@@ -106,6 +106,7 @@ export type ModelDelta = { content?: string; reasoning?: string };
 async function streamedCompletion(
   response: Response,
   onDelta?: (delta: ModelDelta) => void,
+  onActivity?: () => void,
 ): Promise<any> {
   if (!response.body) throw new Error("The model returned an empty stream.");
   const reader = response.body.getReader();
@@ -172,8 +173,13 @@ async function streamedCompletion(
         type: "function",
         function: { name: "", arguments: "" },
       };
-      if (call.id) current.id += call.id;
-      if (call.function?.name) current.function.name += call.function.name;
+      // Some gateways repeat the id and full name on every chunk instead of sending them once.
+      if (call.id && !current.id) current.id = call.id;
+      if (
+        call.function?.name &&
+        !(call.function.name.length > 1 && call.function.name === current.function.name)
+      )
+        current.function.name += call.function.name;
       if (call.function?.arguments)
         current.function.arguments += call.function.arguments;
       calls.set(index, current);
@@ -187,6 +193,7 @@ async function streamedCompletion(
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
+      onActivity?.();
       bytes += value.byteLength;
       if (bytes > 16_000_000) throw new Error("Model response exceeds 16 MB.");
       buffer += decoder.decode(value, { stream: true });
@@ -226,6 +233,27 @@ export async function complete(
     throw new Error("Choose a model in Settings before starting a run.");
   const endpoint = completionUrl(settings.baseUrl);
   let response: Response;
+  // The limit is how long the endpoint may stay silent, not the total time: a long
+  // reasoning stream that keeps producing output must not be cut off mid-answer.
+  const idle = new AbortController();
+  let idleTimer: ReturnType<typeof setTimeout> | undefined;
+  const limit = settings.modelTimeoutSeconds * 1000;
+  const arm = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => idle.abort(new Error("idle-timeout")), limit);
+  };
+  const timedOut = () => idle.signal.aborted && !signal.aborted;
+  const silent = () =>
+    new Error(
+      `The model endpoint sent nothing for ${settings.modelTimeoutSeconds} seconds. Try again, or choose a faster model.`,
+    );
+  arm();
+  try {
+    return await request();
+  } finally {
+    clearTimeout(idleTimer);
+  }
+  async function request() {
   try {
     response = await fetch(endpoint, {
       method: "POST",
@@ -253,14 +281,12 @@ export async function complete(
             }
           : {}),
       }),
-      signal: AbortSignal.any([
-        signal,
-        AbortSignal.timeout(settings.modelTimeoutSeconds * 1000),
-      ]),
+      signal: AbortSignal.any([signal, idle.signal]),
       redirect: "error",
     });
   } catch (error) {
     if (signal.aborted) throw signal.reason;
+    if (timedOut()) throw silent();
     if (error instanceof ModelEndpointError)
       throw new ModelEndpointError(
         redact(error.message, apiKey),
@@ -298,10 +324,11 @@ export async function complete(
   let data: any;
   try {
     data = response.headers.get("content-type")?.includes("text/event-stream")
-      ? await streamedCompletion(response, onDelta)
+      ? await streamedCompletion(response, onDelta, arm)
       : JSON.parse(await readBounded(response, 16_000_000));
   } catch (error) {
     if (signal.aborted) throw signal.reason;
+    if (timedOut()) throw silent();
     if (error instanceof ModelEndpointError)
       throw new ModelEndpointError(
         redact(error.message, apiKey),
@@ -363,6 +390,7 @@ export async function complete(
     ...(data.usage ? { usage: data.usage } : {}),
     requestId: response.headers.get("x-request-id") || data.id,
   };
+  }
 }
 
 export async function testModel(

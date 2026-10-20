@@ -1467,7 +1467,7 @@ function generationOptions(settings, model) {
   }
   return result;
 }
-async function streamedCompletion(response, onDelta) {
+async function streamedCompletion(response, onDelta, onActivity) {
   if (!response.body) throw new Error("The model returned an empty stream.");
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
@@ -1526,8 +1526,9 @@ async function streamedCompletion(response, onDelta) {
         type: "function",
         function: { name: "", arguments: "" }
       };
-      if (call.id) current.id += call.id;
-      if (call.function?.name) current.function.name += call.function.name;
+      if (call.id && !current.id) current.id = call.id;
+      if (call.function?.name && !(call.function.name.length > 1 && call.function.name === current.function.name))
+        current.function.name += call.function.name;
       if (call.function?.arguments)
         current.function.arguments += call.function.arguments;
       calls.set(index, current);
@@ -1541,6 +1542,7 @@ async function streamedCompletion(response, onDelta) {
     for (; ; ) {
       const { done, value } = await reader.read();
       if (done) break;
+      onActivity?.();
       bytes += value.byteLength;
       if (bytes > 16e6) throw new Error("Model response exceeds 16 MB.");
       buffer += decoder.decode(value, { stream: true });
@@ -1570,117 +1572,135 @@ async function complete(settings, apiKey2, messages, tools, signal, onDelta, mod
     throw new Error("Choose a model in Settings before starting a run.");
   const endpoint = completionUrl(settings.baseUrl);
   let response;
-  try {
-    response = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...apiKey2 ? { Authorization: `Bearer ${apiKey2}` } : {}
-      },
-      body: JSON.stringify({
-        model: settings.model,
-        messages,
-        stream: settings.stream,
-        ...generationOptions(settings, model),
-        ...settings.stream && (!model?.supportedParameters || model.supportedParameters.includes("stream_options")) ? { stream_options: { include_usage: true } } : {},
-        ...tools.length ? {
-          tools: tools.map(({ name, description, parameters }) => ({
-            type: "function",
-            function: { name, description, parameters }
-          })),
-          tool_choice: "auto"
-        } : {}
-      }),
-      signal: AbortSignal.any([
-        signal,
-        AbortSignal.timeout(settings.modelTimeoutSeconds * 1e3)
-      ]),
-      redirect: "error"
-    });
-  } catch (error62) {
-    if (signal.aborted) throw signal.reason;
-    if (error62 instanceof ModelEndpointError)
-      throw new ModelEndpointError(
-        redact(error62.message, apiKey2),
-        error62.status,
-        error62.code,
-        JSON.parse(redact(JSON.stringify(error62.details || {}), apiKey2)),
-        error62.requestId
-      );
-    throw new Error(
-      redact(
-        `Model request failed: ${error62 instanceof Error ? error62.message : String(error62)}. Check the endpoint and local model server.`,
-        apiKey2
-      )
-    );
-  }
-  if (!response.ok) {
-    const raw = await readBounded(response);
-    let details;
-    try {
-      details = JSON.parse(redact(raw, apiKey2));
-    } catch {
-    }
-    throw new ModelEndpointError(
-      redact(
-        `Model endpoint returned HTTP ${response.status}: ${raw.slice(0, 3e3)}`,
-        apiKey2
-      ),
-      response.status,
-      details?.error?.code || details?.error?.type || details?.code,
-      details,
-      response.headers.get("x-request-id") || void 0
-    );
-  }
-  let data;
-  try {
-    data = response.headers.get("content-type")?.includes("text/event-stream") ? await streamedCompletion(response, onDelta) : JSON.parse(await readBounded(response, 16e6));
-  } catch (error62) {
-    if (signal.aborted) throw signal.reason;
-    if (error62 instanceof ModelEndpointError)
-      throw new ModelEndpointError(
-        redact(error62.message, apiKey2),
-        error62.status,
-        error62.code,
-        JSON.parse(redact(JSON.stringify(error62.details || {}), apiKey2)),
-        error62.requestId
-      );
-    if (!(error62 instanceof SyntaxError))
-      throw new Error(
-        redact(error62 instanceof Error ? error62.message : String(error62), apiKey2)
-      );
-    throw new Error(
-      "Model endpoint returned invalid JSON. Use an OpenAI-compatible Chat Completions endpoint."
-    );
-  }
-  if (data.choices?.[0]?.finish_reason === "length")
-    throw new Error(
-      "The model reached its available output limit. Try a shorter task or another model."
-    );
-  const message = data?.choices?.[0]?.message;
-  if (!message || typeof message !== "object" || message.content == null && !message.tool_calls?.length && !message.refusal)
-    throw new Error(
-      "Model response contains no assistant message or tool calls."
-    );
-  if (message.tool_calls && (!Array.isArray(message.tool_calls) || message.tool_calls.length > 32 || message.tool_calls.some(
-    (t) => typeof t.id !== "string" || t.type !== "function" || typeof t.function?.name !== "string" || typeof t.function.arguments !== "string"
-  )))
-    throw new Error("Model returned malformed function tool calls.");
-  return {
-    message: {
-      role: "assistant",
-      content: message.content ?? message.refusal ?? null,
-      ...message.tool_calls?.length ? { tool_calls: message.tool_calls } : {},
-      // Thinking providers may require this exact reasoning to accompany the
-      // assistant tool-call message on subsequent requests.
-      ...message.reasoning_content != null ? { reasoning_content: message.reasoning_content } : {},
-      ...message.reasoning != null ? { reasoning: message.reasoning } : {},
-      ...message.reasoning_details != null ? { reasoning_details: message.reasoning_details } : {},
-      ...message.refusal != null ? { refusal: message.refusal } : {}
-    },
-    ...data.usage ? { usage: data.usage } : {},
-    requestId: response.headers.get("x-request-id") || data.id
+  const idle = new AbortController();
+  let idleTimer;
+  const limit = settings.modelTimeoutSeconds * 1e3;
+  const arm = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => idle.abort(new Error("idle-timeout")), limit);
   };
+  const timedOut = () => idle.signal.aborted && !signal.aborted;
+  const silent = () => new Error(
+    `The model endpoint sent nothing for ${settings.modelTimeoutSeconds} seconds. Try again, or choose a faster model.`
+  );
+  arm();
+  try {
+    return await request2();
+  } finally {
+    clearTimeout(idleTimer);
+  }
+  async function request2() {
+    try {
+      response = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...apiKey2 ? { Authorization: `Bearer ${apiKey2}` } : {}
+        },
+        body: JSON.stringify({
+          model: settings.model,
+          messages,
+          stream: settings.stream,
+          ...generationOptions(settings, model),
+          ...settings.stream && (!model?.supportedParameters || model.supportedParameters.includes("stream_options")) ? { stream_options: { include_usage: true } } : {},
+          ...tools.length ? {
+            tools: tools.map(({ name, description, parameters }) => ({
+              type: "function",
+              function: { name, description, parameters }
+            })),
+            tool_choice: "auto"
+          } : {}
+        }),
+        signal: AbortSignal.any([signal, idle.signal]),
+        redirect: "error"
+      });
+    } catch (error62) {
+      if (signal.aborted) throw signal.reason;
+      if (timedOut()) throw silent();
+      if (error62 instanceof ModelEndpointError)
+        throw new ModelEndpointError(
+          redact(error62.message, apiKey2),
+          error62.status,
+          error62.code,
+          JSON.parse(redact(JSON.stringify(error62.details || {}), apiKey2)),
+          error62.requestId
+        );
+      throw new Error(
+        redact(
+          `Model request failed: ${error62 instanceof Error ? error62.message : String(error62)}. Check the endpoint and local model server.`,
+          apiKey2
+        )
+      );
+    }
+    if (!response.ok) {
+      const raw = await readBounded(response);
+      let details;
+      try {
+        details = JSON.parse(redact(raw, apiKey2));
+      } catch {
+      }
+      throw new ModelEndpointError(
+        redact(
+          `Model endpoint returned HTTP ${response.status}: ${raw.slice(0, 3e3)}`,
+          apiKey2
+        ),
+        response.status,
+        details?.error?.code || details?.error?.type || details?.code,
+        details,
+        response.headers.get("x-request-id") || void 0
+      );
+    }
+    let data;
+    try {
+      data = response.headers.get("content-type")?.includes("text/event-stream") ? await streamedCompletion(response, onDelta, arm) : JSON.parse(await readBounded(response, 16e6));
+    } catch (error62) {
+      if (signal.aborted) throw signal.reason;
+      if (timedOut()) throw silent();
+      if (error62 instanceof ModelEndpointError)
+        throw new ModelEndpointError(
+          redact(error62.message, apiKey2),
+          error62.status,
+          error62.code,
+          JSON.parse(redact(JSON.stringify(error62.details || {}), apiKey2)),
+          error62.requestId
+        );
+      if (!(error62 instanceof SyntaxError))
+        throw new Error(
+          redact(error62 instanceof Error ? error62.message : String(error62), apiKey2)
+        );
+      throw new Error(
+        "Model endpoint returned invalid JSON. Use an OpenAI-compatible Chat Completions endpoint."
+      );
+    }
+    if (data.choices?.[0]?.finish_reason === "length")
+      throw new Error(
+        "The model reached its available output limit. Try a shorter task or another model."
+      );
+    const message = data?.choices?.[0]?.message;
+    if (!message || typeof message !== "object" || message.content == null && !message.tool_calls?.length && !message.refusal)
+      throw new Error(
+        "Model response contains no assistant message or tool calls."
+      );
+    if (message.tool_calls && (!Array.isArray(message.tool_calls) || message.tool_calls.length > 32 || message.tool_calls.some(
+      (t) => typeof t.id !== "string" || t.type !== "function" || typeof t.function?.name !== "string" || typeof t.function.arguments !== "string"
+    )))
+      throw new Error("Model returned malformed function tool calls.");
+    return {
+      message: {
+        role: "assistant",
+        content: message.content ?? message.refusal ?? null,
+        ...message.tool_calls?.length ? { tool_calls: message.tool_calls } : {},
+        // Thinking providers may require this exact reasoning to accompany the
+        // assistant tool-call message on subsequent requests.
+        ...message.reasoning_content != null ? { reasoning_content: message.reasoning_content } : {},
+        ...message.reasoning != null ? { reasoning: message.reasoning } : {},
+        ...message.reasoning_details != null ? { reasoning_details: message.reasoning_details } : {},
+        ...message.refusal != null ? { refusal: message.refusal } : {}
+      },
+      ...data.usage ? { usage: data.usage } : {},
+      requestId: response.headers.get("x-request-id") || data.id
+    };
+  }
 }
 async function testModel(settings, apiKey2, model) {
   const tools = [
@@ -2424,6 +2444,10 @@ var AgentEngine = class {
   get activeRunId() {
     return this.active?.run.id ?? null;
   }
+  /** The tab the running task is currently working in, if any. */
+  get selectedTabId() {
+    return this.active?.selectedTab;
+  }
   start(prompt, tabId) {
     return this.begin(prompt, tabId);
   }
@@ -2525,7 +2549,7 @@ var AgentEngine = class {
     };
     active.run.events.push(event);
     active.run.updatedAt = event.time;
-    this.options.save(structuredClone(active.run));
+    this.options.save({ ...active.run, events: [event] });
     this.options.emit(active.run.id, event);
     return event;
   }
@@ -2655,6 +2679,7 @@ Browser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. 
       let tokenRatio = 1;
       let recovered = false;
       let learnedImageLimit;
+      let emptyAnswers = 0;
       const firstStep = active.run.events.reduce(
         (max, event) => event.type === "model_request" ? Math.max(max, Number(event.data.step) || 0) : max,
         0
@@ -2826,6 +2851,21 @@ Browser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. 
         if (typeof message.content === "string" && message.content.trim())
           this.event(active, "assistant", { content: scrub(message.content) });
         if (!message.tool_calls?.length) {
+          const answered = typeof message.content === "string" && message.content.trim();
+          if (!answered) {
+            if (++emptyAnswers <= 2) {
+              this.event(active, "empty_answer", { step, attempt: emptyAnswers });
+              message.content = "(no reply)";
+              messages.push({
+                role: "user",
+                content: "Your last reply was empty. Reply now with your final answer to the task in plain text, based on what you have found."
+              });
+              continue;
+            }
+            throw new Error(
+              "The model finished without giving an answer. Try again or choose another model."
+            );
+          }
           this.finish(active, "completed");
           return;
         }
@@ -22853,7 +22893,7 @@ var ExtensionStore = class {
     return this.metas.has(id);
   }
   summaries() {
-    return [...this.metas.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map(({ lastEventId: _, ...meta3 }) => ({ ...meta3, events: [] }));
+    return [...this.metas.values()].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).map((meta3) => ({ ...meta3, events: [] }));
   }
   async replaceRun(run) {
     await this.flush();
@@ -23708,6 +23748,10 @@ async function perform(action, args = {}) {
     case "browser_snapshot":
       return snapshot(tabId, args.frameId, args);
     case "browser_screenshot": {
+      if (!tab2.active) {
+        await chrome.tabs.update(tabId, { active: true });
+        await settle2();
+      }
       const rootFrame = await frameContext(tabId);
       const viewport = await evaluate(
         tabId,
@@ -24143,7 +24187,7 @@ setNotifier((type, data) => {
     broadcast("bridge", transport.status());
   } else {
     broadcast(type, data);
-    if (type === "browser_notice" && data.event === "detached" && engine.activeRunId) {
+    if (type === "browser_notice" && data.event === "detached" && engine.activeRunId && (data.reason === "canceled_by_user" || data.tabId === engine.selectedTabId && data.reason !== "command_timeout")) {
       engine.stop(
         engine.activeRunId,
         "Chrome disconnected the browser debugger. Check the page, then start a new task to reconnect. No browser action was replayed."
@@ -24280,6 +24324,7 @@ async function route(path, method, body) {
       reasoningEffort: external_exports.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).optional()
     }).strict().parse(body);
     if (starting) throw new Error("Wait for the current change to finish before selecting a model.");
+    if (engine.activeRunId) throw new Error("Stop the current task before switching models.");
     starting = true;
     try {
       if (options.providerId && options.providerId !== providers.activeId) {

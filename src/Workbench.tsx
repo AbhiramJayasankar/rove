@@ -529,7 +529,7 @@ export default function Workbench({
                   ? state.modelInfo.name
                   : undefined
               }
-              disabled={pending === "run-options"}
+              disabled={busy || pending === "run-options"}
               onSelect={(model, _context, providerId) => runOptions({ model, providerId })}
             />
 
@@ -540,7 +540,7 @@ export default function Workbench({
               value={resolvedReasoningEffort(state.settings, state.modelInfo)}
               options={reasoningChoices}
               onChange={(reasoningEffort) => runOptions({ reasoningEffort })}
-              disabled={pending === "run-options"}
+              disabled={busy || pending === "run-options"}
             />}
             <ChoiceMenu
               label="Approval mode"

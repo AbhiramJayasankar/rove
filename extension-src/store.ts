@@ -74,7 +74,7 @@ export class ExtensionStore {
   summaries(): RunRecord[] {
     return [...this.metas.values()]
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-      .map(({ lastEventId: _, ...meta }) => ({ ...meta, events: [] }));
+      .map((meta) => ({ ...meta, events: [] }));
   }
   async replaceRun(run: RunRecord) {
     await this.flush();

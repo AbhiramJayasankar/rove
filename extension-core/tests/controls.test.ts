@@ -119,6 +119,17 @@ describe("automatic model controls", () => {
       ),
     ).toMatchObject({ reasoning: { effort: "max" } });
   });
+  it("shows the documented reasoning control for each free TokenHarbor model", () => {
+    const labels = (id: string) =>
+      reasoningOptions(
+        DEFAULT_SETTINGS,
+        normalizeModel({ id }, "https://tokenharbor.ai/v1/models"),
+      ).map((option) => option.label);
+    expect(labels("mimo-v2.5:free")).toEqual(["Thinking off", "Thinking on"]);
+    expect(labels("mimo-v2.6-flash:free")).toEqual(["Thinking off", "Thinking on"]);
+    expect(labels("deepseek-v4-flash:free")).toEqual(["Off", "Low", "High", "Max"]);
+    expect(labels("deepseek-v4.1-flash:free")).toEqual(["Off", "Low", "High", "Max"]);
+  });
   it("shows distinct DeepSeek levels while keeping aliases compatible internally", () => {
     const info = normalizeModel(
       { id: "deepseek-v4.1-flash:free" },

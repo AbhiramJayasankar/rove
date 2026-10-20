@@ -79,6 +79,8 @@ export interface RunEvent {
 }
 export interface RunRecord {
   revision?: number;
+  /** Set on summaries, which omit events: the newest stored event, so clients can detect gaps. */
+  lastEventId?: number;
   id: string;
   prompt: string;
   status: RunStatus;

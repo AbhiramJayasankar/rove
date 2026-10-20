@@ -46,7 +46,7 @@ export default function ModelPicker({
   const [search, setSearch] = useState("");
   const visible = useVisibleModels();
   const [freeOnly, setFreeOnly] = useState(
-    localStorage.getItem("relay.freeModels") !== "false",
+    localStorage.getItem("relay.freeModels") === "true",
   );
   async function load(refresh = false) {
     const current = ++sequence.current;
@@ -69,7 +69,7 @@ export default function ModelPicker({
   }
   function open() {
     setSearch("");
-    setFreeOnly(localStorage.getItem("relay.freeModels") !== "false");
+    setFreeOnly(localStorage.getItem("relay.freeModels") === "true");
     popup.setOpen(true);
     void load();
   }

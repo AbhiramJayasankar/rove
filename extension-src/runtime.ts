@@ -140,10 +140,15 @@ setNotifier((type: string, data: any) => {
     broadcast("bridge", transport.status());
   } else {
     broadcast(type, data);
+    // Stop the task when the user cancels Chrome's debugging banner, or when the tab it is working
+    // in is lost. A different tab it used earlier, or a command timeout, already reports a precise
+    // error to the model on next use; stopping the whole task for those killed long research runs.
     if (
       type === "browser_notice" &&
       data.event === "detached" &&
-      engine.activeRunId
+      engine.activeRunId &&
+      (data.reason === "canceled_by_user" ||
+        (data.tabId === engine.selectedTabId && data.reason !== "command_timeout"))
     ) {
       engine.stop(
         engine.activeRunId,
@@ -285,6 +290,7 @@ async function route(path: string, method: string, body: any) {
       .strict()
       .parse(body);
     if (starting) throw new Error("Wait for the current change to finish before selecting a model.");
+    if (engine.activeRunId) throw new Error("Stop the current task before switching models.");
     starting = true;
     try {
     if (options.providerId && options.providerId !== providers.activeId) {

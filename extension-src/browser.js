@@ -848,6 +848,11 @@ export async function perform(action, args = {}) {
     case "browser_snapshot":
       return snapshot(tabId, args.frameId, args);
     case "browser_screenshot": {
+      // A hidden tab paints no frames, so capturing it hangs until Chrome times the command out.
+      if (!tab.active) {
+        await chrome.tabs.update(tabId, { active: true });
+        await settle();
+      }
       const rootFrame = await frameContext(tabId);
       const viewport = await evaluate(
         tabId,

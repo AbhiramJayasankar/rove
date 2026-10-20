@@ -33,6 +33,7 @@ type Options = {
   getSettings: () => Settings;
   getApiKey: () => string;
   emit: (runId: string, event: RunEvent) => void;
+  /** Receives the run's current fields with only the newest event in `events`. */
   save: (run: RunRecord) => void;
   checkpoint?: () => Promise<void>;
   resolveModel?: (
@@ -248,6 +249,10 @@ export class AgentEngine {
   get activeRunId(): string | null {
     return this.active?.run.id ?? null;
   }
+  /** The tab the running task is currently working in, if any. */
+  get selectedTabId(): number | undefined {
+    return this.active?.selectedTab;
+  }
 
   start(prompt: string, tabId?: number): RunRecord {
     return this.begin(prompt, tabId);
@@ -374,7 +379,9 @@ export class AgentEngine {
     };
     active.run.events.push(event);
     active.run.updatedAt = event.time;
-    this.options.save(structuredClone(active.run));
+    // Persist only what changed. Cloning the whole run (screenshots included) for every
+    // streamed delta made long research runs quadratically slower.
+    this.options.save({ ...active.run, events: [event] });
     this.options.emit(active.run.id, event);
     return event;
   }
@@ -519,6 +526,7 @@ export class AgentEngine {
       let tokenRatio = 1;
       let recovered = false;
       let learnedImageLimit: number | undefined;
+      let emptyAnswers = 0;
       const firstStep =
         active.run.events.reduce(
           (max, event) =>
@@ -716,6 +724,25 @@ export class AgentEngine {
         if (typeof message.content === "string" && message.content.trim())
           this.event(active, "assistant", { content: scrub(message.content) });
         if (!message.tool_calls?.length) {
+          const answered =
+            typeof message.content === "string" && message.content.trim();
+          if (!answered) {
+            // Some reasoning models spend their turn thinking and return nothing. Ask once
+            // more instead of reporting a finished task with no answer.
+            if (++emptyAnswers <= 2) {
+              this.event(active, "empty_answer", { step, attempt: emptyAnswers });
+              message.content = "(no reply)";
+              messages.push({
+                role: "user",
+                content:
+                  "Your last reply was empty. Reply now with your final answer to the task in plain text, based on what you have found.",
+              });
+              continue;
+            }
+            throw new Error(
+              "The model finished without giving an answer. Try again or choose another model.",
+            );
+          }
           this.finish(active, "completed");
           return;
         }

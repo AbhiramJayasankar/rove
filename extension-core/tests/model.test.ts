@@ -288,4 +288,39 @@ describe("OpenAI-compatible models", () => {
       "did not produce a valid function call",
     );
   });
+
+  it("does not duplicate tool-call ids or names that a gateway repeats on every stream chunk", async () => {
+    const chunk = (delta: any, finish?: string) =>
+      `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason: finish }] })}\n\n`;
+    const body =
+      chunk({ tool_calls: [{ index: 0, id: "call_1", function: { name: "browser_snapshot", arguments: '{"que' } }] }) +
+      chunk({ tool_calls: [{ index: 0, id: "call_1", function: { name: "browser_snapshot", arguments: 'ry":"x"}' } }] }) +
+      chunk({}, "tool_calls") +
+      "data: [DONE]\n\n";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } })));
+    const { message } = await complete(settings, "", [{ role: "user", content: "x" }], [], new AbortController().signal);
+    expect(message.tool_calls).toEqual([{ id: "call_1", type: "function", function: { name: "browser_snapshot", arguments: '{"query":"x"}' } }]);
+  });
+  it("lets a stream that keeps producing output run past the silence limit", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        for (let i = 0; i < 5; i++) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ index: 0, delta: { content: "ab" } }] })}
+
+`));
+          await new Promise((resolve) => setTimeout(resolve, 60));
+        }
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\ndata: [DONE]\n\n`));
+        controller.close();
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } })));
+    const { message } = await complete({ ...settings, modelTimeoutSeconds: 0.15 }, "", [{ role: "user", content: "x" }], [], new AbortController().signal);
+    expect(message.content).toBe("ababababab");
+  });
+  it("reports a silent endpoint with a clear message", async () => {
+    vi.stubGlobal("fetch", vi.fn((_url: string, init: RequestInit) => new Promise((_, reject) => init.signal!.addEventListener("abort", () => reject(init.signal!.reason)))));
+    await expect(complete({ ...settings, modelTimeoutSeconds: 0.05 }, "", [{ role: "user", content: "x" }], [], new AbortController().signal)).rejects.toThrow("sent nothing for");
+  });
 });

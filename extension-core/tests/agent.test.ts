@@ -76,6 +76,35 @@ function setup(
 }
 
 describe("agent execution loop", () => {
+  it("asks again when the model returns an empty final reply, then reports the answer", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(""))
+      .mockResolvedValueOnce(response("Here is the answer."));
+    vi.stubGlobal("fetch", fetchMock);
+    const ctx = setup();
+    const run = ctx.engine.start("Research this.");
+    await until(() => !ctx.engine.activeRunId);
+    expect(run.status).toBe("completed");
+    expect(run.events.some((event) => event.type === "empty_answer")).toBe(true);
+    expect(run.events.findLast((event) => event.type === "assistant")?.data.content).toBe("Here is the answer.");
+  });
+  it("fails visibly when the model never produces an answer", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => response("")));
+    const ctx = setup();
+    const run = ctx.engine.start("Research this.");
+    await until(() => !ctx.engine.activeRunId);
+    expect(run.status).toBe("failed");
+    expect(run.events.find((event) => event.type === "error")?.data.message).toContain("without giving an answer");
+  });
+  it("saves only the newest event per save call", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response("Done.")));
+    const ctx = setup();
+    ctx.engine.start("Hello.");
+    await until(() => !ctx.engine.activeRunId);
+    expect(ctx.saves.every((saved) => saved.events.length === 1)).toBe(true);
+    expect(ctx.saves.at(-1)?.status).toBe("completed");
+  });
   it("applies a corrected server context limit and adjusts output automatically", async () => {
     const fetchMock = vi
       .fn()

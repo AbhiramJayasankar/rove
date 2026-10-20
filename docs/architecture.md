@@ -71,3 +71,9 @@ Credentials never enter settings, history, run exports or API responses. Startup
 Only pages with this extension's identity and URL may call the privileged runtime or open event ports. There are no external-message listeners, page-content relays, HTTP listeners or pairing tokens. The manifest grants debugger, tabs, storage, downloads and side-panel capabilities plus HTTP(S) host access for browser tasks and chosen endpoints.
 
 Model requests reject redirects. Text traces redact the configured model key; screenshot pixels cannot be reliably redacted. Web observations sent to the model go to the selected provider. Generic evaluation, raw CDP and file uploads begin disabled. Prompts guide behavior, while permissions, validation, scoped routing and approval decisions provide enforceable boundaries. Candidate model catalogue lookups validate unsaved endpoint/key inputs without saving or broadcasting them as the active configuration.
+
+## Keeping the panel in sync
+
+The worker pushes events over a long-lived port, but a port can drop or stall and nothing replays what it missed. The panel therefore reconciles against stored state: on every (re)connect, when it regains focus, and every 4 s while a task is active it compares `/api/state` summaries (status, revision, `lastEventId`) with its own copy and re-fetches any run that differs. `tests/extension/resync.spec.ts` covers a port that never delivers.
+
+Other behavior worth knowing: a model request times out on silence rather than total duration; an empty final reply is retried twice before the task fails; only Cancel on Chrome's debugging banner or losing the tab in use stops a task on a debugger detach; model and reasoning cannot change mid-task.

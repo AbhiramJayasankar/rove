@@ -12,7 +12,7 @@ import {
   Sun,
   X,
 } from "lucide-react";
-import type { AppState, RunEvent, RunRecord, Settings } from "../shared/types";
+import type { AppState, RunEvent, RunRecord, Settings, TabInfo } from "../shared/types";
 import { DEFAULT_SETTINGS } from "../shared/defaults";
 import { api, json, type Action, type Page } from "./ui";
 import { RuntimeEventSource as EventSource } from "./transport";
@@ -20,6 +20,7 @@ import Workbench from "./Workbench";
 import Configuration from "./Configuration";
 import HistoryDialog from "./HistoryDialog";
 import { applyTheme, readTheme } from "./theme";
+import { readVisibleModels } from "./modelVisibility";
 
 export default function App() {
   const [theme, setTheme] = useState(readTheme);
@@ -38,6 +39,14 @@ export default function App() {
   const [apiKey, setApiKey] = useState("");
   const [keyChanged, setKeyChanged] = useState(false);
   const [streamConnected, setStreamConnected] = useState(false);
+  const stateRef = useRef<AppState | null>(null);
+  const selectedRef = useRef<string | null>(null);
+  const reconciling = useRef(false);
+  const reconcileRef = useRef<() => Promise<void>>(async () => {});
+  useEffect(() => {
+    stateRef.current = state;
+    selectedRef.current = selectedId;
+  });
   const run = state?.runs.find((r) => r.id === selectedId);
   const activeRun = state?.runs.find((r) => r.id === state.activeRunId);
   const busy =
@@ -77,6 +86,75 @@ export default function App() {
       };
     });
   }
+  // The live event port can drop or stall (the worker restarts, Chrome closes the port, the panel
+  // was hidden). Events sent meanwhile are not replayed, so compare against the stored run and
+  // re-fetch whatever is missing instead of trusting the stream alone.
+  async function reconcile() {
+    if (reconciling.current) return;
+    reconciling.current = true;
+    try {
+      const fresh = await api<AppState>("/api/state");
+      const local = stateRef.current;
+      if (!local) return;
+      const wanted = new Set(
+        [selectedRef.current, fresh.activeRunId, local.activeRunId].filter(
+          (id): id is string => !!id,
+        ),
+      );
+      for (const id of wanted) {
+        const stored = fresh.runs.find((r) => r.id === id);
+        if (!stored) continue;
+        const mine = local.runs.find((r) => r.id === id);
+        if (
+          !mine ||
+          mine.status !== stored.status ||
+          (mine.revision || 0) !== (stored.revision || 0) ||
+          (stored.lastEventId ?? 0) > (mine.events.at(-1)?.id ?? 0)
+        )
+          mergeRun(await api<RunRecord>(`/api/runs/${id}`));
+      }
+      setState((old) =>
+        old && old.activeRunId !== fresh.activeRunId
+          ? { ...old, activeRunId: fresh.activeRunId }
+          : old,
+      );
+    } catch {
+      /* the next tick retries */
+    } finally {
+      reconciling.current = false;
+    }
+  }
+  reconcileRef.current = reconcile;
+  const watching =
+    !!state &&
+    (!!state.activeRunId ||
+      (!!run && ["running", "awaiting_approval"].includes(run.status)));
+  useEffect(() => {
+    if (!watching) return;
+    const timer = setInterval(() => void reconcileRef.current(), 4000);
+    return () => clearInterval(timer);
+  }, [watching]);
+  // Coming back to the panel (switching tabs, refocusing the window) re-syncs runs and the tab
+  // list, which a dropped event connection would otherwise leave stale until a reload.
+  useEffect(() => {
+    const back = () => {
+      if (document.visibilityState !== "visible") return;
+      void reconcileRef.current();
+      api<TabInfo[]>("/api/tabs")
+        .then((tabs) =>
+          setState((old) =>
+            old ? { ...old, bridge: { ...old.bridge, tabs } } : old,
+          ),
+        )
+        .catch(() => {});
+    };
+    document.addEventListener("visibilitychange", back);
+    window.addEventListener("focus", back);
+    return () => {
+      document.removeEventListener("visibilitychange", back);
+      window.removeEventListener("focus", back);
+    };
+  }, []);
   useEffect(() => {
     let source: EventSource | undefined;
     let cancelled = false;
@@ -93,6 +171,7 @@ export default function App() {
         source.onerror = () => setStreamConnected(false);
         source.addEventListener("state", (event) => {
           const incoming: AppState = JSON.parse(event.data);
+          setTimeout(() => void reconcileRef.current(), 0);
           setState((old) => ({
             ...incoming,
             runs: incoming.runs.map((record) => {
@@ -315,6 +394,15 @@ export default function App() {
           baseUrl: id === "add:openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1",
         } : { id, model }),
       });
+      if (id === "remove" && state?.activeProviderId) {
+        // Drop the removed provider's saved "models in chat" choice with it.
+        const removed = state.activeProviderId;
+        const saved = await readVisibleModels();
+        if (removed in saved) {
+          delete saved[removed];
+          await chrome.storage.local.set({ visibleModels: saved });
+        }
+      }
       setState(old => old ? { ...old, ...result } : old); setDraft(result.settings);
       setProviderName(result.providers.find(provider => provider.id === result.activeProviderId)?.name || "Provider");
       setApiKey(""); setKeyChanged(false);
