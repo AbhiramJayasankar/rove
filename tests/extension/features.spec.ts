@@ -124,3 +124,9 @@ test("tool tooltips explain each tool, its risk and its inputs, and group headin
   await expect(ui.getByRole("tooltip")).toContainText("most specific rule wins");
   await ui.getByRole("button", { name: "Back to chat", exact: true }).click();
 });
+
+test("registers the Alt+Shift+O shortcut for the toolbar action, and Chrome accepts it", async () => {
+  // Chrome silently drops a suggested key it reserves (Alt+Shift+N and Alt+Shift+R are two), leaving the shortcut empty.
+  const commands = await ui.evaluate(() => chrome.commands.getAll());
+  expect(commands.find((command) => command.name === "_execute_action")?.shortcut).toBe("Alt+Shift+O");
+});

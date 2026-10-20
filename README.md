@@ -94,7 +94,7 @@ After building, reload Rove on `chrome://extensions`, reopen its side panel, and
 - **Reports**: the agent can save a `.md`, `.txt`, `.csv`, `.json` or `.html` report to Downloads/Rove with `browser_save_file`. File names are bare names; folders and other types are refused.
 - **Export**: the trace view exports a run as JSON or a readable Markdown transcript.
 - **Languages**: English, Simplified Chinese and Traditional Chinese. Settings, Language defaults to following Chrome. The system prompt and the model's answers are not translated.
-- **Shortcut**: Alt+Shift+N is registered for the toolbar action; change it at `chrome://extensions/shortcuts`.
+- **Shortcut**: Alt+Shift+O is registered for the toolbar action; change it at `chrome://extensions/shortcuts`.
 
 ## Versions
 

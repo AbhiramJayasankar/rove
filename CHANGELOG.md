@@ -15,7 +15,7 @@ Closes the main gaps against other bring-your-own-model browser agents.
 - Export a chat as a readable Markdown transcript, next to the JSON export.
 - The agent can save text reports to Downloads/Rove.
 - English, Simplified Chinese and Traditional Chinese, following Chrome by default and switchable in Settings.
-- Alt+Shift+N shortcut for the toolbar action, and an MIT license.
+- Alt+Shift+O shortcut for the toolbar action, and an MIT license.
 - Info tooltips on the Tools page: every tool explains what it does, how risky it is, when it asks for approval and what inputs it takes. Group headings, the enabled count and site rules explain themselves too, and the approval prompt shows the same detail for the tool being approved.
 
 ### Changed
