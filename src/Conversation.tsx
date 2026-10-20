@@ -2,7 +2,7 @@ import type { RunRecord } from "../shared/types";
 import { useState, useEffect, useRef, useImperativeHandle, type Ref } from "react";
 import { Pencil, X, Check, FileText } from "lucide-react";
 import ExecutionLog from "./ExecutionLog";
-import { AssistantMessage } from "./ui";
+import { AssistantMessage, CopyButton, formatTime, tokensPerSecond } from "./ui";
 import { useT } from "./i18n";
 export type ConversationHandle = { editLatest: () => void };
 export default function Conversation({
@@ -57,6 +57,7 @@ export default function Conversation({
             : turn.events.findLast((event) => event.type === "status")?.data
                 .status || "completed",
         };
+        const sentAt = turn.id === 0 ? run.createdAt : run.events.find((event) => event.id === turn.id)?.time ?? run.createdAt;
         return (
           <section className="conversation-turn" key={`${run.id}:${turn.id}`}>
             {editing === turn.id ? (
@@ -113,39 +114,45 @@ export default function Conversation({
                 </div>
               </form>
             ) : (
-              <div className="user-message editable-message">
-                <span>
-                  {turn.prompt}
-                  {turn.events.some((event) => event.type === "attachment") && (
-                    <span className="sent-attachments">
-                      {turn.events
-                        .filter((event) => event.type === "attachment")
-                        .map((event) => (
-                          <span className="attachment-chip" key={event.id}>
-                            {event.data.kind === "image" && typeof event.data.dataUrl === "string" ? (
-                              <img src={event.data.dataUrl} alt="" />
-                            ) : (
-                              <FileText size={13} aria-hidden="true" />
-                            )}
-                            <span>{String(event.data.name)}</span>
-                          </span>
-                        ))}
-                    </span>
-                  )}
-                </span>
-                <button
-                  type="button"
-                  className="message-edit-button"
-                  aria-label={t("Edit message")}
-                  title={t("Edit message")}
-                  disabled={disabled}
-                  onClick={() => {
-                    setDraft(turn.prompt);
-                    setEditing(turn.id);
-                  }}
-                >
-                  <Pencil size={12} />
-                </button>
+              <div className="message-row user">
+                <div className="user-message">
+                  <span>
+                    {turn.prompt}
+                    {turn.events.some((event) => event.type === "attachment") && (
+                      <span className="sent-attachments">
+                        {turn.events
+                          .filter((event) => event.type === "attachment")
+                          .map((event) => (
+                            <span className="attachment-chip" key={event.id}>
+                              {event.data.kind === "image" && typeof event.data.dataUrl === "string" ? (
+                                <img src={event.data.dataUrl} alt="" />
+                              ) : (
+                                <FileText size={13} aria-hidden="true" />
+                              )}
+                              <span>{String(event.data.name)}</span>
+                            </span>
+                          ))}
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <div className="message-meta">
+                  <time dateTime={sentAt} title={new Date(sentAt).toLocaleString()}>{formatTime(sentAt)}</time>
+                  <CopyButton text={turn.prompt} />
+                  <button
+                    type="button"
+                    className="message-action"
+                    aria-label={t("Edit message")}
+                    title={t("Edit message")}
+                    disabled={disabled}
+                    onClick={() => {
+                      setDraft(turn.prompt);
+                      setEditing(turn.id);
+                    }}
+                  >
+                    <Pencil size={13} />
+                  </button>
+                </div>
               </div>
             )}
             <ExecutionLog
@@ -160,6 +167,7 @@ export default function Conversation({
                 <AssistantMessage
                   key={event.id}
                   content={String(event.data.message.content)}
+                  meta={{ time: event.time, speed: tokensPerSecond(event) }}
                 />
               ) : event.type === "error" ? (
                 <div

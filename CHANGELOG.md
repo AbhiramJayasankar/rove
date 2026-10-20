@@ -17,8 +17,12 @@ Closes the main gaps against other bring-your-own-model browser agents.
 - English, Simplified Chinese and Traditional Chinese, following Chrome by default and switchable in Settings.
 - Alt+Shift+O shortcut for the toolbar action, and an MIT license.
 - Info tooltips on the Tools page: every tool explains what it does, how risky it is, when it asks for approval and what inputs it takes. Group headings, the enabled count and site rules explain themselves too, and the approval prompt shows the same detail for the tool being approved.
+- Output speed in tokens per second on each answer, on every step in the trace and averaged in the usage popover.
+- Time sent on every message, and a copy button on your messages and Rove's answers.
 
 ### Changed
+- Edit and copy now sit outside the message bubble, under it, and appear on hover or focus.
+- The recording indicator is a time-based waveform in the top-right of the message box, so the box no longer grows while you dictate.
 - Model and reasoning changes are allowed while other tasks run, and apply to the next task. Provider and endpoint changes still wait until no task is running.
 - Auto-approve now applies per task, so switching it never approves another task's pending action.
 

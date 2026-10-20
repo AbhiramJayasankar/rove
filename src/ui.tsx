@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronRight,
   CircleAlert,
+  Copy,
   LoaderCircle,
   MousePointer2,
 } from "lucide-react";
@@ -23,7 +24,63 @@ export const time = (value: string) =>
     hour: "2-digit",
     minute: "2-digit",
   });
+/** Time of day for today, with the date for anything older. */
+export function formatTime(iso?: string): string {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return "";
+  const today = new Date().toDateString() === date.toDateString();
+  return today
+    ? date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+/** Output speed of one model response: completion tokens over the time the request took. */
+export function tokensPerSecond(response?: RunEvent): number | null {
+  const tokens = Number(response?.data.usage?.completion_tokens);
+  const seconds = Number(response?.data.durationMs) / 1000;
+  return tokens > 0 && seconds > 0 ? tokens / seconds : null;
+}
+export const speedText = (speed: number) => (speed >= 100 ? Math.round(speed) : speed.toFixed(1)).toString();
 export { api } from "./transport";
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+}
+/** Copies a message and confirms with a check for a moment. */
+export function CopyButton({ text, label }: { text: string; label?: string }) {
+  const t = useT();
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  return (
+    <button
+      type="button"
+      className="message-action"
+      aria-label={copied ? t("Copied") : label ?? t("Copy message")}
+      title={copied ? t("Copied") : label ?? t("Copy message")}
+      onClick={async () => {
+        await copyText(text);
+        setCopied(true);
+        window.clearTimeout(timer.current);
+        timer.current = window.setTimeout(() => setCopied(false), 1500);
+      }}
+    >
+      {copied ? <Check size={13} /> : <Copy size={13} />}
+    </button>
+  );
+}
 export type Page = "workbench" | "settings" | "instructions" | "tools";
 export type Shot = {
   dataUrl: string;
@@ -71,24 +128,34 @@ export function toolTitle(
   };
   return titles[name] ? t(titles[name]) : name;
 }
-export function AssistantMessage({ content }: { content: string }) {
+export function AssistantMessage({ content, meta }: { content: string; meta?: { time?: string; speed?: number | null } }) {
+  const t = useT();
   return (
-    <div className="assistant-message">
-      <span className="assistant-mark">
-        <MousePointer2 size={15} />
-      </span>
-      <div className="markdown">
-        <Markdown
-          remarkPlugins={[remarkGfm]}
-          components={{
-            a: (props) => (
-              <a {...props} target="_blank" rel="noreferrer noopener" />
-            ),
-          }}
-        >
-          {content}
-        </Markdown>
+    <div className="assistant-block">
+      <div className="assistant-message">
+        <span className="assistant-mark">
+          <MousePointer2 size={15} />
+        </span>
+        <div className="markdown">
+          <Markdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              a: (props) => (
+                <a {...props} target="_blank" rel="noreferrer noopener" />
+              ),
+            }}
+          >
+            {content}
+          </Markdown>
+        </div>
       </div>
+      {meta && (
+        <div className="message-meta">
+          {meta.time && <time dateTime={meta.time} title={new Date(meta.time).toLocaleString()}>{formatTime(meta.time)}</time>}
+          {meta.speed != null && <span className="message-speed" title={t("Output speed")}>{t("{n} tok/s", { n: speedText(meta.speed) })}</span>}
+          <CopyButton text={content} />
+        </div>
+      )}
     </div>
   );
 }

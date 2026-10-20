@@ -4,6 +4,7 @@ import type { ModelInfo, RunRecord } from "../shared/types";
 import { chatUsage } from "../shared/usage";
 import { tokenCount } from "./ModelPicker";
 import { usePopover } from "./Popover";
+import { speedText } from "./ui";
 import { useT } from "./i18n";
 const format = (value: number) => value.toLocaleString();
 export default function UsageRing({
@@ -22,6 +23,10 @@ export default function UsageRing({
     if (popup.open) popup.panel.current?.focus();
   }, [popup.open]);
   const usage = chatUsage(run?.events || [], model);
+  const responses = (run?.events || []).filter((event) => event.type === "model_response");
+  const outTokens = responses.reduce((sum, event) => sum + (Number(event.data.usage?.completion_tokens) || 0), 0);
+  const outSeconds = responses.reduce((sum, event) => sum + (Number(event.data.usage?.completion_tokens) > 0 ? Number(event.data.durationMs) || 0 : 0), 0) / 1000;
+  const speed = outTokens > 0 && outSeconds > 0 ? outTokens / outSeconds : null;
   const percent = Math.min(100, (usage.current / usage.contextWindow) * 100);
   const total = (value: number, reports: number) =>
     usage.requests && !reports
@@ -95,6 +100,12 @@ export default function UsageRing({
                 <>
                   <dt>{t("Reasoning tokens")}</dt>
                   <dd>{format(usage.reasoning)}</dd>
+                </>
+              )}
+              {speed != null && (
+                <>
+                  <dt>{t("Output speed")}</dt>
+                  <dd>{t("{n} tok/s", { n: speedText(speed) })}</dd>
                 </>
               )}
               <dt>{t("Estimated cost")}</dt>

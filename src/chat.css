@@ -315,7 +315,7 @@
 .app-shell .composer-controls {
   gap: 4px;
 }
-.app-shell .composer-controls:not(:has(.voice-activity, .voice-error)) {
+.app-shell .composer-controls:not(:has(.voice-error)) {
   height: 32px;
 }
 .app-shell .composer-controls > .choice-trigger,
@@ -717,3 +717,118 @@
 .app-shell .active-task .status-dot.running {
   animation: voice-pulse 1.4s ease-in-out infinite;
 }
+
+/* Messages: actions and time sit outside the bubble */
+.app-shell .message-row {
+  display: flex;
+  flex-direction: column;
+  margin: 3px 0 16px;
+}
+.app-shell .message-row.user {
+  align-items: flex-end;
+}
+.app-shell .message-row .user-message {
+  margin: 0;
+}
+.app-shell .message-meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 3px 4px 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.app-shell .message-row.user .message-meta {
+  justify-content: flex-end;
+}
+.app-shell .assistant-block {
+  margin: 12px 0 22px;
+}
+.app-shell .assistant-block .assistant-message {
+  margin: 0;
+}
+.app-shell .assistant-block .message-meta {
+  margin: 6px 0 0;
+}
+.app-shell .message-meta time,
+.app-shell .message-speed {
+  padding: 0 4px;
+}
+.app-shell .message-speed {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--panel);
+}
+.app-shell .message-action {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  color: var(--muted);
+  opacity: 0;
+  transition: opacity 120ms, background 120ms, color 120ms;
+}
+.app-shell .message-row:hover .message-action,
+.app-shell .assistant-block:hover .message-action,
+.app-shell .message-meta:focus-within .message-action,
+.app-shell .message-action:focus-visible {
+  opacity: 1;
+}
+.app-shell .message-action:hover {
+  background: var(--panel);
+  color: var(--ink);
+}
+.app-shell .message-action:disabled {
+  opacity: 0.4;
+}
+@media (hover: none) {
+  .app-shell .message-action {
+    opacity: 1;
+  }
+}
+
+/* Recording: a time-based waveform in the top-right of the composer, so the box keeps its height */
+.app-shell .voice-activity {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 32%;
+  min-width: 136px;
+  height: 30px;
+  padding: 0 4px 0 12px;
+  border-radius: 999px;
+  background: var(--field);
+  color: var(--accent);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.app-shell .voice-activity > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-shell .voice-activity .voice-waveform {
+  flex: 1;
+  width: 0;
+  height: 22px;
+}
+.app-shell .voice-activity .voice-button {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  flex: 0 0 24px;
+  margin-right: 2px;
+}
+.app-shell .task-composer:has(.voice-activity) textarea {
+  padding-right: calc(32% + 20px);
+}
+.app-shell .task-composer { position: relative; }
+.app-shell .voice-activity > span[role="timer"] { flex: none; }

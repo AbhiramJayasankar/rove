@@ -11,7 +11,7 @@ import {
   Wrench,
 } from "lucide-react";
 import type { RunEvent, RunRecord } from "../shared/types";
-import { AssistantMessage, json, ToolActivity } from "./ui";
+import { AssistantMessage, json, speedText, ToolActivity, tokensPerSecond } from "./ui";
 import { tokenCount } from "./ModelPicker";
 import { useT } from "./i18n";
 
@@ -142,6 +142,9 @@ export default function ExecutionLog({
                       ? `${(response.data.durationMs / 1000).toFixed(1)}s`
                       : ""}
                   </span>
+                  {tokensPerSecond(response) != null && (
+                    <span title={t("Output speed")}>{t("{n} tok/s", { n: speedText(tokensPerSecond(response)!) })}</span>
+                  )}
                   {response?.data.usage?.prompt_tokens != null && (
                     <span title={t("Input tokens reported by provider")}>
                       {t("{n} in", { n: tokenCount(response.data.usage.prompt_tokens) })}
