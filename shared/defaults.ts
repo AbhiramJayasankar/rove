@@ -5,6 +5,8 @@ export const DEFAULT_SETTINGS: Settings = {
   baseUrl: "https://api.openai.com/v1",
   model: "",
   systemPrompt: DEFAULT_PROMPT,
+  memory: "",
+  siteRules: [],
   maxSteps: 40,
   contextWindow: 32768,
   contextMode: "auto",

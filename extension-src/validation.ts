@@ -26,6 +26,16 @@ export const settingsSchema = z.preprocess(
       ),
     model: z.string().max(200),
     systemPrompt: z.string().min(1).max(100000),
+    memory: z.string().max(20000).default(""),
+    siteRules: z
+      .array(
+        z.object({
+          pattern: z.string().regex(/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/).max(253),
+          action: z.enum(["allow", "ask", "block"]),
+        }),
+      )
+      .max(200)
+      .default([]),
     maxSteps: z.number().int().min(1).max(200),
     contextMode: z.literal("auto").default("auto"),
     contextWindow: z

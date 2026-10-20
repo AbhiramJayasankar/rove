@@ -59,6 +59,7 @@ export function toolTitle(
     browser_hover: "Hover element",
     browser_drag: "Drag element",
     browser_downloads: "Check downloads",
+    browser_save_file: args.filename ? `Save ${String(args.filename).slice(0, 60)}` : "Save file",
     browser_dialog: "Handle dialog",
     browser_upload: "Upload file",
     browser_evaluate: "Run page script",

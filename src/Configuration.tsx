@@ -19,6 +19,9 @@ import {
 import type { AppState, Settings } from "../shared/types";
 import { DEFAULT_PROMPT } from "../shared/defaults";
 import ModelChecklist from "./ModelChecklist";
+import ShortcutsEditor from "./ShortcutsEditor";
+import SiteRules from "./SiteRules";
+import { useShortcutsEditor } from "./shortcuts";
 import { useModelVisibility } from "./modelVisibility";
 import VoiceSettings, { useVoiceSettings } from "./VoiceSettings";
 import ChoiceMenu from "./ChoiceMenu";
@@ -60,6 +63,7 @@ export default function Configuration({
   const [showKey, setShowKey] = useState(false);
   const voice = useVoiceSettings();
   const visibility = useModelVisibility(state.activeProviderId);
+  const shortcuts = useShortcutsEditor();
   const [toolSearch, setToolSearch] = useState("");
   const whatsNew = useRef<HTMLDialogElement>(null);
   const tabs: [Page, string, typeof Cpu][] = [
@@ -262,6 +266,20 @@ export default function Configuration({
                 spellCheck={false}
               />
             </div>
+            <div className="settings-heading">
+              <h2 className="settings-title">Standing instructions</h2>
+            </div>
+            <div className="panel memory-panel">
+              <textarea
+                aria-label="Standing instructions"
+                className="instructions-editor memory-editor"
+                placeholder="Things Rove should always know or follow, in every chat."
+                value={draft.memory}
+                onChange={(e) => update("memory", e.target.value)}
+                spellCheck={false}
+              />
+            </div>
+            <ShortcutsEditor editor={shortcuts} />
           </section>
         ) : (
           <section className="tools-settings">
@@ -322,6 +340,7 @@ export default function Configuration({
                 </div>
               </div>
             ))}
+            <SiteRules rules={draft.siteRules} onChange={(rules) => update("siteRules", rules)} />
           </section>
         )}
       </div>
@@ -329,7 +348,7 @@ export default function Configuration({
         <button
           className="button primary"
           disabled={!!pending || !!state.activeRunId}
-          onClick={() => saveSettings(async () => { await voice.save(); await visibility.save(); })}
+          onClick={() => saveSettings(async () => { await voice.save(); await visibility.save(); await shortcuts.save(); })}
         >
           {pending === "save" ? (
             <LoaderCircle className="spin" size={15} />

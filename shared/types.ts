@@ -35,6 +35,10 @@ export interface Settings {
   baseUrl: string;
   model: string;
   systemPrompt: string;
+  /** Standing notes appended to the instructions of every task. */
+  memory: string;
+  /** Per-site overrides of the approval mode. A rule for a host also covers its subdomains. */
+  siteRules: { pattern: string; action: "allow" | "ask" | "block" }[];
   maxSteps: number;
   contextWindow: number;
   contextMode: "auto";

@@ -25,6 +25,8 @@ import {
 } from "lucide-react";
 import ModelPicker from "./ModelPicker";
 import UsageRing from "./UsageRing";
+import ShortcutMenu, { shortcutMatches, slashQuery } from "./ShortcutMenu";
+import { shortcutText, useShortcuts, type Shortcut } from "./shortcuts";
 import VoiceInput from "./VoiceInput";
 import Conversation, { type ConversationHandle } from "./Conversation";
 import ChoiceMenu from "./ChoiceMenu";
@@ -33,7 +35,8 @@ import {
   resolvedReasoningEffort,
 } from "../shared/capabilities";
 import { TraceView } from "./ExecutionLog";
-import { downloadJson } from "./transport";
+import { downloadJson, downloadText } from "./transport";
+import { runToMarkdown } from "../shared/markdown";
 import type { AppState, RunRecord, Settings } from "../shared/types";
 import { api, json, toolTitle, type Action, type Page, type Shot } from "./ui";
 type Props = {
@@ -100,6 +103,9 @@ export default function Workbench({
   const scrollRef = useRef<HTMLDivElement>(null);
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const [voiceBusy, setVoiceBusy] = useState(false);
+  const shortcuts = useShortcuts();
+  const [shortcutIndex, setShortcutIndex] = useState(0);
+  const [slashDismissed, setSlashDismissed] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const conversationRef = useRef<ConversationHandle>(null);
   const [retryEditRequested, setRetryEditRequested] = useState(false);
@@ -157,6 +163,18 @@ export default function Workbench({
     input.style.height = "auto";
     input.style.height = Math.min(input.scrollHeight, 120) + "px";
   }, [prompt, visible]);
+  const slash = slashQuery(prompt);
+  const slashMatches = slash === null ? [] : shortcutMatches(shortcuts, slash);
+  const slashOpen = slash !== null && !slashDismissed;
+  useEffect(() => {
+    setShortcutIndex(0);
+    if (slash === null) setSlashDismissed(false);
+  }, [slash]);
+  function pickShortcut(shortcut: Shortcut) {
+    setPrompt(shortcutText(shortcut));
+    setSlashDismissed(true);
+    requestAnimationFrame(() => promptRef.current?.focus());
+  }
   const reasoningChoices = reasoningOptions(state.settings, state.modelInfo);
   async function runOptions(options: Partial<Settings> & { providerId?: string }) {
     await action("run-options", async () => {
@@ -343,6 +361,9 @@ export default function Workbench({
               <strong>
                 {toolTitle(approval.data.tool, approval.data.args)}
               </strong>
+              {approval.data.reason === "site rule" && (
+                <p className="decision-note">Your site rules ask before acting on {String(approval.data.site)}.</p>
+              )}
               <details>
                 <summary>Action details</summary>
                 <pre>
@@ -389,13 +410,15 @@ export default function Workbench({
                   Deny
                 </button>
               </div>
-              <button
-                className="text-button"
-                disabled={!!pending}
-                onClick={() => changeApprovalMode("never")}
-              >
-                Auto-approve and continue
-              </button>
+              {approval.data.reason !== "site rule" && (
+                <button
+                  className="text-button"
+                  disabled={!!pending}
+                  onClick={() => changeApprovalMode("never")}
+                >
+                  Auto-approve and continue
+                </button>
+              )}
             </>
           </div>
         )}
@@ -416,6 +439,16 @@ export default function Workbench({
                 <TraceView
                   events={run.events}
                   exportPending={!!pending}
+                  onExportMarkdown={() => {
+                    void action("export-markdown", async () => {
+                      const record = await api<RunRecord>(`/api/runs/${run.id}/export`);
+                      downloadText(
+                        runToMarkdown(record, toolTitle, { app: "Rove", version: __APP_VERSION__ }),
+                        `rove-chat-${run.id.slice(0, 8)}.md`,
+                        "text/markdown",
+                      );
+                    });
+                  }}
                   onExport={() => {
                     void action("export-run", async () => {
                       const record = await api<RunRecord>(
@@ -501,6 +534,15 @@ export default function Workbench({
             if (canRun) startRun();
           }}
         >
+          {slashOpen && (
+            <ShortcutMenu
+              shortcuts={shortcuts}
+              query={slash!}
+              index={shortcutIndex}
+              onPick={pickShortcut}
+              onSettings={() => setPage("instructions")}
+            />
+          )}
           <textarea
             ref={promptRef}
             aria-label="Task prompt"
@@ -510,6 +552,24 @@ export default function Workbench({
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => {
+              if (slashOpen && slashMatches.length) {
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  setShortcutIndex((index) => (index + (e.key === "ArrowDown" ? 1 : -1) + slashMatches.length) % slashMatches.length);
+                  return;
+                }
+                if ((e.key === "Enter" || e.key === "Tab") && !e.shiftKey) {
+                  e.preventDefault();
+                  pickShortcut(slashMatches[shortcutIndex] ?? slashMatches[0]);
+                  return;
+                }
+              }
+              if (slashOpen && e.key === "Escape") {
+                e.preventDefault();
+                e.stopPropagation();
+                setSlashDismissed(true);
+                return;
+              }
               if (
                 e.key === "Enter" &&
                 !e.shiftKey &&

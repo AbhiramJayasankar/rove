@@ -237,3 +237,15 @@ describe("debugger lifecycle", () => {
     ).toHaveLength(1);
   });
 });
+
+describe("saving reports to Downloads", () => {
+  it("saves a text report into the Rove folder and rejects paths and risky types", async () => {
+    const download = vi.fn(async () => 42);
+    (chrome as any).downloads = { download };
+    await expect(browser.perform("browser_save_file", { filename: "report.md", content: "# Hi" })).resolves.toMatchObject({ saved: true, filename: "Rove/report.md", downloadId: 42 });
+    expect(download).toHaveBeenCalledWith(expect.objectContaining({ filename: "Rove/report.md", conflictAction: "uniquify", saveAs: false }));
+    for (const bad of ["../evil.md", "dir/report.md", "run.exe", "noextension", ".hidden.md"])
+      await expect(browser.perform("browser_save_file", { filename: bad, content: "x" })).rejects.toThrow("plain file name");
+    expect(download).toHaveBeenCalledTimes(1);
+  });
+});

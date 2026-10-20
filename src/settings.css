@@ -645,3 +645,192 @@
 .changelog-body li {
   margin: 4px 0;
 }
+
+.settings-page .memory-panel {
+  padding: 6px;
+}
+.settings-page .memory-editor {
+  min-height: 120px;
+}
+
+/* Saved prompts and site rules */
+.settings-page .shortcuts-panel,
+.settings-page .rules-panel {
+  gap: 10px;
+}
+.rules-empty {
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+  padding: 2px 4px;
+}
+.shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 6px 8px 14px;
+  border-radius: 14px;
+  background: var(--field);
+}
+.shortcut-row > span {
+  flex: 1;
+  min-width: 0;
+}
+.shortcut-row strong,
+.rule-row strong {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.shortcut-row small {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shortcut-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--field);
+}
+.settings-page .shortcut-form .field > input,
+.settings-page .shortcut-form .field > textarea {
+  background: var(--panel);
+}
+.shortcut-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.rule-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 6px 8px 14px;
+  border-radius: 14px;
+  background: var(--field);
+}
+.rule-row strong {
+  flex: 1;
+  min-width: 0;
+}
+.rule-choice {
+  display: flex;
+  padding: 2px;
+  border-radius: 999px;
+  background: var(--panel);
+}
+.rule-choice button,
+.rule-add button {
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+}
+.rule-choice button[aria-checked="true"] {
+  background: var(--field);
+  color: var(--ink);
+  box-shadow: 0 1px 2px var(--shadow);
+}
+.rule-choice .rule-block[aria-checked="true"] {
+  color: var(--danger);
+}
+.rule-choice .rule-allow[aria-checked="true"] {
+  color: var(--accent);
+}
+.rule-add {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 4px 3px 14px;
+  border-radius: 14px;
+  background: var(--field);
+}
+.rule-add input {
+  flex: 1;
+  width: 0;
+  min-height: 36px;
+  border: 0;
+  background: none;
+  font-size: 13.5px;
+  outline: 0;
+}
+.rule-add button:hover:not(:disabled) {
+  background: var(--panel);
+  color: var(--ink);
+}
+.rule-add .rule-add-block:hover:not(:disabled) {
+  color: var(--danger);
+}
+
+/* Composer slash menu */
+.shortcut-menu {
+  position: absolute;
+  inset: auto 0 calc(100% + 8px);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 6px;
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--ink) 7%, transparent),
+    0 14px 44px var(--shadow);
+}
+.shortcut-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  text-align: left;
+}
+.shortcut-option svg {
+  margin-top: 3px;
+  color: var(--accent);
+}
+.shortcut-option[aria-selected="true"],
+.shortcut-option:hover {
+  background: var(--panel);
+}
+.shortcut-option span {
+  min-width: 0;
+}
+.shortcut-option strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+.shortcut-option small {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.shortcut-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 10px 12px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.decision-note {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+}

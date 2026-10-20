@@ -24,6 +24,14 @@
     "default_path": "index.html"
   },
   "options_page": "index.html?view=tab",
+  "commands": {
+    "_execute_action": {
+      "suggested_key": {
+        "default": "Alt+Shift+N"
+      },
+      "description": "Open Rove"
+    }
+  },
   "action": {
     "default_title": "Open Rove",
     "default_icon": {

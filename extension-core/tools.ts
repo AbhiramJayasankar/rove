@@ -112,6 +112,13 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
     "write",
   ),
   tool(
+    "browser_save_file",
+    "Save a text report to the user's Downloads folder (Rove subfolder) as a .md, .txt, .csv, .json or .html file. Use for results the user asked to keep.",
+    { filename: { type: "string", minLength: 1, maxLength: 120 }, content: { type: "string", maxLength: 1000000 } },
+    ["filename", "content"],
+    "write",
+  ),
+  tool(
     "browser_type",
     "Type text into a ref or the focused element; optionally clear existing text first.",
     { ...target, text: str, ref: str, clear: { type: "boolean" } },

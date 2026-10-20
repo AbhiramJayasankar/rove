@@ -6,6 +6,7 @@ import {
   Check,
   ChevronDown,
   Copy,
+  FileText,
   LoaderCircle,
   Wrench,
 } from "lucide-react";
@@ -229,10 +230,12 @@ export default function ExecutionLog({
 export function TraceView({
   events,
   onExport,
+  onExportMarkdown,
   exportPending,
 }: {
   events: RunEvent[];
   onExport?: () => void;
+  onExportMarkdown?: () => void;
   exportPending?: boolean;
 }) {
   const [query, setQuery] = useState("");
@@ -254,6 +257,18 @@ export function TraceView({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        {onExportMarkdown && (
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Export chat as Markdown"
+            title="Export chat as Markdown"
+            disabled={exportPending}
+            onClick={onExportMarkdown}
+          >
+            <FileText size={15} />
+          </button>
+        )}
         {onExport && (
           <button
             type="button"

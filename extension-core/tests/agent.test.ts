@@ -97,6 +97,52 @@ describe("agent execution loop", () => {
     expect(run.status).toBe("failed");
     expect(run.events.find((event) => event.type === "error")?.data.message).toContain("without giving an answer");
   });
+  it("adds the user's standing instructions to every request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(response("Done."));
+    vi.stubGlobal("fetch", fetchMock);
+    const ctx = setup({ memory: "Always answer in British English." });
+    ctx.engine.start("Hello.");
+    await until(() => !ctx.engine.activeRunId);
+    const sent = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(sent.messages[0].content).toContain("Standing notes from the user");
+    expect(sent.messages[0].content).toContain("Always answer in British English.");
+  });
+  describe("site rules", () => {
+    const navigate = (url: string) => response(null, [call("nav", "browser_navigate", { url })]);
+    it("blocks a site without touching the browser and tells the model", async () => {
+      const fetchMock = vi.fn().mockResolvedValueOnce(navigate("https://login.bank.com/")).mockResolvedValueOnce(response("Skipped it."));
+      vi.stubGlobal("fetch", fetchMock);
+      const ctx = setup({ siteRules: [{ pattern: "bank.com", action: "block" }] });
+      const run = ctx.engine.start("Open my bank.");
+      await until(() => !ctx.engine.activeRunId);
+      expect(ctx.execute).not.toHaveBeenCalledWith("browser_navigate", expect.anything(), expect.anything());
+      const result = run.events.find((event) => event.type === "tool_result");
+      expect(result?.data.result).toMatchObject({ blocked: true, site: "login.bank.com" });
+      expect(run.status).toBe("completed");
+    });
+    it("asks even in auto-approve mode, and switching to auto cannot answer it", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(navigate("https://news.example.org/")).mockResolvedValueOnce(response("Read it.")));
+      const ctx = setup({ approvalMode: "never", siteRules: [{ pattern: "example.org", action: "ask" }] });
+      const run = ctx.engine.start("Open the news.");
+      await until(() => run.status === "awaiting_approval");
+      ctx.engine.setApprovalMode("never");
+      expect(run.status).toBe("awaiting_approval");
+      const required = run.events.findLast((event) => event.type === "approval_required")!;
+      expect(required.data).toMatchObject({ site: "news.example.org", reason: "site rule" });
+      ctx.engine.approve(run.id, required.data.id, true);
+      await until(() => !ctx.engine.activeRunId);
+      expect(ctx.execute).toHaveBeenCalledWith("browser_navigate", expect.anything(), expect.anything());
+    });
+    it("lets an allowed site skip approval in ask-first mode but still asks elsewhere", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(navigate("https://docs.ok.com/")).mockResolvedValueOnce(navigate("https://other.com/")));
+      const ctx = setup({ approvalMode: "risky", siteRules: [{ pattern: "ok.com", action: "allow" }] });
+      const run = ctx.engine.start("Browse.");
+      await until(() => run.status === "awaiting_approval");
+      expect(ctx.execute).toHaveBeenCalledWith("browser_navigate", expect.objectContaining({ url: "https://docs.ok.com/" }), expect.anything());
+      expect(run.events.findLast((event) => event.type === "approval_required")?.data.args.url).toBe("https://other.com/");
+      ctx.engine.stop(run.id);
+    });
+  });
   it("saves only the newest event per save call", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response("Done.")));
     const ctx = setup();

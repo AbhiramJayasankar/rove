@@ -811,6 +811,22 @@ export async function perform(action, args = {}) {
       ...(error ? { error } : {}),
     }));
   }
+  if (action === "browser_save_file") {
+    const name = String(args.filename ?? "").trim();
+    // A bare file name only: no folders, no hidden or executable types.
+    if (!/^[\w][\w .()-]{0,100}\.(md|txt|csv|json|html)$/i.test(name))
+      throw new Error("Use a plain file name ending in .md, .txt, .csv, .json or .html.");
+    if (typeof args.content !== "string" || args.content.length > 1_000_000)
+      throw new Error("content must be text of at most 1,000,000 characters.");
+    const mime = { md: "text/markdown", txt: "text/plain", csv: "text/csv", json: "application/json", html: "text/html" }[name.split(".").pop().toLowerCase()];
+    const id = await chrome.downloads.download({
+      url: `data:${mime};charset=utf-8,${encodeURIComponent(args.content)}`,
+      filename: `Rove/${name}`,
+      conflictAction: "uniquify",
+      saveAs: false,
+    });
+    return { saved: true, downloadId: id, filename: `Rove/${name}`, characters: args.content.length };
+  }
   if (action === "browser_wait") {
     const milliseconds = Number(args.milliseconds);
     if (
