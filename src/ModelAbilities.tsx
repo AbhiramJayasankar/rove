@@ -47,7 +47,15 @@ function bodyError(body: string): "" | "json" | "object" {
 }
 
 /** Per-model choices that replace what the endpoint advertises: whether to send images, and how to ask for reasoning. */
-export default function ModelAbilities({ model, endpoint }: { model: ModelInfo; endpoint: string }) {
+export default function ModelAbilities({
+  model,
+  endpoint,
+  onSaved,
+}: {
+  model: ModelInfo;
+  endpoint: string;
+  onSaved?: (model: ModelInfo | null) => void;
+}) {
   const t = useT();
   const [override, setOverride] = useState<ModelOverride>(model.override ?? {});
   const [levels, setLevels] = useState<ReasoningLevel[]>(model.override?.reasoning ?? []);
@@ -64,11 +72,12 @@ export default function ModelAbilities({ model, endpoint }: { model: ModelInfo; 
     setSaving(true);
     setError("");
     try {
-      await api("/api/model-override", {
+      const result = await api<{ model: ModelInfo | null }>("/api/model-override", {
         method: "PUT",
         body: JSON.stringify({ baseUrl: endpoint, model: model.id, override: next.images || next.reasoning ? next : null }),
       });
       setOverride(next);
+      onSaved?.(result.model);
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {

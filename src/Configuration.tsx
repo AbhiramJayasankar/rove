@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import changelog from "../CHANGELOG.md?raw";
@@ -19,6 +19,7 @@ import {
 import type { AppState, ModelInfo, Settings } from "../shared/types";
 import { DEFAULT_PROMPT } from "../shared/defaults";
 import ModelChecklist from "./ModelChecklist";
+import ModelPicker from "./ModelPicker";
 import ModelAbilities from "./ModelAbilities";
 import { ModelDetails } from "./ModelFacts";
 import Tooltip from "./Tooltip";
@@ -82,6 +83,16 @@ export default function Configuration({
   const selectedInfo =
     (state.modelInfo?.id === draft.model && state.settings.baseUrl === draft.baseUrl ? state.modelInfo : undefined) ??
     listed.find((info) => info.id === draft.model);
+  // Any listed model can be inspected; the chat's own model is the starting point.
+  const [inspected, setInspected] = useState("");
+  useEffect(() => setInspected(""), [state.activeProviderId, draft.baseUrl]);
+  const inspectedInfo = (inspected !== draft.model && listed.find((info) => info.id === inspected)) || selectedInfo;
+  const keepListed = (saved: ModelInfo | null) => {
+    if (saved)
+      setListed((models) =>
+        models.map((info) => (info.id === saved.id ? { ...saved, providerId: info.providerId, providerName: info.providerName } : info)),
+      );
+  };
   const enabledCount = state.tools.length - draft.disabledTools.length;
   const tools = state.tools.filter((tool) =>
     (tool.name + tool.description)
@@ -209,10 +220,28 @@ export default function Configuration({
                   }}
                 />
               </div>
-              {selectedInfo ? (
+              {listed.length > 1 && (
+                <div className="model-inspect">
+                  <span>{t("Details for")}</span>
+                  <ModelPicker
+                    model={inspectedInfo?.id ?? draft.model}
+                    label={inspectedInfo?.name}
+                    choices={listed}
+                    ariaLabel={t("Model to inspect")}
+                    placement="bottom"
+                    onSelect={(id) => setInspected(id)}
+                  />
+                  {inspectedInfo && inspectedInfo.id !== draft.model && (
+                    <button type="button" className="text-button" onClick={() => setInspected("")}>
+                      {t("Show the chat model")}
+                    </button>
+                  )}
+                </div>
+              )}
+              {inspectedInfo ? (
                 <>
-                  <ModelDetails model={selectedInfo} />
-                  <ModelAbilities model={selectedInfo} endpoint={draft.baseUrl} />
+                  <ModelDetails model={inspectedInfo} />
+                  <ModelAbilities model={inspectedInfo} endpoint={draft.baseUrl} onSaved={keepListed} />
                 </>
               ) : (
                 <p className="abilities-note model-abilities-empty">

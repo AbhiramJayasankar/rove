@@ -334,6 +334,7 @@
 }
 .app-shell .composer-controls > .model-picker-trigger {
   flex: 0 1 auto;
+  min-width: 72px;
   max-width: 55%;
 }
 .app-shell .composer-controls > .choice-trigger[aria-label="Approval mode"] {
@@ -586,7 +587,8 @@
 .app-shell .assistant-message .markdown {
   flex: 1;
 }
-@media (max-width: 380px) {
+/* The side panel is usually 360-460px wide: the approval mode keeps its shield and gives the model name room. */
+@media (max-width: 460px) {
   .app-shell .composer-controls > .choice-trigger[aria-label="Approval mode"] > span {
     display: none;
   }
@@ -832,3 +834,44 @@
 }
 .app-shell .task-composer { position: relative; }
 .app-shell .voice-activity > span[role="timer"] { flex: none; }
+
+/* Narrow side panels: chips lose their chevrons, then everything tightens, so the row never clips or wraps. */
+@media (max-width: 400px) {
+  .app-shell .composer-controls {
+    gap: 2px;
+  }
+  .app-shell .composer-controls > .choice-trigger,
+  .app-shell .composer-controls > .model-picker-trigger {
+    padding-inline: 8px;
+  }
+  .app-shell .composer-controls > .choice-trigger > svg:last-child,
+  .app-shell .composer-controls > .model-picker-trigger > svg:last-child {
+    display: none;
+  }
+  .app-shell .composer-controls > .model-picker-trigger {
+    min-width: 56px;
+  }
+}
+@media (max-width: 340px) {
+  .app-shell .usage-ring,
+  .app-shell .voice-button {
+    width: 28px;
+    min-width: 28px;
+    height: 28px;
+    flex-basis: 28px;
+  }
+  .app-shell .composer-controls > .choice-trigger,
+  .app-shell .composer-controls > .model-picker-trigger {
+    height: 28px;
+    min-height: 28px;
+    padding-inline: 6px;
+  }
+  .app-shell .composer-controls > .model-picker-trigger {
+    min-width: 44px;
+  }
+  .app-shell .composer-controls > .run-button {
+    width: 28px;
+    height: 28px;
+    flex-basis: 28px;
+  }
+}

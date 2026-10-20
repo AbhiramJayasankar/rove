@@ -459,7 +459,7 @@ async function route(path: string, method: string, body: any, settingsLocked = f
     // Refresh what the active model looks like, and every provider list the picker shows.
     const modelInfo = catalogue.peek(store.settings, apiKey);
     broadcast("model_info", modelInfo);
-    return { modelInfo };
+    return { modelInfo, model: catalogue.find(input.baseUrl, input.model) };
   }
   if (method === "POST" && path === "/api/model/test") {
     const candidate = settingsSchema.parse({

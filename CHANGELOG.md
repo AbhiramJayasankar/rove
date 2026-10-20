@@ -2,6 +2,19 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## 2.4.0 - 2026-10-21
+
+Reasoning levels come back with several providers saved, any model can be inspected, and images can be switched off from the chat.
+
+### Added
+- Image mode switch next to the attach button. Text-only mode stops screenshots and images for the current model, hides the screenshot tool and tells the model to work from page text. It is saved per model and endpoint, and switching back to what the endpoint reports removes the override.
+- A "Details for" model chooser in Settings → Model. Search any model the endpoint lists (useful for OpenRouter and TokenHarbor) to see what the endpoint reports and set its image and reasoning choices, not just the chat model's.
+
+### Fixed
+- The reasoning picker disappeared for every model, local, TokenHarbor and OpenRouter alike, once more than one provider was saved. Listing all providers' models left Rove remembering only the last one, so the chat model's details looked unknown.
+- In text-only mode the default instructions no longer tell the model to use screenshots.
+- In a narrow side panel the model name no longer shrinks to nothing. Below 460px the approval mode shows only its shield, and below 400px the chips drop their arrows, so every control stays on one line down to 320px.
+
 ## 2.3.0 - 2026-10-21
 
 Better local-model support and more visibility into what each endpoint reports.

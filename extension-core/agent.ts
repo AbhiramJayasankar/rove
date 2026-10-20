@@ -560,7 +560,8 @@ export class AgentEngine {
             );
         const first = messages[0];
         if (first?.role === "system" && typeof first.content === "string")
-          first.content +=
+          first.content =
+            first.content.replace(" Use browser_screenshot and coordinate tools for visual interfaces.", "") +
             "\n\nThis model cannot see images. Rely on browser_snapshot text and element refs; screenshots are not available.";
       }
       this.event(active, "model_metadata", {

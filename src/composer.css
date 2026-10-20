@@ -527,6 +527,9 @@
 }
 .voice-button:hover, .voice-button.recording { color: var(--accent); background: var(--accent-soft); }
 .voice-button.recording svg { animation: voice-pulse 1.4s ease-in-out infinite; }
+/* Text-only is the mode worth noticing: it changes what the model can do. */
+.image-mode.text-only { color: var(--accent); background: var(--accent-soft); }
+.image-mode:disabled { opacity: .5; }
 @keyframes voice-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .voice-button.recording svg { animation: none; } }
 .voice-error { display: block; flex: 1 0 100%; order: 10; color: var(--danger); font-size: 12px; line-height: 1.5; padding: 5px 2px 0; }

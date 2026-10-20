@@ -1157,3 +1157,29 @@
 .tooltip-panel .model-facts > div {
   grid-template-columns: minmax(84px, 38%) 1fr;
 }
+
+/* Which model the details and abilities below describe */
+.settings-page .model-inspect {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+.settings-page .model-inspect .model-picker-trigger {
+  flex: 0 1 auto;
+  max-width: 100%;
+  padding: 7px 10px;
+  border-radius: 10px;
+  background: var(--field);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.settings-page .model-inspect .model-picker-trigger:hover {
+  background: var(--accent-soft);
+}
+.settings-page .model-inspect .text-button {
+  margin-left: auto;
+}

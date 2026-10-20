@@ -212,8 +212,8 @@ export class ModelCatalogue {
   private overrides: Record<string, ModelOverride> = {};
   private initialization?: Promise<void>;
   private pendingWrite: Promise<void> = Promise.resolve();
-  private credential?: { endpoint: string; key: string; hash: string };
-  private identitySequence = 0;
+  // Every endpoint+key listed so far. The picker lists all providers at once, so one slot is not enough.
+  private credentials = new Map<string, string>();
   private storage?: CatalogueStorage;
   constructor(
     storage?: CatalogueStorage,
@@ -253,12 +253,8 @@ export class ModelCatalogue {
     })());
   }
   private async key(settings: Settings, key: string): Promise<string> {
-    if (
-      this.credential?.endpoint === settings.baseUrl &&
-      this.credential.key === key
-    )
-      return this.credential.hash;
-    const sequence = ++this.identitySequence;
+    const known = this.credentials.get(`${settings.baseUrl}\0${key}`);
+    if (known) return known;
     const digest = await crypto.subtle.digest(
       "SHA-256",
       new TextEncoder().encode(`${settings.baseUrl}\0${key}`),
@@ -266,8 +262,9 @@ export class ModelCatalogue {
     const hash = Array.from(new Uint8Array(digest), (byte) =>
       byte.toString(16).padStart(2, "0"),
     ).join("");
-    if (sequence === this.identitySequence)
-      this.credential = { endpoint: settings.baseUrl, key, hash };
+    // Keep the newest few: a key typed into Settings registers on every keystroke pause.
+    if (this.credentials.size >= 32) this.credentials.delete(this.credentials.keys().next().value!);
+    this.credentials.set(`${settings.baseUrl}\0${key}`, hash);
     return hash;
   }
   private overrideId(endpoint: string, model: string): string {
@@ -295,17 +292,21 @@ export class ModelCatalogue {
   }
   /** Synchronous after list/resolve has registered this endpoint+credential identity. */
   peek(settings: Settings, key: string): ModelInfo | null {
-    const credential = this.credential;
-    if (
-      !credential ||
-      credential.endpoint !== settings.baseUrl ||
-      credential.key !== key
-    )
-      return null;
+    const hash = this.credentials.get(`${settings.baseUrl}\0${key}`);
+    if (!hash) return null;
     const model = this.cache
-      .get(credential.hash)
+      .get(hash)
       ?.models.find((model) => model.id === settings.model);
-    return model ? this.decorate(model, credential.hash, settings.baseUrl) : null;
+    return model ? this.decorate(model, hash, settings.baseUrl) : null;
+  }
+  /** Any listed model on this endpoint, with the user's choices applied, whichever key listed it. */
+  find(endpoint: string, id: string): ModelInfo | null {
+    for (const [hash, entry] of this.cache) {
+      if (entry.endpoint !== endpoint) continue;
+      const model = entry.models.find((model) => model.id === id);
+      if (model) return this.decorate(model, hash, endpoint);
+    }
+    return null;
   }
   async list(
     settings: Settings,

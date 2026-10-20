@@ -2103,8 +2103,8 @@ var ModelCatalogue = class {
   overrides = {};
   initialization;
   pendingWrite = Promise.resolve();
-  credential;
-  identitySequence = 0;
+  // Every endpoint+key listed so far. The picker lists all providers at once, so one slot is not enough.
+  credentials = /* @__PURE__ */ new Map();
   storage;
   init() {
     return this.initialization ??= (async () => {
@@ -2128,9 +2128,8 @@ var ModelCatalogue = class {
     })();
   }
   async key(settings, key) {
-    if (this.credential?.endpoint === settings.baseUrl && this.credential.key === key)
-      return this.credential.hash;
-    const sequence = ++this.identitySequence;
+    const known = this.credentials.get(`${settings.baseUrl}\0${key}`);
+    if (known) return known;
     const digest = await crypto.subtle.digest(
       "SHA-256",
       new TextEncoder().encode(`${settings.baseUrl}\0${key}`)
@@ -2139,8 +2138,8 @@ var ModelCatalogue = class {
       new Uint8Array(digest),
       (byte) => byte.toString(16).padStart(2, "0")
     ).join("");
-    if (sequence === this.identitySequence)
-      this.credential = { endpoint: settings.baseUrl, key, hash: hash2 };
+    if (this.credentials.size >= 32) this.credentials.delete(this.credentials.keys().next().value);
+    this.credentials.set(`${settings.baseUrl}\0${key}`, hash2);
     return hash2;
   }
   overrideId(endpoint, model) {
@@ -2168,11 +2167,19 @@ var ModelCatalogue = class {
   }
   /** Synchronous after list/resolve has registered this endpoint+credential identity. */
   peek(settings, key) {
-    const credential = this.credential;
-    if (!credential || credential.endpoint !== settings.baseUrl || credential.key !== key)
-      return null;
-    const model = this.cache.get(credential.hash)?.models.find((model2) => model2.id === settings.model);
-    return model ? this.decorate(model, credential.hash, settings.baseUrl) : null;
+    const hash2 = this.credentials.get(`${settings.baseUrl}\0${key}`);
+    if (!hash2) return null;
+    const model = this.cache.get(hash2)?.models.find((model2) => model2.id === settings.model);
+    return model ? this.decorate(model, hash2, settings.baseUrl) : null;
+  }
+  /** Any listed model on this endpoint, with the user's choices applied, whichever key listed it. */
+  find(endpoint, id) {
+    for (const [hash2, entry] of this.cache) {
+      if (entry.endpoint !== endpoint) continue;
+      const model = entry.models.find((model2) => model2.id === id);
+      if (model) return this.decorate(model, hash2, endpoint);
+    }
+    return null;
   }
   async list(settings, key, refresh = false, signal) {
     await this.init();
@@ -2836,7 +2843,7 @@ Browser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. 
             );
         const first = messages[0];
         if (first?.role === "system" && typeof first.content === "string")
-          first.content += "\n\nThis model cannot see images. Rely on browser_snapshot text and element refs; screenshots are not available.";
+          first.content = first.content.replace(" Use browser_screenshot and coordinate tools for visual interfaces.", "") + "\n\nThis model cannot see images. Rely on browser_snapshot text and element refs; screenshots are not available.";
       }
       this.event(active, "model_metadata", {
         model: modelInfo,
@@ -24719,7 +24726,7 @@ async function route(path, method, body, settingsLocked = false) {
     await catalogue.setOverride(input2.baseUrl, input2.model, input2.override);
     const modelInfo = catalogue.peek(store.settings, apiKey);
     broadcast("model_info", modelInfo);
-    return { modelInfo };
+    return { modelInfo, model: catalogue.find(input2.baseUrl, input2.model) };
   }
   if (method === "POST" && path === "/api/model/test") {
     const candidate = settingsSchema.parse({

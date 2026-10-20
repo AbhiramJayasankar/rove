@@ -45,6 +45,30 @@ describe("llama.cpp detection", () => {
   });
 });
 
+describe("several providers", () => {
+  it("still knows the active model after listing another provider", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        new Response(
+          JSON.stringify({
+            data: String(url).startsWith("https://router.example")
+              ? [{ id: "other", supported_parameters: ["tools"] }]
+              : [{ id: "ling", supported_parameters: ["tools", "reasoning_effort"], reasoning_efforts: ["low", "high"] }],
+          }),
+        ),
+      ),
+    );
+    const catalogue = new ModelCatalogue(storage());
+    const other = { ...settings, baseUrl: "https://router.example/v1", model: "other" };
+    await Promise.all([catalogue.list(settings, "local"), catalogue.list(other, "remote")]);
+    expect(catalogue.peek(settings, "local")?.reasoningEfforts).toEqual(["low", "high"]);
+    expect(catalogue.peek(other, "remote")?.id).toBe("other");
+    expect(catalogue.peek(settings, "wrong-key")).toBeNull();
+    expect(catalogue.find("https://router.example/v1", "other")?.id).toBe("other");
+  });
+});
+
 describe("per-model overrides", () => {
   it("force images off, survive a key change, and clear", async () => {
     llamaServer({ build_info: "b1", modalities: { vision: true } });

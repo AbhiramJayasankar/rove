@@ -29,8 +29,13 @@ export default function ModelPicker({
   disabled = false,
   placement = "top",
   providerId,
+  choices,
+  ariaLabel,
 }: {
+  ariaLabel?: string;
   model: string;
+  /** A fixed list to choose from instead of every provider's catalogue, shown unfiltered. */
+  choices?: ModelInfo[];
   label?: string;
   connection?: { baseUrl: string; apiKey?: string };
   onSelect: (model: string, contextWindow?: number, providerId?: string) => void | Promise<void>;
@@ -44,7 +49,8 @@ export default function ModelPicker({
   const searchRef = useRef<HTMLInputElement>(null);
   const options = useRef<(HTMLButtonElement | null)[]>([]);
   const sequence = useRef(0);
-  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [loaded, setModels] = useState<ModelInfo[]>([]);
+  const models = choices ?? loaded;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -75,14 +81,14 @@ export default function ModelPicker({
     setSearch("");
     setFreeOnly(localStorage.getItem("relay.freeModels") === "true");
     popup.setOpen(true);
-    void load();
+    if (!choices) void load();
   }
   async function choose(info: ModelInfo) {
     await onSelect(info.id, info.contextWindow, info.providerId);
     popup.close(true);
   }
   useEffect(() => {
-    if (model && !label) void load();
+    if (model && !label && !choices) void load();
   }, [model, label, connection?.baseUrl]);
   useEffect(() => {
     if (popup.open) searchRef.current?.focus();
@@ -92,7 +98,9 @@ export default function ModelPicker({
     info.id === model && (!providerId || info.providerId === providerId);
   const filtered = models.filter(
     (info) =>
-      (visible[info.providerId || providerId || ""]
+      (choices
+        ? !freeOnly || info.free
+        : visible[info.providerId || providerId || ""]
         ? visible[info.providerId || providerId || ""].includes(info.id) || isCurrent(info)
         : !freeOnly || info.free) &&
       `${info.name} ${info.id} ${info.owner || ""} ${info.providerName || ""}`
@@ -109,7 +117,7 @@ export default function ModelPicker({
         ref={popup.trigger}
         type="button"
         className="model-picker-trigger"
-        aria-label={t("Choose model")}
+        aria-label={ariaLabel || t("Choose model")}
         title={name}
         aria-haspopup="dialog"
         aria-expanded={popup.open}
@@ -159,7 +167,7 @@ export default function ModelPicker({
               >
                 {t("Free")}
               </button>
-              <button
+              {!choices && <button
                 type="button"
                 className="icon-button"
                 aria-label={t("Refresh models")}
@@ -172,7 +180,7 @@ export default function ModelPicker({
                 ) : (
                   <RefreshCw size={13} />
                 )}
-              </button>
+              </button>}
             </div>
             <div
               className="catalogue-list"
