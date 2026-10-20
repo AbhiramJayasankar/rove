@@ -3,7 +3,7 @@ import { AgentEngine, MAX_CONCURRENT_RUNS } from "../extension-core/agent";
 import { historyBeforeEdit } from "../extension-core/conversation";
 import { ModelCatalogue, effectiveSettings } from "../extension-core/catalogue";
 import { BUILTIN_TOOLS } from "../extension-core/tools";
-import { testModel } from "../extension-core/model";
+import { parseReasoningBody, testModel } from "../extension-core/model";
 import type {
   AppState,
   ModelInfo,
@@ -425,6 +425,41 @@ async function route(path: string, method: string, body: any, settingsLocked = f
         key ? String(error).split(key).join("[redacted]") : String(error),
       );
     }
+  }
+  if (method === "PUT" && path === "/api/model-override") {
+    const input = z
+      .object({
+        baseUrl: z.string().max(2000),
+        model: z.string().min(1).max(200),
+        override: z
+          .object({
+            images: z.enum(["on", "off"]).optional(),
+            reasoning: z
+              .array(
+                z.object({
+                  value: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/),
+                  label: z.string().trim().min(1).max(40),
+                  body: z.string().max(4000).superRefine((text, ctx) => {
+                    try {
+                      parseReasoningBody(text);
+                    } catch (error) {
+                      ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : String(error) });
+                    }
+                  }),
+                }),
+              )
+              .max(8)
+              .refine((levels) => new Set(levels.map((level) => level.value)).size === levels.length, "Reasoning level IDs must be unique.")
+              .optional(),
+          })
+          .nullable(),
+      })
+      .parse(body);
+    await catalogue.setOverride(input.baseUrl, input.model, input.override);
+    // Refresh what the active model looks like, and every provider list the picker shows.
+    const modelInfo = catalogue.peek(store.settings, apiKey);
+    broadcast("model_info", modelInfo);
+    return { modelInfo };
   }
   if (method === "POST" && path === "/api/model/test") {
     const candidate = settingsSchema.parse({

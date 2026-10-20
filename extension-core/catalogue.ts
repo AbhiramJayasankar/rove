@@ -1,4 +1,4 @@
-import type { ModelInfo, Settings } from "../shared/types";
+import type { ModelInfo, ModelOverride, Settings } from "../shared/types";
 import { completionUrl } from "./model";
 import { readBounded } from "./tools";
 import { documentedCapabilities } from "./provider-capabilities";
@@ -77,6 +77,8 @@ export function normalizeModel(
       positive(
         raw.context_length,
         raw.context_window,
+        // llama.cpp reports the loaded context as meta.n_ctx.
+        raw.meta?.n_ctx,
         raw.max_model_len,
         raw.top_provider?.context_length,
         raw.limits?.context_length,
@@ -165,7 +167,7 @@ export function effectiveSettings(
 }
 
 export interface CatalogueStorage {
-  get(key: string): Promise<Record<string, any>>;
+  get(key: string | string[]): Promise<Record<string, any>>;
   set(items: Record<string, unknown>): Promise<void>;
 }
 type Profile = {
@@ -174,10 +176,40 @@ type Profile = {
   updatedAt: string;
 };
 
+/** llama.cpp tells /v1/models nothing about images or thinking, but /props does. */
+export async function probeLlamaServer(
+  modelsUrl: string,
+  key: string,
+  signal?: AbortSignal,
+): Promise<Partial<ModelInfo> | null> {
+  try {
+    const response = await fetch(modelsUrl.replace(/\/(?:v1\/)?models$/, "/props"), {
+      headers: key ? { Authorization: `Bearer ${key}` } : {},
+      signal: AbortSignal.any([AbortSignal.timeout(4000), ...(signal ? [signal] : [])]),
+      redirect: "error",
+    });
+    if (!response.ok) return null;
+    const props = JSON.parse(await readBounded(response, 2_000_000));
+    if (!props || typeof props !== "object" || !props.build_info) return null;
+    const template = String(props.chat_template || "");
+    const thinks = /enable_thinking|reasoning_effort|<think>|thinking/i.test(template);
+    return {
+      supportsVision: props.modalities?.vision === true,
+      // llama.cpp reads reasoning_effort for every template; "none" turns thinking off.
+      ...(thinks
+        ? { reasoningFormat: "reasoning_effort" as const, reasoningEfforts: ["none", "high"], capabilitySources: [modelsUrl.replace(/\/(?:v1\/)?models$/, "/props")] }
+        : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Browser-only catalogue. Initialize once; flush queued learned limits before teardown. */
 export class ModelCatalogue {
-  private cache = new Map<string, { at: number; models: ModelInfo[] }>();
+  private cache = new Map<string, { at: number; endpoint: string; models: ModelInfo[] }>();
   private profiles: Record<string, Profile> = {};
+  private overrides: Record<string, ModelOverride> = {};
   private initialization?: Promise<void>;
   private pendingWrite: Promise<void> = Promise.resolve();
   private credential?: { endpoint: string; key: string; hash: string };
@@ -186,13 +218,18 @@ export class ModelCatalogue {
   constructor(
     storage?: CatalogueStorage,
     private readonly storageKey = "relay.modelProfiles.v1",
+    private readonly overrideKey = "rove.modelOverrides.v1",
   ) {
     this.storage = storage ?? (globalThis as any).chrome?.storage?.local;
   }
   init(): Promise<void> {
     return (this.initialization ??= (async () => {
       if (!this.storage) return;
-      const stored = (await this.storage.get(this.storageKey))[this.storageKey];
+      const saved = await this.storage.get([this.storageKey, this.overrideKey]);
+      const overrides = saved[this.overrideKey];
+      if (overrides && typeof overrides === "object" && !Array.isArray(overrides))
+        this.overrides = overrides as Record<string, ModelOverride>;
+      const stored = saved[this.storageKey];
       if (!stored || typeof stored !== "object" || Array.isArray(stored))
         return;
       for (const [id, value] of Object.entries(stored)) {
@@ -233,8 +270,28 @@ export class ModelCatalogue {
       this.credential = { endpoint: settings.baseUrl, key, hash };
     return hash;
   }
-  private decorate(model: ModelInfo, cacheKey: string): ModelInfo {
-    return { ...model, ...this.profiles[`${cacheKey}:${model.id}`] };
+  private overrideId(endpoint: string, model: string): string {
+    return `${endpoint.replace(/\/+$/, "")}\0${model}`;
+  }
+  private decorate(model: ModelInfo, cacheKey: string, endpoint: string): ModelInfo {
+    const decorated: ModelInfo = { ...model, ...this.profiles[`${cacheKey}:${model.id}`] };
+    const override = this.overrides[this.overrideId(endpoint, model.id)];
+    if (!override) return decorated;
+    return {
+      ...decorated,
+      override,
+      endpointVision: decorated.supportsVision,
+      ...(override.images ? { supportsVision: override.images === "on" } : {}),
+      ...(override.reasoning?.length ? { customReasoning: override.reasoning } : {}),
+    };
+  }
+  /** Save, or with null clear, the user's choices for one model on one endpoint. */
+  async setOverride(endpoint: string, model: string, override: ModelOverride | null): Promise<void> {
+    await this.init();
+    const id = this.overrideId(endpoint, model);
+    if (override && (override.images || override.reasoning?.length)) this.overrides[id] = override;
+    else delete this.overrides[id];
+    if (this.storage) await this.storage.set({ [this.overrideKey]: structuredClone(this.overrides) });
   }
   /** Synchronous after list/resolve has registered this endpoint+credential identity. */
   peek(settings: Settings, key: string): ModelInfo | null {
@@ -248,7 +305,7 @@ export class ModelCatalogue {
     const model = this.cache
       .get(credential.hash)
       ?.models.find((model) => model.id === settings.model);
-    return model ? this.decorate(model, credential.hash) : null;
+    return model ? this.decorate(model, credential.hash, settings.baseUrl) : null;
   }
   async list(
     settings: Settings,
@@ -261,7 +318,7 @@ export class ModelCatalogue {
     const cacheKey = await this.key(settings, key);
     const cached = this.cache.get(cacheKey);
     if (!refresh && cached && Date.now() - cached.at < 60000)
-      return cached.models.map((model) => this.decorate(model, cacheKey));
+      return cached.models.map((model) => this.decorate(model, cacheKey, settings.baseUrl));
     const url = completionUrl(settings.baseUrl).replace(
       /\/chat\/completions$/,
       "/models",
@@ -289,11 +346,20 @@ export class ModelCatalogue {
     const entries = Array.isArray(data) ? data : data.data || data.models;
     if (!Array.isArray(entries))
       throw new Error("The endpoint did not return a model catalogue.");
-    const models = entries
-      .filter((entry: any) => entry && typeof entry.id === "string")
-      .map((entry: any) => normalizeModel(entry, url));
-    this.cache.set(cacheKey, { at: Date.now(), models });
-    return models.map((model) => this.decorate(model, cacheKey));
+    const valid = entries.filter((entry: any) => entry && typeof entry.id === "string");
+    let models = valid.map((entry: any) => normalizeModel(entry, url));
+    // A llama.cpp server describes its loaded model in /props; fill only what /v1/models left unsaid.
+    if (valid.some((entry: any) => entry.owned_by === "llamacpp")) {
+      const props = await probeLlamaServer(url, key, signal);
+      if (props)
+        models = models.map((model, index) =>
+          valid[index].owned_by === "llamacpp"
+            ? { ...model, ...Object.fromEntries(Object.entries(props).filter(([field]) => (model as any)[field] === undefined)) }
+            : model,
+        );
+    }
+    this.cache.set(cacheKey, { at: Date.now(), endpoint: settings.baseUrl, models });
+    return models.map((model) => this.decorate(model, cacheKey, settings.baseUrl));
   }
   async resolve(
     settings: Settings,

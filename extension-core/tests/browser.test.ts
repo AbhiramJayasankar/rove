@@ -69,9 +69,9 @@ describe("browser runtime primitives", () => {
   it("isolates catalogue caches and learned Chrome storage profiles by credential hash", async () => {
     const data: Record<string, any> = {};
     const storage = {
-      get: vi.fn(async (key: string) => ({
-        [key]: structuredClone(data[key]),
-      })),
+      get: vi.fn(async (keys: string | string[]) =>
+        Object.fromEntries([keys].flat().map((key) => [key, structuredClone(data[key])])),
+      ),
       set: vi.fn(async (values: Record<string, unknown>) => {
         Object.assign(data, structuredClone(values));
       }),

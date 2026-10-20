@@ -137,7 +137,6 @@ export default function Conversation({
                   </span>
                 </div>
                 <div className="message-meta">
-                  <time dateTime={sentAt} title={new Date(sentAt).toLocaleString()}>{formatTime(sentAt)}</time>
                   <CopyButton text={turn.prompt} />
                   <button
                     type="button"
@@ -152,6 +151,7 @@ export default function Conversation({
                   >
                     <Pencil size={13} />
                   </button>
+                  <time dateTime={sentAt} title={new Date(sentAt).toLocaleString()}>{formatTime(sentAt)}</time>
                 </div>
               </div>
             )}

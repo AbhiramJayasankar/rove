@@ -210,7 +210,10 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
 
 export function getTools(settings: Settings): ToolDefinition[] {
   return BUILTIN_TOOLS.filter(
-    (tool) => !settings.disabledTools.includes(tool.name),
+    (tool) =>
+      !settings.disabledTools.includes(tool.name) &&
+      // A model that never receives images has no use for screenshots.
+      !(tool.name === "browser_screenshot" && settings.vision === false),
   );
 }
 export function isToolRisky(name: string, _settings: Settings): boolean {

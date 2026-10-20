@@ -1268,7 +1268,8 @@ var BUILTIN_TOOLS = [
 ];
 function getTools(settings) {
   return BUILTIN_TOOLS.filter(
-    (tool2) => !settings.disabledTools.includes(tool2.name)
+    (tool2) => !settings.disabledTools.includes(tool2.name) && // A model that never receives images has no use for screenshots.
+    !(tool2.name === "browser_screenshot" && settings.vision === false)
   );
 }
 function isToolRisky(name, _settings) {
@@ -1360,6 +1361,8 @@ var labels = {
   ultra: "Ultra"
 };
 function reasoningOptions(_settings, info) {
+  if (info?.customReasoning?.length)
+    return info.customReasoning.map(({ value, label }) => ({ value, label }));
   if (!info?.reasoningFormat) return [{ value: "default", label: "Automatic" }];
   if (info.reasoningFormat === "thinking" || info.reasoningFormat === "enable_thinking")
     return [
@@ -1447,12 +1450,32 @@ var ModelEndpointError = class extends Error {
     return explicit || (match ? Number(match[1].replaceAll(",", "")) : void 0);
   }
 };
+var RESERVED_REQUEST_FIELDS = ["model", "messages", "tools", "tool_choice", "stream", "stream_options", "max_tokens", "max_completion_tokens"];
+function parseReasoningBody(text) {
+  let value;
+  try {
+    value = JSON.parse(text.trim() || "{}");
+  } catch {
+    throw new Error("Reasoning request fields must be valid JSON.");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("Reasoning request fields must be a JSON object.");
+  const reserved = RESERVED_REQUEST_FIELDS.filter((field) => field in value);
+  if (reserved.length)
+    throw new Error(`Reasoning request fields cannot set ${reserved.join(", ")}.`);
+  return value;
+}
 function generationOptions(settings, model) {
   const result = {
     [model?.outputTokenParameter || "max_tokens"]: settings.maxOutputTokens
   };
   const selectedEffort = settings.reasoningEffort === "default" ? resolvedReasoningEffort(settings, model) : settings.reasoningEffort;
   const effort = model?.reasoningAliases?.[selectedEffort] || selectedEffort;
+  if (model?.customReasoning?.length) {
+    const level = model.customReasoning.find((item) => item.value === selectedEffort);
+    if (level) Object.assign(result, parseReasoningBody(level.body));
+    return result;
+  }
   if (effort !== "default") {
     const format2 = model?.reasoningFormat;
     if (!format2)
@@ -1978,6 +2001,8 @@ function normalizeModel(raw, source) {
     contextWindow: positive(
       raw.context_length,
       raw.context_window,
+      // llama.cpp reports the loaded context as meta.n_ctx.
+      raw.meta?.n_ctx,
       raw.max_model_len,
       raw.top_provider?.context_length,
       raw.limits?.context_length
@@ -2044,14 +2069,38 @@ function effectiveSettings(settings, model) {
     vision: model?.supportsVision !== false
   };
 }
+async function probeLlamaServer(modelsUrl, key, signal) {
+  try {
+    const response = await fetch(modelsUrl.replace(/\/(?:v1\/)?models$/, "/props"), {
+      headers: key ? { Authorization: `Bearer ${key}` } : {},
+      signal: AbortSignal.any([AbortSignal.timeout(4e3), ...signal ? [signal] : []]),
+      redirect: "error"
+    });
+    if (!response.ok) return null;
+    const props = JSON.parse(await readBounded(response, 2e6));
+    if (!props || typeof props !== "object" || !props.build_info) return null;
+    const template = String(props.chat_template || "");
+    const thinks = /enable_thinking|reasoning_effort|<think>|thinking/i.test(template);
+    return {
+      supportsVision: props.modalities?.vision === true,
+      // llama.cpp reads reasoning_effort for every template; "none" turns thinking off.
+      ...thinks ? { reasoningFormat: "reasoning_effort", reasoningEfforts: ["none", "high"], capabilitySources: [modelsUrl.replace(/\/(?:v1\/)?models$/, "/props")] } : {}
+    };
+  } catch {
+    return null;
+  }
+}
 var ModelCatalogue = class {
-  constructor(storage, storageKey = "relay.modelProfiles.v1") {
+  constructor(storage, storageKey = "relay.modelProfiles.v1", overrideKey = "rove.modelOverrides.v1") {
     this.storageKey = storageKey;
+    this.overrideKey = overrideKey;
     this.storage = storage ?? globalThis.chrome?.storage?.local;
   }
   storageKey;
+  overrideKey;
   cache = /* @__PURE__ */ new Map();
   profiles = {};
+  overrides = {};
   initialization;
   pendingWrite = Promise.resolve();
   credential;
@@ -2060,7 +2109,11 @@ var ModelCatalogue = class {
   init() {
     return this.initialization ??= (async () => {
       if (!this.storage) return;
-      const stored = (await this.storage.get(this.storageKey))[this.storageKey];
+      const saved = await this.storage.get([this.storageKey, this.overrideKey]);
+      const overrides = saved[this.overrideKey];
+      if (overrides && typeof overrides === "object" && !Array.isArray(overrides))
+        this.overrides = overrides;
+      const stored = saved[this.storageKey];
       if (!stored || typeof stored !== "object" || Array.isArray(stored))
         return;
       for (const [id, value] of Object.entries(stored)) {
@@ -2090,8 +2143,28 @@ var ModelCatalogue = class {
       this.credential = { endpoint: settings.baseUrl, key, hash: hash2 };
     return hash2;
   }
-  decorate(model, cacheKey) {
-    return { ...model, ...this.profiles[`${cacheKey}:${model.id}`] };
+  overrideId(endpoint, model) {
+    return `${endpoint.replace(/\/+$/, "")}\0${model}`;
+  }
+  decorate(model, cacheKey, endpoint) {
+    const decorated = { ...model, ...this.profiles[`${cacheKey}:${model.id}`] };
+    const override = this.overrides[this.overrideId(endpoint, model.id)];
+    if (!override) return decorated;
+    return {
+      ...decorated,
+      override,
+      endpointVision: decorated.supportsVision,
+      ...override.images ? { supportsVision: override.images === "on" } : {},
+      ...override.reasoning?.length ? { customReasoning: override.reasoning } : {}
+    };
+  }
+  /** Save, or with null clear, the user's choices for one model on one endpoint. */
+  async setOverride(endpoint, model, override) {
+    await this.init();
+    const id = this.overrideId(endpoint, model);
+    if (override && (override.images || override.reasoning?.length)) this.overrides[id] = override;
+    else delete this.overrides[id];
+    if (this.storage) await this.storage.set({ [this.overrideKey]: structuredClone(this.overrides) });
   }
   /** Synchronous after list/resolve has registered this endpoint+credential identity. */
   peek(settings, key) {
@@ -2099,7 +2172,7 @@ var ModelCatalogue = class {
     if (!credential || credential.endpoint !== settings.baseUrl || credential.key !== key)
       return null;
     const model = this.cache.get(credential.hash)?.models.find((model2) => model2.id === settings.model);
-    return model ? this.decorate(model, credential.hash) : null;
+    return model ? this.decorate(model, credential.hash, settings.baseUrl) : null;
   }
   async list(settings, key, refresh = false, signal) {
     await this.init();
@@ -2107,7 +2180,7 @@ var ModelCatalogue = class {
     const cacheKey = await this.key(settings, key);
     const cached2 = this.cache.get(cacheKey);
     if (!refresh && cached2 && Date.now() - cached2.at < 6e4)
-      return cached2.models.map((model) => this.decorate(model, cacheKey));
+      return cached2.models.map((model) => this.decorate(model, cacheKey, settings.baseUrl));
     const url2 = completionUrl(settings.baseUrl).replace(
       /\/chat\/completions$/,
       "/models"
@@ -2135,9 +2208,17 @@ var ModelCatalogue = class {
     const entries = Array.isArray(data) ? data : data.data || data.models;
     if (!Array.isArray(entries))
       throw new Error("The endpoint did not return a model catalogue.");
-    const models = entries.filter((entry) => entry && typeof entry.id === "string").map((entry) => normalizeModel(entry, url2));
-    this.cache.set(cacheKey, { at: Date.now(), models });
-    return models.map((model) => this.decorate(model, cacheKey));
+    const valid = entries.filter((entry) => entry && typeof entry.id === "string");
+    let models = valid.map((entry) => normalizeModel(entry, url2));
+    if (valid.some((entry) => entry.owned_by === "llamacpp")) {
+      const props = await probeLlamaServer(url2, key, signal);
+      if (props)
+        models = models.map(
+          (model, index) => valid[index].owned_by === "llamacpp" ? { ...model, ...Object.fromEntries(Object.entries(props).filter(([field]) => model[field] === void 0)) } : model
+        );
+    }
+    this.cache.set(cacheKey, { at: Date.now(), endpoint: settings.baseUrl, models });
+    return models.map((model) => this.decorate(model, cacheKey, settings.baseUrl));
   }
   async resolve(settings, key, signal) {
     return (await this.list(settings, key, false, signal)).find(
@@ -2753,6 +2834,9 @@ Browser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. 
             message.content = message.content.filter(
               (part) => part.type !== "image_url"
             );
+        const first = messages[0];
+        if (first?.role === "system" && typeof first.content === "string")
+          first.content += "\n\nThis model cannot see images. Rely on browser_snapshot text and element refs; screenshots are not available.";
       }
       this.event(active, "model_metadata", {
         model: modelInfo,
@@ -3075,7 +3159,7 @@ Browser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. 
                   { type: "image_url", image_url: { url: picture } }
                 ]
               });
-            const shouldCapture = actionExecuted && BUILTIN_TOOLS.some((t) => t.name === name) && ![
+            const shouldCapture = actionExecuted && settings.vision && BUILTIN_TOOLS.some((t) => t.name === name) && ![
               "browser_tabs",
               "browser_wait",
               "browser_screenshot",
@@ -24610,6 +24694,32 @@ async function route(path, method, body, settingsLocked = false) {
         key ? String(error62).split(key).join("[redacted]") : String(error62)
       );
     }
+  }
+  if (method === "PUT" && path === "/api/model-override") {
+    const input2 = external_exports.object({
+      baseUrl: external_exports.string().max(2e3),
+      model: external_exports.string().min(1).max(200),
+      override: external_exports.object({
+        images: external_exports.enum(["on", "off"]).optional(),
+        reasoning: external_exports.array(
+          external_exports.object({
+            value: external_exports.string().regex(/^[a-z][a-z0-9_-]{0,39}$/),
+            label: external_exports.string().trim().min(1).max(40),
+            body: external_exports.string().max(4e3).superRefine((text, ctx) => {
+              try {
+                parseReasoningBody(text);
+              } catch (error62) {
+                ctx.addIssue({ code: "custom", message: error62 instanceof Error ? error62.message : String(error62) });
+              }
+            })
+          })
+        ).max(8).refine((levels) => new Set(levels.map((level) => level.value)).size === levels.length, "Reasoning level IDs must be unique.").optional()
+      }).nullable()
+    }).parse(body);
+    await catalogue.setOverride(input2.baseUrl, input2.model, input2.override);
+    const modelInfo = catalogue.peek(store.settings, apiKey);
+    broadcast("model_info", modelInfo);
+    return { modelInfo };
   }
   if (method === "POST" && path === "/api/model/test") {
     const candidate = settingsSchema.parse({

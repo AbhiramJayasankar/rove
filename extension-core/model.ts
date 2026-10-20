@@ -64,6 +64,24 @@ export class ModelEndpointError extends Error {
   }
 }
 
+/** Fields a custom reasoning body may not set: they belong to the agent loop. */
+export const RESERVED_REQUEST_FIELDS = ["model", "messages", "tools", "tool_choice", "stream", "stream_options", "max_tokens", "max_completion_tokens"];
+/** Parse a custom reasoning body: a JSON object that leaves the agent's own fields alone. */
+export function parseReasoningBody(text: string): Record<string, unknown> {
+  let value: unknown;
+  try {
+    value = JSON.parse(text.trim() || "{}");
+  } catch {
+    throw new Error("Reasoning request fields must be valid JSON.");
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw new Error("Reasoning request fields must be a JSON object.");
+  const reserved = RESERVED_REQUEST_FIELDS.filter((field) => field in value);
+  if (reserved.length)
+    throw new Error(`Reasoning request fields cannot set ${reserved.join(", ")}.`);
+  return value as Record<string, unknown>;
+}
+
 export function generationOptions(
   settings: Settings,
   model?: ModelInfo | null,
@@ -76,6 +94,12 @@ export function generationOptions(
       ? resolvedReasoningEffort(settings, model)
       : settings.reasoningEffort;
   const effort = model?.reasoningAliases?.[selectedEffort] || selectedEffort;
+  if (model?.customReasoning?.length) {
+    // The user's own levels replace the endpoint's control: send exactly the chosen level's fields.
+    const level = model.customReasoning.find((item) => item.value === selectedEffort);
+    if (level) Object.assign(result, parseReasoningBody(level.body));
+    return result;
+  }
   if (effort !== "default") {
     const format = model?.reasoningFormat;
     if (!format)

@@ -946,3 +946,113 @@
 .settings-page .settings-heading:has(> .tooltip-trigger) {
   justify-content: flex-start;
 }
+
+/* Model abilities: per-model image and reasoning overrides */
+.settings-page .model-abilities {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 18px;
+  background: var(--field);
+}
+.settings-page .abilities-title {
+  font-family: var(--display, inherit);
+  font-size: 13px;
+  font-weight: 700;
+}
+.settings-page .abilities-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.settings-page .ability-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: var(--panel);
+}
+.settings-page .ability-row > div {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.settings-page .ability-row strong {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+}
+.settings-page .ability-row small {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+.settings-page .level-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.settings-page .level-presets .choice-trigger {
+  width: 100%;
+}
+.settings-page .level-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 14px;
+  background: var(--panel);
+}
+.settings-page .level-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.settings-page .level-head input {
+  flex: 1;
+  min-width: 0;
+  background: var(--field);
+}
+.settings-page .level-body {
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+  background: var(--field);
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.settings-page .level-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.settings-page .level-head input,
+.settings-page .level-body {
+  border: 1.5px solid transparent;
+  border-radius: 12px;
+  padding: 9px 12px;
+  font-size: 13.5px;
+  transition: border-color 140ms;
+}
+.settings-page .level-body {
+  font-size: 12px;
+}
+.settings-page .level-head input:focus-visible,
+.settings-page .level-body:focus-visible {
+  outline: 0;
+  border-color: var(--accent);
+}
+.settings-page .level-presets .choice-trigger {
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 12px;
+  background: var(--panel);
+  justify-content: space-between;
+}

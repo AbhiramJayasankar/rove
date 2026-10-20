@@ -20,7 +20,11 @@ Closes the main gaps against other bring-your-own-model browser agents.
 - Output speed in tokens per second on each answer, on every step in the trace and averaged in the usage popover.
 - Time sent on every message, and a copy button on your messages and Rove's answers.
 
+- Model abilities in Settings → Model: send images always or never for a given model, and replace its reasoning control with your own levels (each level is JSON merged into the request, with presets for llama.cpp, vLLM, DeepSeek, OpenAI and OpenRouter styles).
+- llama.cpp servers are detected: Rove reads the loaded context size, whether the model accepts images and whether it has a thinking switch.
+
 ### Changed
+- A model that gets no images no longer takes automatic screenshots or sees the screenshot tool, and is told to rely on page snapshots.
 - Edit and copy now sit outside the message bubble, under it, and appear on hover or focus.
 - The recording indicator is a time-based waveform in the top-right of the message box, so the box no longer grows while you dictate.
 - Model and reasoning changes are allowed while other tasks run, and apply to the next task. Provider and endpoint changes still wait until no task is running.

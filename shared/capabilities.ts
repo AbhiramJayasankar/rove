@@ -23,6 +23,8 @@ export function reasoningOptions(
   _settings: Settings,
   info?: ModelInfo | null,
 ): { value: string; label: string; description?: string }[] {
+  if (info?.customReasoning?.length)
+    return info.customReasoning.map(({ value, label }) => ({ value, label }));
   if (!info?.reasoningFormat) return [{ value: "default", label: "Automatic" }];
   if (
     info.reasoningFormat === "thinking" ||

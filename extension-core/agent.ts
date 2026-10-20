@@ -552,12 +552,17 @@ export class AgentEngine {
       }
       signal.throwIfAborted();
       settings = effectiveSettings(settings, modelInfo);
-      if (!settings.vision)
+      if (!settings.vision) {
         for (const message of messages)
           if (Array.isArray(message.content))
             message.content = message.content.filter(
               (part: any) => part.type !== "image_url",
             );
+        const first = messages[0];
+        if (first?.role === "system" && typeof first.content === "string")
+          first.content +=
+            "\n\nThis model cannot see images. Rely on browser_snapshot text and element refs; screenshots are not available.";
+      }
       this.event(active, "model_metadata", {
         model: modelInfo,
         contextSource: modelInfo?.contextWindow
@@ -929,6 +934,7 @@ export class AgentEngine {
               });
             const shouldCapture =
               actionExecuted &&
+              settings.vision &&
               BUILTIN_TOOLS.some((t) => t.name === name) &&
               ![
                 "browser_tabs",

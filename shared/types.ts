@@ -1,4 +1,17 @@
 export type JsonSchema = Record<string, unknown>;
+/** One step of a user-defined reasoning control. `body` is a JSON object merged into the request. */
+export interface ReasoningLevel {
+  value: string;
+  label: string;
+  body: string;
+}
+/** Per-model choices that replace or refine what the endpoint advertises. */
+export interface ModelOverride {
+  /** "on" always sends images, "off" never does; absent follows the endpoint. */
+  images?: "on" | "off";
+  /** Levels, lowest first, replacing the endpoint's reasoning control. */
+  reasoning?: ReasoningLevel[];
+}
 export interface ModelInfo {
   providerId?: string;
   providerName?: string;
@@ -10,6 +23,10 @@ export interface ModelInfo {
   maxOutputTokens?: number;
   supportsTools?: boolean;
   supportsVision?: boolean;
+  /** What the endpoint said before any user override was applied. */
+  endpointVision?: boolean;
+  override?: ModelOverride;
+  customReasoning?: ReasoningLevel[];
   inputModalities?: string[];
   outputModalities?: string[];
   supportedParameters?: string[];
