@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Relay bridge</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <span class="mark">r<span>↗</span></span>
+        <div>
+          <h1>Relay</h1>
+          <p>Your browser, connected.</p>
+        </div>
+      </header>
+      <div class="status">
+        <span id="dot"></span><strong id="status">Checking connection…</strong>
+      </div>
+      <p id="detail" class="detail">
+        Connect to the Relay app running on this computer.
+      </p>
+      <form id="form">
+        <label for="server">Local bridge address</label
+        ><input
+          id="server"
+          type="url"
+          value="ws://127.0.0.1:4789"
+          required
+          spellcheck="false"
+        /><label for="token">Pairing token</label
+        ><input
+          id="token"
+          type="password"
+          placeholder="Paste from Relay → Settings"
+          required
+          autocomplete="off"
+          spellcheck="false"
+        /><button id="connect" type="submit">
+          Connect browser <span>↗</span>
+        </button>
+      </form>
+      <button id="disconnect" class="secondary" type="button">
+        Disconnect and release tabs
+      </button>
+      <p class="footnote">
+        Relay uses Chrome’s debugger permission to read and operate tabs.
+        Disconnect releases every attached tab.
+      </p>
+      <p id="error" role="alert"></p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,142 @@
+:root {
+  font-family: Arial, sans-serif;
+  color: #eeeae1;
+  background: #161b1b;
+  font-size: 13px;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+  width: 350px;
+}
+main {
+  padding: 24px;
+}
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 25px;
+}
+.mark {
+  font-family: Georgia, serif;
+  font-size: 42px;
+  width: 49px;
+  height: 49px;
+  border: 1px solid #55796d;
+  border-radius: 13px;
+  line-height: 39px;
+  text-align: center;
+  color: #bee2bf;
+  position: relative;
+}
+.mark span {
+  font: 16px Arial;
+  position: absolute;
+  right: 6px;
+  top: 5px;
+}
+h1 {
+  font:
+    25px Georgia,
+    serif;
+  margin: 0 0 4px;
+}
+header p {
+  margin: 0;
+  color: #a5aaa3;
+  font-size: 12px;
+}
+.status {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px;
+  background: #222a28;
+  border: 1px solid #38433e;
+  border-radius: 9px;
+}
+#dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #a9afa5;
+}
+#dot.connected {
+  background: #b8deb4;
+  box-shadow: 0 0 10px #b8deb433;
+}
+.detail {
+  line-height: 1.5;
+  color: #b9bdb5;
+  min-height: 37px;
+  margin: 12px 0 20px;
+}
+label {
+  display: block;
+  font-size: 11px;
+  color: #b7bdb3;
+  margin: 15px 0 7px;
+}
+input {
+  font: 12px monospace;
+  width: 100%;
+  padding: 11px 12px;
+  border-radius: 7px;
+  border: 1px solid #45504a;
+  background: #1c2321;
+  color: #f2f0e8;
+  outline: none;
+}
+input:focus {
+  border-color: #aaccab;
+  box-shadow: 0 0 0 2px #aaccab18;
+}
+button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 7px;
+  padding: 12px;
+  background: #c0ddb7;
+  color: #1d2b20;
+  font-weight: 600;
+  margin-top: 18px;
+  text-align: left;
+  cursor: pointer;
+}
+button span {
+  float: right;
+}
+.secondary {
+  background: transparent;
+  border: 1px solid #465149;
+  color: #bec5b9;
+  text-align: center;
+  margin-top: 9px;
+  font-size: 11px;
+}
+button:hover {
+  filter: brightness(1.08);
+}
+button:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+.footnote {
+  font-size: 10px;
+  line-height: 1.6;
+  color: #8e9a8e;
+  margin: 17px 0 0;
+}
+#error {
+  color: #eab39e;
+  line-height: 1.4;
+  font-size: 11px;
+  margin-bottom: 0;
+}
+#error:empty {
+  display: none;
+}
