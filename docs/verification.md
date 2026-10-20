@@ -1,31 +1,56 @@
-# V1 verification
+# Verification
 
-Verified locally on Windows on **2026-10-20**, with Node.js 24 and Playwright Chromium 156. Chrome 125+ is the implementation's minimum; the integration test covers the installed test browser version.
+Relay v2 is tested as a self-contained unpacked Chrome extension. Node runs build/test tooling and deterministic fixture servers; production browser control, model requests and persistence run in the extension worker.
 
-- `npm run build`: TypeScript checking and production Vite build pass.
-- `npm test`: **37 tests pass**, covering the agent/model loop, approval denial and cancellation, live auto-approval changes, questions/replies, selected-tab routing, vision sequencing, schema validation, provider compatibility/errors, key redaction, long snapshot compaction, array tool results, historical configuration, and persistence/restart recovery including transient Windows file locks.
-- `npm run test:e2e`: **2 integration tests pass**, exercising the actual MV3 extension, real browser page state, loopback backend, deterministic OpenAI-compatible model endpoint, and React interface.
-- `npm audit`: no known vulnerabilities reported in the installed dependency tree at verification time.
-- Production `npm start` smoke check: built interface loads successfully in Chromium, with no page errors, an empty task history, and no configured endpoint key or model. The local app is left running at port 4789 for handoff.
+## Commands
 
-Real browser operations checked: pairing, native typing and click, selecting options, same-origin frame input, cross-site frame native click with site isolation enabled, screenshots, native hover and drag, JavaScript confirmation dialog recovery, download listing, and long-page text/element pagination. The model loop actually fills, submits and verifies a greeting form through browser tools, pausing for approvals. The UI starts a question task and resumes it after an answer. Tests also verify request/result traces, automatic screenshot rendering, mobile overflow, cross-origin request rejection, unpaired socket rejection, secret omission from settings, and rejection of manual snapshots during a run so approved refs remain valid.
+```sh
+npm install
+npm run build
+npm test
+npx playwright install chromium
+npm run test:e2e
+```
 
-Desktop and mobile layouts were visually inspected. Screenshots in `docs/screenshots/` show real test runs and fixture pages, with the test provider explicitly identified.
+`npm run build` checks TypeScript and generates the loadable `extension/` directory. `npm test` covers the browser core. `npm run test:e2e` loads that generated directory into an isolated persistent Chromium profile. Use the command's exit status and reports as the current result; counts change as cases are added.
 
-The automated suite uses an isolated browser and deterministic provider. Separately, the user's regular Chrome was paired and a real Token Harbor `mimo-v2.6-flash:free` run opened Amazon.in and verified its URL/title. The key is held in server memory and excluded from source. The redesign's UI test verifies that enabling auto-approval while paused resumes the task, prevents later approval pauses, persists after reload, and keeps the decision panel visible independently of activity scrolling. Desktop, mobile task/browser, model, instructions, and tools views were visually inspected.
+## Coverage
 
-The source repository includes CI commands for Linux. The CI workflow has been authored but was not executed on GitHub in this session. No repository was published or pushed remotely.
+| Suite                                  | Checks                                                                                                                                                                           |
+| -------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `extension-core/tests/agent.test.ts`   | Multi-step tool execution, approval changes/denial, cancellation, user questions, tab routing, screenshots, redaction, structured snapshots, array results and run configuration |
+| `extension-core/tests/model.test.ts`   | Compatible endpoints, keys/errors, streaming reasoning/tool assembly, incomplete streams, generation parameters and function-call connection tests                               |
+| `extension-core/tests/controls.test.ts` | Endpoint effort enums, model maxima, exact documented fallbacks, protocol selection, legacy-setting migration |
+| `extension-core/tests/conversation.test.ts` | Saved chat reconstruction, retained reasoning and images, reused tool IDs, interrupted batches, same-ID follow-ups and monotonic steps |
+| `extension-core/tests/usage.test.ts` | Per-chat totals across models, provider costs, pricing units, caches, unknown/interrupted usage and current context estimates |
+| `extension-core/tests/context.test.ts` | Independent image budgets, intact tool groups, retained reasoning and bounded context                                                                                            |
+| `extension-core/tests/browser.test.ts` | CSP-safe interpreted schemas, Unicode byte limits, hashed Chrome-storage profiles and durable pre-dispatch checkpoint failures                                                   |
+| `extension-core/tests/browser-session.test.ts` | Stale attachments/dialogs, owned-client recovery, isolated iframe loss, intentional close, cancelled command deadlines and no mutation replay |
+| `tests/extension/native.spec.ts`       | Actual worker/model/browser loop, streaming Stop, approvals/questions, worker restart recovery, lost debugger detection and fresh-task reconnection without replay |
+| `tests/extension/tools.spec.ts`        | Cross-origin frames, refs/pagination, native pointer/keyboard operations, dialogs, navigation/history, screenshots and protected target rejection                                |
+| `tests/extension/ui.spec.ts`           | Unsaved connection discovery, composer controls, custom keyboard menus, trace, history, light/dark persistence, 320/360/400/1280px layouts, full-browser credential persistence, key clearing, anchored menus/ring, chronological follow-ups and settings-return draft preservation                    |
 
-The context/observability update adds regression coverage for large image payloads retaining earlier steps, independent image retention, atomic tool-group eviction, untruncated long reasoning, fragmented SSE/tool-call assembly, incomplete-stream rejection, and provider-appropriate reasoning parameters. The real browser suite additionally verifies catalogue search/free filtering/model selection inside chat, reasoning selection, full reasoning/tool result expansion, snapshot query/viewport filtering, coordinate rejection, and cancellation of an upstream live stream before any partial tool call executes.
+The browser-core suite has been run successfully during implementation. The real extension suites use local pages and an OpenAI-compatible fixture, allowing reproducible checks without paid credentials. They exercise native browser effects and inspect the resulting page rather than substituting a fake browser transport.
 
-The user's Token Harbor catalogue was fetched successfully (69 entries, four free-tagged models). A real `mimo-v2.6-flash:free` connection test with streaming and `thinking.type: enabled` verified valid function calling. The existing Chrome extension was reloaded for viewport metadata and filtering.
+## Manual handoff check
 
-A live read-only snapshot of a background Amazon tab timed out after extension reload. This prompted a per-CDP-command deadline and debugger detach, preventing a suspended renderer from holding the serial extension queue indefinitely; no timed-out action is replayed. The automated browser suite covers active pages and isolated frames, not every suspended-tab state.
+1. Load `extension/` using Chrome's **Load unpacked** control. Open Relay from its toolbar action and open Options for the full workbench.
+2. Enter your endpoint/key, choose a tool-capable model, test it and save. Try a small task on an ordinary page.
+3. Inspect the tool arguments/results, model request, response and screenshot. Check Stop and a task requiring a user answer.
+4. Export a run and inspect its settings/history. The model API key must be absent. Check the settings contain only Model, Instructions and Tools.
+5. Confirm browser/extension restart retains history and credentials, and marks an interrupted task failed without replaying it. Verify Clear key removes the credential after saving.
 
-The final command-deadline source passed the browser suite, but its last reload in the user's regular Chrome was blocked when Computer Use could not establish the current browser URL. Reload the existing Relay extension once to activate that final deadline change. The preceding viewport/filtering update was already reloaded successfully.
+Chrome 125 is the minimum declared version; an automated run proves behavior on its installed Chromium version, not every supported release or website. Deterministic model fixtures prove protocol/execution behavior rather than the task quality of an arbitrary provider. Complex pages, suspended tabs, transformed frames, Chrome policy, CAPTCHA and native dialogs still need task-specific checks. Source rebuilds must be followed by extension reload before checking installed behavior.
+## Voice input verification
 
-The metadata/admission fix replaces model-name guesses with endpoint metadata and adds bounded context-error recovery. Regression coverage includes unknown capability handling, pricing-derived free models, nested provider limits, dynamic output-token fields, cache/learned-limit isolation and persistence, structured context errors, retries without duplicate browser actions, and retaining text history while reducing older screenshots first.
+- Current verification: typecheck, 85 unit tests, production build, and all 28 unpacked-extension browser tests. Light/dark settings, provider configuration/model lists, and a 320 px recording composer were visually inspected. Real microphone/service accuracy and live provider credentials remain manual checks.
+- Run `npm run typecheck`, `npm test`, `npm run build`, and `npm run test:e2e`.
+- Unit coverage: multipart file/model/JSON response format, separate bearer credential, endpoint validation, no redirects/retries/fallbacks, 25 MB/empty audio/60-second OpenRouter guards, empty transcripts, network/timeout/cancellation and HTTP 401/403/429/413/408/504 errors. Provider error bodies are not echoed into UI or history.
+- `tests/extension/voice.spec.ts` uses a mocked recognizer and microphone in an isolated unpacked extension: click-to-start/stop, live insertion at cursor, no auto-send/history, Escape rollback, denied-permission inline error and narrow-panel width. No live audio leaves the test browser.
+- Manual real-device check: reload extension and reopen panel; choose Web Speech, click the mic, Allow if first-time permission setup appears, then speak inside Relay. Check the live waveform/interim text and stop from the composer; repeat and confirm no new window opens. Repeat with selected text, Escape, switching chats/settings, and a running agent. Check Enter/Shift+Enter after completion, focus, keyboard navigation, light/dark and reduced motion. Deny permission and verify recovery instructions; test a missing/busy mic. Chromium test builds may not include Google’s recognition service, so mocked tests cannot establish real speech accuracy or service availability.
+- API check with your own key: save independent voice settings, dictate, stop, inspect the one multipart request to your endpoint and review the returned draft without sending. Verify the model key is untouched, keys/audio are absent from run exports, cancellation halts capture/upload, and no request reaches a different backend. Test OpenRouter with a paid transcription model and short clip. Quotas and provider credentials are not exercised by automated tests.
 
-A real failed DeepSeek request advertised 1,048,576 context tokens in `/v1/models` but rejected a request whose previous successful usage was 45,516 input tokens. Replaying its text history with only the latest screenshot returned HTTP 200 and stream data; no returned tool was executed. This is evidence for image-first recovery, not proof of the provider's hidden internal limit. The endpoint's per-model retrieval returned 404 despite listing the model, so missing capabilities remain explicitly unadvertised rather than fabricated.
+Implementation: recognition, recording and a Web Audio analyser waveform run directly in the composer. A permission-only page (`index.html?voice=<random session>`) is opened when microphone permission is still at prompt; it grants the extension origin access and closes. Its random extension-origin BroadcastChannel carries only the permission result. No recording windows open once permission is granted. Escape, pagehide and chat/view cleanup stop capture and release audio tracks/AudioContext. The dedicated voice settings/key remain outside agent settings and the run journal; manifest/CSP remain unchanged. Browser coverage includes inline capture without new windows, control order, waveform visibility, and first-time-only permission setup.
+## Multiple provider verification
 
-The updated local backend was restarted with automatic metadata enabled. Its authenticated model catalogue resolved the selected DeepSeek label, context and tool support, and a real connection/tool-calling test returned HTTP 200.
+Provider-store unit tests cover migration of existing endpoint/key, independent credentials and remembered models across reloads, failed-write rollback, and removing one credential while retaining another. Browser tests combine two catalogues with identical model IDs, select models through the UI, check actual endpoint/bearer routing on consecutive messages, and verify keys are absent from state and run exports. They also exercise partial catalogue failures, adding the OpenRouter preset through Settings, saving its own key, persistence and narrow layouts. Fixture servers replace external providers; no paid credentials are required.

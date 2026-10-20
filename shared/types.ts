@@ -1,5 +1,7 @@
 export type JsonSchema = Record<string, unknown>;
 export interface ModelInfo {
+  providerId?: string;
+  providerName?: string;
   id: string;
   name: string;
   owner?: string;
@@ -12,8 +14,14 @@ export interface ModelInfo {
   outputModalities?: string[];
   supportedParameters?: string[];
   reasoningFormat?:
-    "reasoning_effort" | "thinking" | "enable_thinking" | "reasoning";
+    | "reasoning_effort"
+    | "thinking"
+    | "enable_thinking"
+    | "reasoning";
   reasoningEfforts?: string[];
+  reasoningAliases?: Record<string, string>;
+  reasoningToggle?: boolean;
+  capabilitySources?: string[];
   outputTokenParameter?: "max_tokens" | "max_completion_tokens";
   free: boolean;
   pricing?: Record<string, unknown>;
@@ -23,38 +31,22 @@ export interface ModelInfo {
   workingInputBudget?: number;
   workingMaxImages?: number;
 }
-export interface CustomTool {
-  name: string;
-  description: string;
-  parameters: JsonSchema;
-  enabled: boolean;
-  approval: boolean;
-  handler:
-    | { type: "javascript"; code: string }
-    | {
-        type: "http";
-        url: string;
-        method: "GET" | "POST";
-        headers?: Record<string, string>;
-      };
-}
 export interface Settings {
   baseUrl: string;
   model: string;
   systemPrompt: string;
   maxSteps: number;
   contextWindow: number;
-  contextMode: "auto" | "manual";
+  contextMode: "auto";
   maxOutputTokens: number;
   maxImages: number;
   reasoningEffort: string;
-  reasoningFormat: "auto" | "reasoning_effort" | "thinking";
+  reasoningFormat: "auto";
   stream: boolean;
   modelTimeoutSeconds: number;
   approvalMode: "always" | "risky" | "never";
   vision: boolean;
   disabledTools: string[];
-  customTools: CustomTool[];
 }
 export interface TabInfo {
   id: number;
@@ -74,7 +66,11 @@ export interface ToolDefinition {
   risk: "read" | "write" | "danger";
 }
 export type RunStatus =
-  "running" | "awaiting_approval" | "completed" | "failed" | "stopped";
+  | "running"
+  | "awaiting_approval"
+  | "completed"
+  | "failed"
+  | "stopped";
 export interface RunEvent {
   id: number;
   time: string;
@@ -82,6 +78,7 @@ export interface RunEvent {
   data: Record<string, any>;
 }
 export interface RunRecord {
+  revision?: number;
   id: string;
   prompt: string;
   status: RunStatus;
@@ -95,6 +92,8 @@ export interface Approval {
   args: Record<string, unknown>;
 }
 export interface AppState {
+  providers: { id: string; name: string; baseUrl: string; model: string; hasApiKey: boolean }[];
+  activeProviderId: string;
   modelInfo?: ModelInfo | null;
   settings: Settings;
   hasApiKey: boolean;

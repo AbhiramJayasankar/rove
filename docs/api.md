@@ -1,50 +1,71 @@
-# Local API
+# Extension messaging API
 
-Default base: `http://127.0.0.1:4789`. Browser clients must use this app's Origin. Writes require `Content-Type: application/json`. Errors return `{ "error": "Actionable message" }`. Shared shapes are in `shared/types.ts`.
+The `/api/...` names identify structured extension operations. They are not HTTP routes: Relay v2 exposes no localhost server. Only Relay's own extension pages may invoke them. Shared shapes are in `shared/types.ts`; dispatch and validation live in `extension-src/runtime.ts`.
 
-| Method | Path                     | Behavior                                                                                                                                                               |
-| ------ | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/health`            | Version and readiness                                                                                                                                                  |
-| GET    | `/api/state`             | Settings, key-present flag, bridge/tabs, runs, active run, built-in tool catalog                                                                                       |
-| GET    | `/api/events`            | Server-sent event stream, initial full state and incremental updates                                                                                                   |
-| PUT    | `/api/settings`          | Full `Settings` plus optional `apiKey`; omit key to retain, empty string to clear. Reject while active.                                                                |
-| PUT    | `/api/approval-mode`     | `{mode}` updates current and future runs. `never` resumes a pending tool approval; `risky` reviews interactions; `always` reviews every tool. Questions remain paused. |
-| POST   | `/api/model/test`        | Optional connection fields, verifies harmless function call; does not change settings                                                                                  |
-| GET    | `/api/pairing`           | Secret pairing token, local URL and extension folder                                                                                                                   |
-| POST   | `/api/pairing/rotate`    | Rotate token and disconnect bridge; reject while active                                                                                                                |
-| GET    | `/api/tabs`              | Refresh Chrome tab list                                                                                                                                                |
-| POST   | `/api/browser`           | `{action, args}` manual built-in command; while active, only tabs/screenshot allowed                                                                                   |
-| POST   | `/api/runs`              | `{prompt, tabId?}` starts a task and returns its record immediately                                                                                                    |
-| GET    | `/api/runs/:id`          | Full persisted record and events                                                                                                                                       |
-| GET    | `/api/runs/:id/export`   | JSON attachment                                                                                                                                                        |
-| POST   | `/api/runs/:id/stop`     | Abort active run, prevent further dispatch                                                                                                                             |
-| POST   | `/api/runs/:id/approval` | `{approvalId, approved}` resolves that specific pending decision                                                                                                       |
-| POST   | `/api/runs/:id/reply`    | `{message}` resumes a pending user question                                                                                                                            |
-
-`state`, `bridge`, `run`, `event`, `run_status`, `settings` and `browser_notice` are named SSE events. `event` is `{runId,event}` with monotonically increasing event IDs within each run. `run_status` is `{id,status,updatedAt}`. Chrome notices include debugger detachment and JavaScript dialogs. On reconnect the stream sends a fresh complete `state` so missed events are recovered.
-
-Agent-friendly example, after pairing and model setup:
-
-```sh
-curl -H "Content-Type: application/json" -d '{"prompt":"Read the current page title and summarize it","tabId":123}' http://127.0.0.1:4789/api/runs
+```ts
+const response = await chrome.runtime.sendMessage({
+  type: "relay-api",
+  path: "/api/runs",
+  method: "POST",
+  body: { prompt: "Read the current page title", tabId: 123 },
+});
+if (!response.ok) throw new Error(response.error);
+const run = response.data;
 ```
 
-The API is intentionally local. A native local process can access it as the current OS user; web Origins are constrained. Do not forward this port or deploy it as a public service without adding an appropriate authentication and browser-isolation design.
+Success is `{ok:true,data}`; failure is `{ok:false,error}`. `method` defaults to `GET`, and omitted body becomes `{}`. This small-message interface is useful for integration clients. These operations are unavailable to websites, content scripts or other extensions.
 
-## Model catalogue and run options
+The workbench uses a trusted `relay-rpc` runtime port for the same operations. It serializes `{path,method,body?}` into `{type:"chunk",data:string}` messages of at most 1,000,000 characters, followed by `{type:"end"}`. The worker responds with the plain JSON result using the same chunks/end framing, or `{type:"error",error:string}`. This preserves complete large histories across Chrome's per-message size limit. A disconnected request is never automatically retried: its outcome may be unknown. `src/transport.ts` owns framing, cleanup and error propagation.
 
-`GET /api/models` retrieves the configured endpoint's `/models` catalogue through the backend, with its memory-held key. Entries contain `id`, `name`, optional `contextWindow`, and a pricing-derived `free` flag (falling back to an explicit free ID tag when pricing is absent). Results are cached for one minute per endpoint/key. The picker defaults to free-tagged IDs; it does not infer pricing from an unknown provider. Manual ID entry remains available when listing is unsupported.
+| Method | Operation                  | Behavior                                                                                         |
+| ------ | -------------------------- | ------------------------------------------------------------------------------------------------ |
+| GET    | `/api/health`              | Version and extension runtime identity                                                           |
+| GET    | `/api/state`               | Settings, key-present flag, model metadata, tabs, run summaries, active run and tool catalogue   |
+| GET    | `/api/tabs`                | Refresh Chrome tab inventory                                                                     |
+| GET | `/api/settings` | Normalized saved settings, key-present flag, and selected model metadata; never the key |
+| PUT    | `/api/settings`            | Full settings, optional `apiKey`; omit key to retain, empty string to clear; reject while active |
+| PUT    | `/api/approval-mode`       | `{mode}`; persists and updates live approval behavior                                            |
+| PUT    | `/api/run-options`         | Model and reasoning effort selection only; active run keeps its configuration snapshot |
+| GET    | `/api/models`              | Endpoint catalogue and selected metadata; `?refresh` bypasses catalogue cache                    |
+| POST | `/api/models` | Candidate `{baseUrl,apiKey?,refresh?}` catalogue lookup before saving; no settings or key changes and no saved-model broadcasts |
+| POST   | `/api/model/test`          | Candidate settings/key; verify a harmless function call without saving settings                  |
+| POST   | `/api/browser`             | `{action,args}` manual built-in tool; during a run only tabs/screenshots are allowed             |
+| POST   | `/api/runs`                | `{prompt,tabId?}`; prepare a controllable tab and start one task                                 |
+| GET    | `/api/runs/:id`            | Full run and persisted events                                                                    |
+| GET    | `/api/runs/:id/export`     | Full run object; the UI creates the download                                                     |
+| POST   | `/api/runs/:id/messages` | `{message,tabId?,editMessageId?}`; append a follow-up, or replace the specified user-message event and all later history. ID `0` edits the first prompt. `tabId:null` starts in a new tab. Earlier browser effects are not undone. |
+| POST   | `/api/runs/:id/stop`       | Stop scheduling and abort waits/requests; no rollback                                            |
+| POST   | `/api/runs/:id/approval`   | `{approvalId,approved}` resolves a specific pending decision                                     |
+| POST   | `/api/runs/:id/reply`      | `{message}` answers a pending user question                                                      |
 
-`PUT /api/run-options` accepts optional `model`, `reasoningEffort` and `contextWindow` fields. Changes persist for the next task, including when a different run is active. They do not mutate that run's captured configuration.
+Model API keys persist in a dedicated trusted `chrome.storage.local` entry, separate from settings and history. Omit `apiKey` when saving settings to retain the saved key; provide an empty string to clear it. A one-time migration retains an existing session key when no persistent entry exists and removes the legacy session entry. Responses and logs never include the credential.
 
-Settings also accept `contextWindow`, `maxOutputTokens`, `maxImages`, `reasoningEffort` (provider-advertised values, or `default`), `reasoningFormat` (`auto`, `reasoning_effort`, `thinking`), `stream`, and `modelTimeoutSeconds`. Auto format uses advertised supported parameters and reasoning levels. It does not infer capabilities from model names. Non-default reasoning settings require endpoint support.
+Candidate `POST /api/models` uses the supplied key, including an explicitly empty key for a keyless endpoint; omission uses the private saved key. Endpoint validation rejects non-HTTP(S) addresses and embedded credentials. It does not save candidate connection details or broadcast them as the active model. Settings always normalize automatic context and reasoning format, streaming and vision; removed legacy flags/definitions are discarded. Full history import/backup and manual learned-profile reset operations are no longer exposed; individual run export remains available.
 
-`context_usage` journals the estimated prompt size, configured budget, output reserve, and compaction counts. `model_delta` carries incremental returned content/reasoning; `model_response` contains the completed message, usage, elapsed time and provider request ID when available. Cancellation keeps already-delivered deltas, aborts the upstream stream, and prevents additional dispatch.
+## Live events
 
-## Extension transport
+Open a trusted runtime port rather than an EventSource:
 
-The extension opens `ws://127.0.0.1:4789/bridge?token=...`, announces `{type:"hello",browser:"Chrome",tabs:[...]}`, and exchanges a ping every 20 seconds. Backend commands are `{type:"command",id,action,args}`. Replies are `{type:"result",id,result}` or `{type:"result",id,error}`. Tabs and browser notices are pushed separately. Command IDs are UUID strings; a 45-second backend timeout rejects unresolved calls without retrying them. Transport failures never silently replay commands.
+```ts
+const port = chrome.runtime.connect({ name: "relay-events" });
+port.onMessage.addListener(({ type, data }) => {
+  // Apply state, run, event and status updates by run/event ID.
+});
+```
 
-`GET /api/models` also returns the selected `modelInfo`, including full raw `metadata`, supported parameters/modalities/tools, context and output limits, and any separately learned `workingInputBudget` / `workingMaxImages`. SSE `model_info` updates refresh these fields. `contextMode` is `auto` by default; `manual` enables a configured override, still capped by known provider limits. Reasoning effort accepts advertised strings, including future levels, rather than a fixed UI-only subset.
+Messages are `{type,data}`. The worker sends fresh `state` on connection, followed by `bridge`, `run`, `event`, `run_status`, `settings`, `model_info` and `browser_notice` updates. `bridge` is the retained browser-status shape, not a network connection. `event` contains `{runId,event}` with increasing IDs within a run. `run_status` contains `{id,status,updatedAt}`. Browser notices include debugger detachments and dialogs.
 
-`POST /api/model-profile/reset` clears the selected model's learned working limits for this endpoint and credential. Context recovery journals `model_error` and `context_recovery` alongside separately numbered request attempts; an admission retry does not execute or replay a browser tool.
+The UI reconnects ports and retrieves full runs when required. It merges events by ID so an older request response cannot erase newer live events. Terminal persistence and history recovery belong to the worker, independent of an open panel.
+
+Tool names, schemas and browser behavior are documented in [browser tools](browser-tools.md). Privileged messages are checked against both the extension ID and extension-page URL; the runtime registers no external or page-message forwarding surface. See [architecture](architecture.md) for checkpoints, storage and restart behavior.
+## Multiple provider catalogues
+
+State/settings responses include `providers` (id, name, baseUrl, model, hasApiKey) and `activeProviderId`. All saved profiles participate in discovery; active identifies the model/credential used for the next task, not an enable/disable flag.
+
+- `POST /api/providers` with `{name, baseUrl}` adds a profile and selects it for configuration. Existing profiles remain available.
+- `PUT /api/providers` with `{id, model?}` selects a saved connection. `DELETE` with `{id}` removes it; one profile must remain. These operations require an idle engine.
+- `PUT /api/settings` additionally accepts `providerName` and `providerId`; the latter rejects saves from a stale configuration window. The existing `apiKey` input updates only the selected profile. Settings, selected profile and active credential commit together.
+- `GET /api/models` combines saved catalogues; `POST` still accepts unsaved connection discovery parameters and overrides only the configured profile while combining the others. Entries retain original model IDs and add `providerId`/`providerName`. Duplicate IDs across providers stay distinct. Partial discovery failures return `warnings` without hiding successful catalogues.
+- `PUT /api/run-options` accepts `providerId` with `model`; model selection routes to that profile's endpoint/key. Already-running work retains its original settings/key snapshot. No automatic provider fallback occurs.
+
+Provider credentials live only in trusted storage (`modelProviderKeys`, plus the active `modelApiKey` mirror) and are never returned by these APIs or included in journal/export settings. Existing single-provider settings migrate automatically.

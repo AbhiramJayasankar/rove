@@ -2,104 +2,85 @@
 
 Your own prompt-driven Chrome agent. Bring an OpenAI-compatible endpoint, choose a model, write a task, and inspect every request and browser action.
 
-Relay runs on your computer. A small Chrome extension connects your existing tabs and signed-in sessions to the local backend. The interface uses Anthropic's frontend-design guidance; the runtime has no dependency on Anthropic or a hosted browser service.
+Relay v2 runs entirely inside a Chrome extension: the agent, browser controller, interface and history. Once built and installed, it needs no Node process, local server or pairing connection. Node.js is used only to build and test the source.
 
-![Relay workbench running a real browser integration task](docs/screenshots/workbench.png)
+## Install
 
-## Start
-
-Requires Node.js 22 or newer and Chrome 125 or newer. On Windows, double-click **start-relay.cmd**, or run:
+Requires Chrome 125 or newer. To build from source, install Node.js 22 or newer and run:
 
 ```sh
 npm install
 npm run build
-npm start
 ```
 
-Open [Relay on this computer](http://127.0.0.1:4789).
+1. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the generated `extension` folder.
+2. Pin Relay and click its toolbar icon to open the side panel. Use the extension's **Options** page for the full workbench in a tab.
+3. In **Model settings → Language model**, enter an OpenAI-compatible base URL and a key if required. Choose a model from the searchable endpoint catalogue and save the settings.
+4. Open a normal webpage, select its tab in Relay, and enter a task. The activity, execution details and trace show what happens. Use **Stop** or Escape to prevent further dispatch.
 
-1. Open **Chrome connection** in Relay. In your regular Chrome, open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select this repository's `extension` folder.
-2. Open the Relay extension from Chrome's toolbar. Copy the local server address and pairing token from Relay, then click **Connect browser**. The token authorizes this local server to control this Chrome profile.
-3. In **Model settings**, enter your endpoint base URL and exact model ID. Enter a key if the provider requires one. Click **Test connection**, then **Save changes**. The connection test verifies function calling, not just a text response.
-4. Open a normal webpage in Chrome. In the workbench, select the tab, enter a task, and click **Run task**. Approve actions or answer questions inline. **Stop task** prevents further dispatch; an action already delivered to Chrome may finish.
+After source changes, rebuild and reload Relay on `chrome://extensions`. Keep the generated folder in place while the unpacked extension is installed. Clicking the toolbar icon uses Chrome's [Side Panel API](https://developer.chrome.com/docs/extensions/reference/api/sidePanel).
 
-The extension installation is a one-time Chrome action. Relay cannot silently install itself into your regular profile. Keep the local server running while using the extension.
+## What you control
 
-## What v1 includes
+- Your existing Chrome tabs and signed-in sessions: navigation/history, frame-aware snapshots, native pointer/keyboard input, forms/selects, hover/drag, screenshots, dialogs, download metadata and optional file uploads.
+- Editable instructions, browser tool enablement, model and reasoning selection, and approvals directly in the composer.
+- Streaming responses and provider-returned reasoning, model requests/responses, full tool arguments/results, screenshots, approvals, questions, saved history and individual run export.
 
-- Existing Chrome sessions, multiple tabs, navigation and history, snapshots with element refs and frame IDs, native mouse and keyboard input, forms and selects, screenshots, dialogs, and file upload controls.
-- Automatic screenshot observations during runs. Vision input is optional; a text-only model can use page snapshots.
-- Editable agent instructions, per-tool enablement, configurable step limits and approval modes, and custom tools defined by JSON Schema plus a JavaScript or HTTP handler.
-- A live event timeline, full model request/response inspection, tool arguments/results/errors, approvals, questions and replies, persistent run history, and JSON export.
-- A local HTTP API, typed contracts, an authenticated extension bridge, durable event journals, and clear module boundaries.
+**Auto-approve** is on by default. Turn it off in the composer to review interactions. Changes apply to the current run; enabling auto-approval releases a pending approval. Questions still wait for your answer. Generic JavaScript, raw CDP and file uploads begin disabled. Prompt-injection instructions guide the model, while approval settings determine which enabled actions require review.
 
-See [browser tools](docs/browser-tools.md), [architecture](docs/architecture.md), [API](docs/api.md), the [researched technology comparison](docs/research.md), and [verification details](docs/verification.md).
+See [architecture](docs/architecture.md), [extension messaging](docs/api.md), [browser tools](docs/browser-tools.md) and [verification](docs/verification.md). Earlier technology comparisons are recorded in [research](docs/research.md).
 
-## Models and endpoints
+The interface is designed for Chrome's side panel: a single conversation column, current-tab selector, optional screenshot preview and searchable history. Reply in the composer to continue the selected chat; New task starts a separate chat. The compact control row contains model, reasoning, approval mode, a context ring and Send. Model search and usage details open beside their buttons. Settings has an explicit Back to chat action and retains your draft. Syne and Commissioner fonts ship inside the extension with their licenses. Enter sends a task; Shift+Enter adds a line. See the [interface decisions](docs/extension-design.md).
 
-Relay uses **Chat Completions function calling** for provider compatibility. Use a base URL such as `https://api.openai.com/v1`, your gateway's compatible base URL, or a local server's URL. A complete URL ending in `/chat/completions` also works. No specific provider or model is hardcoded. Keys are optional for local endpoints; the model must support tool calls. Enable vision only if it also accepts image inputs. Provider-specific reasoning fields are preserved when returned.
+## Models and context
 
-API keys entered in the UI are held in server memory and are not written into settings, exposed by the settings API, or stored in browser localStorage. Re-enter after a restart, or set `RELAY_API_KEY` in the environment before launching. Model traffic goes from your local backend to your selected endpoint. Page observations and screenshots included in model context are consequently sent to that provider.
+Relay uses OpenAI-compatible **Chat Completions function calling**. Set a base URL such as `https://api.openai.com/v1`, a compatible gateway, or a local model server. A full URL ending in `/chat/completions` also works. Local endpoints may omit the key. The model must support tools. Streaming is always requested; screenshots are sent automatically unless the endpoint explicitly reports a text-only model.
 
-Settings and run journals are stored in ignored `.relay/`. Run logs can contain page content and private information from your tasks. HTTP tool headers are user-authored configuration and are stored locally with those definitions; do not commit that directory or share exports without reviewing them.
+The picker uses endpoint labels, prices, modalities, supported parameters and limits. Endpoint metadata takes precedence. Exact provider/model fallbacks from primary documentation fill missing capabilities for the configured free models. Unknown capabilities remain automatic; the interface does not invent effort levels. Context and output limits use the model maxima, reserving sufficient room for actual input. The trace shows provider reasoning when returned; Relay does not invent it. Documented effort aliases appear with their canonical mapping in the selector. The context-ring popover separates current context from cumulative chat input/output tokens and estimates cost from provider usage or model pricing; missing usage/pricing stays explicitly unknown.
 
-## Custom tools
+Before each request, Relay retains complete tool-call groups within the selected model's budget and limits older screenshots independently. Provider usage calibrates token estimates. Structured context rejections trigger bounded recovery of the model request, removing older images before older text. Browser mutations are not replayed. Learned input/image limits are isolated by endpoint, credential hash and model.
 
-Edit the JSON array under **Tools → Custom tools**. An example page tool:
+## Storage
 
-```json
-[
-  {
-    "name": "read_headings",
-    "description": "Read headings from the current page.",
-    "enabled": true,
-    "approval": false,
-    "parameters": {
-      "type": "object",
-      "properties": {},
-      "additionalProperties": false
-    },
-    "handler": {
-      "type": "javascript",
-      "code": "return [...document.querySelectorAll('h1,h2')].map(el => el.textContent);"
-    }
-  }
-]
-```
+The model API key persists in a dedicated trusted `chrome.storage.local.modelApiKey` entry across Chrome and extension restarts. Settings, history, API responses and run exports exclude the key. Legacy session credentials migrate once. Save an empty key to clear it.
 
-JavaScript handlers run as async function bodies **in the selected page**, with `args` available. They can return values and use `await`; they are not backend shell scripts. Custom scripts are explicit independent capabilities, so they can run when the generic `browser_evaluate` tool is disabled. Set `approval: true` for tools you want reviewed when interaction review is enabled. A custom HTTP tool uses `{"type":"http","url":"https://your-service.example/action","method":"POST"}` as its handler. POST sends tool arguments as JSON; GET adds them as query parameters. Both have response limits and timeouts.
+Settings and learned model limits use `chrome.storage.local`. Run metadata and append-only event history use IndexedDB. Page content and screenshots sent in model context go directly from the extension to your selected provider. Light/dark mode and the free-model filter persist within the extension profile.
 
-**Auto-approve** is on by default. The switch beside Stop applies immediately to the current run and persists for future runs; enabling it releases a pending tool approval. Questions still wait for your answer. Turn the switch off for **Review interactions**, or select **Review every tool** in Settings. A decision panel stays above the scrolling activity. **Activity** groups actions and results; **Trace** retains every model request, response, observation, and decision. Generic JavaScript, raw CDP, and file uploads begin disabled. The effective system message is inspectable in every model-request event. Custom tools with `approval: true` are reviewed when interaction review is enabled; auto-approval skips those prompts too. See [design decisions](docs/design.md).
-
-## Context, models, and reasoning
-
-Choose a model from the prompt dock; Relay fetches the configured endpoint's model catalogue, supports search, defaults to free-tagged IDs, and shows context sizes supplied by the provider. Model and reasoning choices apply to the next task. Manual IDs are a fallback rather than a setup requirement.
-
-Context is resolved from the endpoint's selected-model metadata before each run, including manually entered IDs. Limits are capped by advertised input/output constraints; explicit manual overrides remain available. Missing fields are shown as **Not advertised**, with a conservative configured fallback for an unknown context window. Provider-reported token usage calibrates estimates. Screenshots have a separate retention budget.
-
-Expand **Execution** to inspect each step's full provider-returned reasoning, tool arguments/results, timing, and request/response. **Trace** supports search, expand/collapse, copying, screenshot inspection, and complete JSON download. Provider reasoning is displayed as returned; Relay does not manufacture reasoning when an endpoint does not expose it. Responses stream by default. Stop from the prompt dock or press Escape; interrupted text/reasoning remains inspectable and partial tool calls never execute.
-
-Reasoning controls and output-token parameter names come from advertised supported parameters, rather than model-name rules. Unknown reasoning capabilities use the provider default; advanced API-format overrides remain available. The model picker uses endpoint labels, prices, tool/vision capabilities, and limits. Inspect the raw metadata under **Endpoint capabilities** in Settings.
-
-Structured context rejections trigger bounded recovery of the same model request: remove old screenshots first, then compact complete older tool groups if necessary while preserving the task, recent state and an explicit checkpoint. Browser actions are never replayed. Successful working input/image budgets are learned separately for each endpoint, credential and model and survive restart. They are displayed separately from advertised limits and can be reset in Settings.
+The worker attaches the debugger before a run's model requests and releases it afterward. If Chrome interrupts a run, history remains and that run becomes failed on recovery; no browser action is resumed automatically. Durable journal checkpoints precede model/tool dispatch. Chrome documents the active-debugger worker lifetime behavior in its [service-worker lifecycle reference](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle).
 
 ## Development
 
 ```sh
-npm run dev          # Local backend plus Vite HMR, one port
+npm run dev                    # Rebuild extension source in watch mode
 npm run typecheck
-npm test             # Agent, model, persistence tests
+npm test
 npx playwright install chromium
-npm run test:e2e     # Actual MV3 extension in headless Chromium
-npm run build        # Typecheck and production frontend
+npm run test:e2e                # Actual extension in isolated Chromium
+npm run build                  # Generate the loadable extension/ directory
 ```
 
-The browser tests use a dedicated server at port 4799, an isolated Chromium profile, a local fixture page, and a deterministic OpenAI-compatible endpoint. They exercise real browser control and the entire agent loop without a paid provider. They do not prove the quality of a particular external model; use **Test connection** with your own provider and try a small task after pairing your regular Chrome.
+After a watch rebuild, reload the extension and reopen its interface. Test fixture servers are used only by integration tests; the installed product has no backend service. Edit `extension-src/`, `extension-core/`, `src/` and `shared/`, rather than generated `extension/` files.
 
-Optional environment variables: `RELAY_PORT` (default 4789), `RELAY_DATA_DIR` (default `.relay` in the repository), and `RELAY_API_KEY`. Bind remains loopback. The extension accepts the corresponding loopback address and port.
+Relay controls web content. Chrome internal pages, OS windows, native permissions, CAPTCHA and some sign-in challenges require direct interaction. DevTools or browser policy can detach the debugger. Stop cannot undo an action already dispatched. Browser/file permissions still apply, and site-specific or transformed frame layouts may need fresh observations or manual takeover. One run is active at a time in the shared browser session.
+## Multiple language-model providers
 
-## Practical boundaries
+In **Settings → Model → Provider**, choose **+ Add OpenRouter** or **+ Add compatible provider**. Enter its name, OpenAI-compatible base URL and separate API key, choose a model, then **Save changes**. Existing connections are retained automatically. The provider dropdown edits a saved connection; its trash button removes that connection.
 
-Relay controls web content in Chrome. Chrome's protected pages, browser settings, OS windows, native permission dialogs, CAPTCHA and interactive sign-in challenges need direct user interaction. Chrome may detach the debugger when you open DevTools. Complex sites and deeply transformed cross-origin frames can require a fresh snapshot, visual coordinates, an enabled advanced tool, or manual takeover. File URLs require Chrome's extension file-access permission. Downloads are managed by Chrome; v1 does not provide arbitrary local filesystem access or hide automation from sites.
+All saved providers contribute models to the same searchable model picker. Each model shows its provider when multiple catalogues are present, including duplicate model IDs. Selecting a model automatically uses that provider’s URL and key. A failed catalogue does not hide other providers. **Free** still filters paid models; turn it off to see the full combined list. There is no automatic cross-provider request fallback.
 
-This is deliberately a single-user local application, with one active browser run. It does not add queues, cloud authentication, distributed workers, or a database service before those are needed. The boundaries allow replacing storage, transport, or model adapter independently.
+Provider keys stay in trusted `chrome.storage.local.modelProviderKeys`, with the currently selected key mirrored in `modelApiKey`; they are excluded from settings responses, run history and exports. Provider selection and credential changes are committed together. Your existing provider is migrated automatically; the voice transcription key remains separate.
+
+## Voice input
+
+The microphone inserts dictation at the cursor or replaces selected text. Click again to stop; Escape cancels and restores the draft. It never auto-sends. Afterwards, Enter sends and Shift+Enter adds a newline.
+
+Settings → Model → Speech to text selects the backend; **Save changes** saves both model and voice settings:
+
+- **Web Speech** (default): no key, live text; Chrome sends audio to Google. Requires internet and a Chrome build supporting speech recognition.
+- **Groq / compatible API**: uploads WebM/Opus only to your configured endpoint on stop. Defaults: `https://api.groq.com/openai/v1`, `whisper-large-v3-turbo`. The base URL/model are editable; enter a separate voice API key. No automatic backend fallback.
+
+Dictation runs inside the composer, with a live microphone waveform and timer. On first use only, Chrome may need a small permission setup window: choose **Allow**, and it closes automatically. Subsequent recording stays in Relay. Escape or leaving the chat cancels. If blocked, check Chrome’s microphone site settings and your system’s microphone permission for Chrome.
+
+API clips stay below 25 MB and 10 minutes. Paid OpenRouter STT stops recording at 59 seconds to avoid its 60-second timeout. Groq free quotas vary (roughly 20 requests/minute, 7,200 audio-seconds/hour). Errors appear inline. Audio/key stay out of history and exports; `voiceApiKey` persists separately in trusted `chrome.storage.local`. Cancellation cannot retract audio already uploaded.
+
+After building, reload Relay on `chrome://extensions`, reopen its side panel, and refresh open workbench tabs. No manifest permission or CSP changes are needed. See [verification](docs/verification.md#voice-input-verification) for detailed checks.

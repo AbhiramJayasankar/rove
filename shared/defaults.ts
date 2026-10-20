@@ -15,7 +15,6 @@ export const DEFAULT_SETTINGS: Settings = {
   stream: true,
   modelTimeoutSeconds: 300,
   approvalMode: "never",
-  vision: false,
+  vision: true,
   disabledTools: ["browser_evaluate", "browser_cdp", "browser_upload"],
-  customTools: [],
 };

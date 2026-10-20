@@ -1,29 +1,42 @@
 # Browser tools and extension contract
 
-The extension executes browser actions; the backend validates model tool inputs and decides which actions are enabled. All browser action names begin with `browser_`. The following describes the actual bridge contract in `extension/background.js`, including advanced operations that may be disabled in the agent's tool configuration.
+The Chrome extension contains both the agent runtime and browser controller. The runtime validates model tool inputs and decides which actions are enabled. All browser action names begin with `browser_`. The reusable controller lives in `extension-src/browser.js`; `extension/` is the generated installable output. Advanced operations may be disabled in the agent's tool configuration.
 
-## Connection
+## Controller integration
 
-1. Start Relay locally.
-2. Load the `extension/` directory as an unpacked extension in Chrome's extensions page with Developer mode enabled.
-3. Open the Relay extension popup, enter the local app address and pairing token from Relay settings, and connect.
+Build the extension, load the generated `extension/` directory as an unpacked extension in Chrome's extensions page with Developer mode enabled, and configure the model endpoint in Relay. The complete runtime runs inside Chrome without a companion process.
 
-The popup accepts an `http://` or `ws://` loopback address on a configurable port, for example `http://127.0.0.1:4789`. Only `127.0.0.1` and `localhost` are accepted as connection hosts. Credentials and URL paths are not used to change the bridge route. The extension connects to `/bridge?token=...` over WebSocket. Disconnect releases all attached debugger sessions and disables automatic reconnection until configured again.
+The browser module exports:
 
-The first outgoing message is `{type:"hello", browser:"Chrome", tabs:[...]}`. Tab updates use `{type:"tabs", tabs:[...]}`; the 20-second heartbeat uses `{type:"ping"}`. Commands use:
+- `prepareRun(tabId?)` selects and attaches the run's target **before the first model request**, returning `{tabId, url, title}`. Active debugger sessions keep the MV3 worker alive. When no target is supplied and no ordinary tab exists, it creates and attaches a blank starter tab; an explicit restricted target is rejected.
+- `perform(action, args?)` executes one browser operation and returns its result or throws an actionable error. The caller owns serial scheduling and cancellation.
+- `listTabs()` returns the browser's current tab inventory.
+- `detachAll()` releases all attached debugger sessions at the end of a run.
+- `hasPendingDialogs()` reports whether a tracked JavaScript modal is open, allowing manual operations to retain their debugger until the dialog is handled.
+- `recoverSessions()` is a startup-only cleanup after persisted interrupted runs are marked failed. It discovers attached page targets, attempts caller-scoped debugger detachment, and returns `{detached}`. Run it before accepting new tasks or listing targets; never invoke it during an active task.
+- `setNotifier(callback)` registers a callback receiving `(event, data)`. `tabs` delivers an array of tab records; `browser_notice` delivers `{event: "dialog" | "detached" | "error", tabId?, ...details}`.
 
-```json
-{
-  "type": "command",
-  "id": "unique-request-id",
-  "action": "browser_snapshot",
-  "args": { "tabId": 123 }
+```js
+import {prepareRun, perform, detachAll, setNotifier} from './browser.js';
+
+setNotifier((event, data) => recordBrowserEvent(event, data));
+const target = await prepareRun(selectedTabId);
+try {
+  // Start model requests only after the target is attached.
+  const snapshot = await perform('browser_snapshot', {tabId: target.tabId});
+  // Supply snapshot to the agent and dispatch its validated browser actions.
+} finally {
+  await detachAll();
 }
 ```
 
-Replies contain either `{type:"result", id, result}` or `{type:"result", id, error:"message"}`. IDs must be strings. Commands execute serially. A detached debugger also emits a `browser_event` with its tab ID and reason. A broken connection does not replay commands.
+Dialog notices include `dialogType` and a bounded `message`; detach notices include `reason`. `dialog_closed` notices indicate when a manual modal session may be released. Notification failures do not interrupt browser event handling. The controller contains no model configuration, credentials, UI messaging, runtime bootstrap, or service-worker alarms. Those are runtime responsibilities.
+
+Forced service-worker termination can leave Chrome's extension-owned debugger session attached even though JavaScript maps were lost. Startup recovery releases those orphaned sessions and never replays the interrupted task. The public target inventory does not identify a debugger's owner, so recovery attempts detachment and ignores ownership errors. Chromium's `DebuggerDetachFunction` resolves a client through `InitClientHost` and `FindClientHost`, which checks both target and calling extension ID; this prevents the cleanup from closing DevTools or another extension's debugger. [Chromium debugger implementation](https://github.com/chromium/chromium/blob/main/chrome/browser/extensions/api/debugger/debugger_api.cc)
 
 ## Tabs, frames, and references
+
+Before using a cached debugger attachment, each browser operation probes the root session. If Chrome has disconnected it, Relay clears the stale cache and stops an active task. It does not replay the rejected command. A new task or manual observation acquires a fresh session. Browser detach notifications also stop an active task immediately, including cancellation from Chrome's debugger banner.
 
 Most tools accept an optional numeric `tabId`. An explicit ID is preferable: without one the bridge uses its last controlled tab, or chooses an active controllable tab. `browser_tabs` returns IDs, titles, URLs, active state, and a `controllable` flag. A tab listed by Chrome is not necessarily controllable.
 
@@ -59,7 +72,7 @@ An element `ref` is stored in a document-local map in an isolated execution worl
 | `browser_press_key`  | `key`; optional `tabId`                                                                                         | Native keyboard input to the focused element                                                                 |
 | `browser_scroll`     | optional `x`, `y`, `deltaX`, `deltaY`, `tabId`                                                                  | Native wheel input; defaults: position 200,200 and deltaY 600                                                |
 | `browser_select`     | `ref`, `values: string[]`; optional `tabId`, `frameId`                                                          | Select option values; dispatch input/change events                                                           |
-| `browser_wait`       | `milliseconds`                                                                                                  | Bounded 0–10,000 ms delay; backend may implement this locally                                                |
+| `browser_wait` | `milliseconds` | Bounded 0–10,000 ms delay; the extension runtime may implement this locally |
 | `browser_close_tab`  | `tabId`                                                                                                         | Close the permitted tab                                                                                      |
 | `browser_history`    | `direction`: `"back"`, `"forward"`, or `"reload"`; optional `tabId`                                             | Checked navigation; returns a new snapshot                                                                   |
 | `browser_dialog`     | `accept`; optional `promptText`, `tabId`                                                                        | Handle an already-open JavaScript alert, confirm, or prompt                                                  |
@@ -93,12 +106,12 @@ Return JSON-serializable data. Page exceptions become tool errors. These scripts
 ## Limits and failure recovery
 
 - Chrome 125+ is required. Debugger permissions produce Chrome's visible permission/control indicators. Opening DevTools, closing a tab, browser policy, or canceling the debugging banner can detach the session.
-- Relay refuses its own configured loopback app port, Chrome internals, and Chrome Web Store pages. It also rejects snapshots/evaluation of an embedded Relay app frame. Advanced JavaScript is deliberately powerful and can initiate navigation; subsequent operations still check the resulting target.
+- Relay refuses its own extension pages, Chrome internals, and Chrome Web Store pages. It also rejects snapshots/evaluation of an embedded Relay extension frame. Ordinary localhost sites remain controllable. Advanced JavaScript is deliberately powerful and can initiate navigation; subsequent operations still check the resulting target.
 - Same-process iframe coordinates are adjusted using the embedding frame. Out-of-process iframes have child sessions; native pointer targets are translated through their embedding frames to the root viewport. Deeply nested/transformed frame geometry requires testing against the target site; use fresh frame snapshots when an interaction fails.
 - Open shadow roots are traversed. Closed shadow roots, canvas-only controls, inaccessible inputs, browser menus, OS dialogs, browser authentication prompts, and CAPTCHA challenges are not universally covered.
 - Screenshots capture the viewport rather than an arbitrarily large full-page image. Vision support depends on the configured model endpoint.
 - Uploads require an actual file-input reference and accessible local files. A hidden upload input may need a custom script or advanced DOM/CDP inspection. This does not operate the OS file picker.
-- Stop prevents the agent from scheduling further actions. An action already dispatched to Chrome may finish; actions are not rolled back. After a transport timeout or disconnect, inspect browser state before retrying.
+- Stop prevents the agent from scheduling further actions. An action already dispatched to Chrome may finish; actions are not rolled back. After a protocol timeout or debugger detachment, inspect browser state before retrying.
 - A navigation waits up to roughly 12 seconds for load completion; highly dynamic pages may need another snapshot or a bounded wait. A failed frame/context/ref should be rediscovered, not guessed.
 - If an action opens a JavaScript dialog, Relay reports an actionable tool error and leaves the dialog visible. Use `browser_dialog` next; the pending native input or script may complete after it is handled. This prevents the serial command queue from deadlocking on a modal.
 
@@ -106,4 +119,4 @@ Return JSON-serializable data. Page exceptions become tool errors. These scripts
 
 Snapshots accept `query` (case-insensitive accessible-name/link match) and `viewportOnly`. Pagination offsets apply to the filtered set. Purely structural roles such as group, text and main are not listed as interactive unless independently focusable. Each element includes `inViewport`; links include `href`. Snapshot and screenshot results include viewport width/height, `devicePixelRatio`, and the CSS coordinate space.
 
-A screenshot preserves native resolution. Divide image pixel coordinates by its reported device pixel ratio before issuing pointer input. Explicit pointer coordinates outside the CSS viewport fail with an actionable error. References remain preferable: the extension scrolls and remeasures their centre at dispatch time.
+A screenshot reports the actual JPEG dimensions as `imageSize`, read from its encoded header. `captureBounds` describes the captured rectangle in viewport CSS pixels (`x`, `y`, `width`, `height`) and its document origin (`pageX`, `pageY`). Map an image-pixel point to pointer coordinates using `x = captureBounds.x + imageX * captureBounds.width / imageSize.width` and the equivalent formula for `y`. Do not infer this mapping from page `devicePixelRatio`: Chrome emulation can give the page and debugger capture different scales. The screenshot uses an explicit clip of the current viewport, including its scroll offset. Explicit pointer coordinates outside the CSS viewport fail with an actionable error. References remain preferable: the extension scrolls and remeasures their centre at dispatch time.

@@ -1,190 +1,220 @@
-import { useEffect, useRef, useState } from "react";
-import { Check, ChevronDown, LoaderCircle, Search, X } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  Box,
+  Check,
+  ChevronDown,
+  LoaderCircle,
+  RefreshCw,
+  Search,
+} from "lucide-react";
 import { api } from "./ui";
-
+import { usePopover } from "./Popover";
 import type { ModelInfo } from "../shared/types";
-type Model = ModelInfo;
 export const tokenCount = (count: number) =>
   count >= 1_000_000
     ? `${(count / 1_000_000).toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}M`
     : count >= 1000
       ? `${(count / 1000).toFixed(1).replace(/\.0$/, "")}k`
       : String(count);
-
 export default function ModelPicker({
   model,
   onSelect,
+  label,
+  connection,
   disabled = false,
+  placement = "top",
+  providerId,
 }: {
   model: string;
-  onSelect: (model: string, contextWindow?: number) => void | Promise<void>;
+  label?: string;
+  connection?: { baseUrl: string; apiKey?: string };
+  onSelect: (model: string, contextWindow?: number, providerId?: string) => void | Promise<void>;
+  providerId?: string;
   disabled?: boolean;
+  placement?: "top" | "bottom";
 }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  const [models, setModels] = useState<Model[]>([]);
+  const id = useId();
+  const popup = usePopover({ width: 330, placement });
+  const searchRef = useRef<HTMLInputElement>(null);
+  const options = useRef<(HTMLButtonElement | null)[]>([]);
+  const sequence = useRef(0);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  const [customId, setCustomId] = useState("");
   const [freeOnly, setFreeOnly] = useState(
     localStorage.getItem("relay.freeModels") !== "false",
   );
   async function load(refresh = false) {
+    const current = ++sequence.current;
     setLoading(true);
     setError("");
     try {
-      setModels(
-        (
-          await api<{ models: Model[] }>(
-            `/api/models${refresh ? "?refresh=1" : ""}`,
-          )
-        ).models,
+      const result = await api<{ models: ModelInfo[]; warnings?: string[] }>(
+        `/api/models${refresh ? "?refresh=1" : ""}`,
+        connection
+          ? { method: "POST", body: JSON.stringify({ ...connection, refresh }) }
+          : undefined,
       );
+      if (current === sequence.current) { setModels(result.models); setError(result.warnings?.join(" ") || ""); }
     } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
+      if (current === sequence.current)
+        setError(error instanceof Error ? error.message : String(error));
     } finally {
-      setLoading(false);
+      if (current === sequence.current) setLoading(false);
     }
   }
   function open() {
     setSearch("");
-    dialog.current?.showModal();
+    setFreeOnly(localStorage.getItem("relay.freeModels") !== "false");
+    popup.setOpen(true);
     void load();
   }
-  async function choose(id: string, contextWindow?: number) {
-    await onSelect(id, contextWindow);
-    dialog.current?.close();
+  async function choose(info: ModelInfo) {
+    await onSelect(info.id, info.contextWindow, info.providerId);
+    popup.close(true);
   }
-  useEffect(() => () => dialog.current?.close(), []);
+  useEffect(() => {
+    if (model && !label) void load();
+  }, [model, label, connection?.baseUrl]);
+  useEffect(() => {
+    if (popup.open) searchRef.current?.focus();
+  }, [popup.open]);
+  const showProviders = new Set(models.map(model => model.providerId)).size > 1;
   const filtered = models.filter(
-    (m) =>
-      (!freeOnly || m.free) &&
-      `${m.id} ${m.name} ${m.owner || ""}`
+    (info) =>
+      (!freeOnly || info.free) &&
+      `${info.name} ${info.id} ${info.owner || ""} ${info.providerName || ""}`
         .toLowerCase()
         .includes(search.toLowerCase()),
   );
+  const name =
+    label ||
+    models.find((info) => info.id === model && (!providerId || info.providerId === providerId))?.name ||
+    (model ? "Selected model" : "Choose model");
   return (
     <>
       <button
+        ref={popup.trigger}
         type="button"
         className="model-picker-trigger"
         aria-label="Choose model"
+        title={name}
+        aria-haspopup="dialog"
+        aria-expanded={popup.open}
+        aria-controls={popup.open ? id : undefined}
         disabled={disabled}
-        onClick={open}
-        title={model || "Choose a model"}
+        onClick={() => (popup.open ? popup.close() : open())}
       >
-        <span className="model-glyph" aria-hidden="true">
-          ✳
-        </span>
-        <span>{model || "Choose model"}</span>
-        <ChevronDown size={13} />
+        <Box size={13} className="model-glyph" />
+        <span>{name}</span>
+        <ChevronDown size={11} />
       </button>
-      <dialog
-        ref={dialog}
-        className="model-catalogue"
-        aria-label="Choose a model"
-        onClick={(e) => {
-          if (e.target === e.currentTarget) dialog.current?.close();
-        }}
-      >
-        <div className="catalogue-heading">
-          <h2>Choose a model</h2>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Close model picker"
-            onClick={() => dialog.current?.close()}
+      {popup.open &&
+        createPortal(
+          <div
+            ref={popup.panel}
+            id={id}
+            role="dialog"
+            aria-label="Model picker"
+            className="model-catalogue anchored-popover"
+            style={popup.style}
           >
-            <X size={18} />
-          </button>
-        </div>
-        <div className="catalogue-search">
-          <Search size={17} />
-          <input
-            aria-label="Search models"
-            autoFocus
-            placeholder="Search models…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="catalogue-filter">
-          <label>
-            <input
-              type="checkbox"
-              checked={freeOnly}
-              onChange={(e) => {
-                setFreeOnly(e.target.checked);
-                localStorage.setItem(
-                  "relay.freeModels",
-                  String(e.target.checked),
-                );
-              }}
-            />
-            Free models only
-          </label>
-          <button
-            type="button"
-            className="text-button"
-            onClick={() => load(true)}
-            disabled={loading}
-          >
-            {loading ? <LoaderCircle size={14} className="spin" /> : "Refresh"}
-          </button>
-        </div>
-        <div className="catalogue-list" aria-label="Available models">
-          {filtered.map((m) => (
-            <button
-              type="button"
-              key={m.id}
-              className={`catalogue-model ${m.id === model ? "selected" : ""}`}
-              aria-label={`Use ${m.id}`}
-              onClick={() => choose(m.id, m.contextWindow)}
-            >
-              <span className="catalogue-model-text">
-                <strong>{m.name}</strong>
-                <small>{m.id}</small>
-              </span>
-              <span className="catalogue-model-meta">
-                {m.free && <span className="free-label">Free</span>}
-                {m.contextWindow && (
-                  <span>{tokenCount(m.contextWindow)} context</span>
+            <div className="catalogue-search">
+              <Search size={14} />
+              <input
+                ref={searchRef}
+                aria-label="Search models"
+                placeholder="Search models…"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    options.current[0]?.focus();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className={`catalogue-free ${freeOnly ? "selected" : ""}`}
+                aria-label="Free models only"
+                aria-pressed={freeOnly}
+                title="Free models only"
+                onClick={() => {
+                  setFreeOnly(!freeOnly);
+                  localStorage.setItem("relay.freeModels", String(!freeOnly));
+                }}
+              >
+                Free
+              </button>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Refresh models"
+                title="Refresh models"
+                disabled={loading}
+                onClick={() => load(true)}
+              >
+                {loading ? (
+                  <LoaderCircle size={13} className="spin" />
+                ) : (
+                  <RefreshCw size={13} />
                 )}
-                {m.id === model && <Check size={16} />}
-              </span>
-            </button>
-          ))}
-          {loading && !models.length && (
-            <div className="catalogue-empty">Loading models…</div>
-          )}
-          {!loading && !filtered.length && (
-            <div className="catalogue-empty">
-              {error || "No matching models."}
+              </button>
             </div>
-          )}
-        </div>
-        <form
-          className="manual-model"
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (customId.trim()) void choose(customId.trim());
-          }}
-        >
-          <input
-            aria-label="Custom model ID"
-            placeholder="Or enter a model ID"
-            value={customId}
-            onChange={(e) => setCustomId(e.target.value)}
-          />
-          <button
-            type="submit"
-            className="button secondary"
-            disabled={!customId.trim()}
-          >
-            Use ID
-          </button>
-        </form>
-      </dialog>
+            <div
+              className="catalogue-list"
+              role="listbox"
+              aria-label="Available models"
+            >
+              {filtered.map((info, index) => (
+                <button
+                  ref={(element) => {
+                    options.current[index] = element;
+                  }}
+                  type="button"
+                  role="option"
+                  aria-selected={info.id === model && (!providerId || info.providerId === providerId)}
+                  aria-label={info.name}
+                  key={`${info.providerId || ""}:${info.id}`}
+                  className="catalogue-model"
+                  onClick={() => choose(info)}
+                  onKeyDown={(event) => {
+                    let next = index;
+                    if (event.key === "ArrowDown")
+                      next = (index + 1) % filtered.length;
+                    else if (event.key === "ArrowUp")
+                      next = (index - 1 + filtered.length) % filtered.length;
+                    else if (event.key === "Home") next = 0;
+                    else if (event.key === "End") next = filtered.length - 1;
+                    else return;
+                    event.preventDefault();
+                    options.current[next]?.focus();
+                  }}
+                >
+                  <span className="catalogue-model-text">{info.name}{showProviders && <small className="model-provider-name">{info.providerName}</small>}</span>
+                  <span className="catalogue-model-meta">
+                    {info.contextWindow && (
+                      <small>{tokenCount(info.contextWindow)}</small>
+                    )}
+                    {info.id === model && (!providerId || info.providerId === providerId) && <Check size={13} />}
+                  </span>
+                </button>
+              ))}
+              {loading && !models.length && (
+                <div className="catalogue-empty">Loading models…</div>
+              )}
+              {!loading && (error || !filtered.length) && (
+                <div className="catalogue-empty">
+                  {error || "No matching models."}
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </>
   );
 }

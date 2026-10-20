@@ -22,25 +22,8 @@ export const time = (value: string) =>
     hour: "2-digit",
     minute: "2-digit",
   });
-export async function api<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...options?.headers },
-  });
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok)
-    throw new Error(
-      body.error || body.message || `Request failed (${response.status}).`,
-    );
-  return body as T;
-}
-export type Page =
-  "workbench" | "connection" | "settings" | "instructions" | "tools";
-export type Pairing = {
-  token: string;
-  extensionPath: string;
-  serverUrl: string;
-};
+export { api } from "./transport";
+export type Page = "workbench" | "settings" | "instructions" | "tools";
 export type Shot = {
   dataUrl: string;
   url?: string;
@@ -53,7 +36,7 @@ export function toolTitle(
   args: Record<string, any> = {},
 ): string {
   if (name === "browser_type")
-    return `Type “${String(args.text || "").slice(0, 80)}”`;
+    return args.text ? `Type “${String(args.text).slice(0, 80)}”` : "Type text";
   if (name === "browser_navigate") {
     try {
       return `Open ${new URL(args.url).hostname}`;
@@ -61,7 +44,8 @@ export function toolTitle(
       return "Open page";
     }
   }
-  if (name === "browser_press_key") return `Press ${args.key}`;
+  if (name === "browser_press_key")
+    return args.key ? `Press ${args.key}` : "Press key";
   const titles: Record<string, string> = {
     browser_snapshot: "Read page",
     browser_screenshot: "Capture screenshot",

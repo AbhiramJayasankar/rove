@@ -6,10 +6,13 @@ import {
   type SetStateAction,
 } from "react";
 import {
-  ArrowDownToLine,
+  AlignLeft,
+  Brain,
+  ShieldCheck,
+  Eye,
+  Search,
   ArrowUp,
   Check,
-  ChevronDown,
   Code2,
   Globe,
   LoaderCircle,
@@ -17,27 +20,24 @@ import {
   Monitor,
   Plug,
   RefreshCw,
-  Send,
   Square,
   X,
 } from "lucide-react";
-import ModelPicker, { tokenCount } from "./ModelPicker";
-import { reasoningOptions } from "../shared/capabilities";
-import ExecutionLog, { TraceView } from "./ExecutionLog";
-import type { AppState, RunRecord, Settings } from "../shared/types";
+import ModelPicker from "./ModelPicker";
+import UsageRing from "./UsageRing";
+import VoiceInput from "./VoiceInput";
+import Conversation, { type ConversationHandle } from "./Conversation";
+import ChoiceMenu from "./ChoiceMenu";
 import {
-  api,
-  AssistantMessage,
-  json,
-  statusLabels,
-  TimelineEvent,
-  ToolActivity,
-  toolTitle,
-  type Action,
-  type Page,
-  type Shot,
-} from "./ui";
+  reasoningOptions,
+  resolvedReasoningEffort,
+} from "../shared/capabilities";
+import { TraceView } from "./ExecutionLog";
+import { downloadJson } from "./transport";
+import type { AppState, RunRecord, Settings } from "../shared/types";
+import { api, json, toolTitle, type Action, type Page, type Shot } from "./ui";
 type Props = {
+  newChatVersion: number;
   state: AppState;
   setState: Dispatch<SetStateAction<AppState | null>>;
   run?: RunRecord;
@@ -50,8 +50,10 @@ type Props = {
   mergeRun: (run: RunRecord) => void;
   streamConnected: boolean;
   changeApprovalMode: (mode: Settings["approvalMode"]) => Promise<void>;
+  visible: boolean;
 };
 export default function Workbench({
+  newChatVersion,
   state,
   setState,
   run,
@@ -64,18 +66,17 @@ export default function Workbench({
   mergeRun,
   streamConnected,
   changeApprovalMode,
+  visible,
 }: Props) {
-  const [prompt, setPrompt] = useState("");
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const draftId = run?.id || "new";
+  const prompt = drafts[draftId] || "";
+  const setPrompt = (value: string) =>
+    setDrafts((previous) => ({ ...previous, [draftId]: value }));
   const tabs = state.bridge.tabs.filter((tab) => {
     try {
       const url = new URL(tab.url);
-      return (
-        ["http:", "https:", "file:"].includes(url.protocol) &&
-        !(
-          url.port === location.port &&
-          ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
-        )
-      );
+      return ["http:", "https:", "file:"].includes(url.protocol);
     } catch {
       return false;
     }
@@ -84,14 +85,30 @@ export default function Workbench({
     tabs.find((t) => t.active)?.id || tabs[0]?.id,
   );
   const [manualShot, setManualShot] = useState<Shot | null>(null);
-  const [reply, setReply] = useState("");
+  useEffect(() => {
+    if (newChatVersion) {
+      setTabId(undefined);
+      setManualShot(null);
+      followsBrowser.current = false;
+    }
+  }, [newChatVersion]);
   const [snapshot, setSnapshot] = useState<unknown>(null);
   const [activityView, setActivityView] = useState<"activity" | "trace">(
     "activity",
   );
   const [mobileView, setMobileView] = useState<"task" | "browser">("task");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const [voiceBusy, setVoiceBusy] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const conversationRef = useRef<ConversationHandle>(null);
+  const [retryEditRequested, setRetryEditRequested] = useState(false);
+  useEffect(() => {
+    if (retryEditRequested && activityView === "activity") {
+      conversationRef.current?.editLatest();
+      setRetryEditRequested(false);
+    }
+  }, [retryEditRequested, activityView]);
   const follows = useRef(true);
   const followsBrowser = useRef(true);
   const browserRef = useRef<HTMLElement>(null);
@@ -109,7 +126,6 @@ export default function Workbench({
     (runShot && (!tabId || !runShot.tabId || runShot.tabId === tabId)
       ? runShot
       : previousShot);
-  const selectedTab = tabs.find((t) => t.id === tabId);
   const pause = [...(run?.events || [])]
     .reverse()
     .find((e) =>
@@ -128,19 +144,21 @@ export default function Workbench({
     run?.status === "awaiting_approval" && pause?.type === "user_question"
       ? pause
       : undefined;
-  const latestContext = run?.events.findLast(
-    (e) => e.type === "context_usage",
-  )?.data;
-  const latestUsage = run?.events.findLast((e) => e.type === "model_response")
-    ?.data.usage;
-  const inputTokens =
-    latestUsage?.prompt_tokens ?? latestContext?.estimatedTokens;
-  const contextWindow =
-    latestContext?.contextWindow ||
-    state.modelInfo?.contextWindow ||
-    state.settings.contextWindow;
+  useEffect(() => {
+    if (question) {
+      follows.current = true;
+      setMobileView("task");
+      setActivityView("activity");
+    }
+  }, [question?.id]);
+  useEffect(() => {
+    const input = promptRef.current;
+    if (!input) return;
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 120) + "px";
+  }, [prompt, visible]);
   const reasoningChoices = reasoningOptions(state.settings, state.modelInfo);
-  async function runOptions(options: Partial<Settings>) {
+  async function runOptions(options: Partial<Settings> & { providerId?: string }) {
     await action("run-options", async () => {
       const result = await api<{ settings: Settings; hasApiKey: boolean }>(
         "/api/run-options",
@@ -170,13 +188,12 @@ export default function Workbench({
     return () => window.removeEventListener("keydown", escape);
   }, [activeRun?.id]);
   useEffect(() => {
-    if (!tabs.some((t) => t.id === tabId))
+    if (tabId !== undefined && !tabs.some((t) => t.id === tabId))
       setTabId(tabs.find((t) => t.active)?.id || tabs[0]?.id);
   }, [state.bridge.tabs, tabId]);
   useEffect(() => {
     setManualShot(null);
     setSnapshot(null);
-    setReply("");
     follows.current = true;
     followsBrowser.current = true;
   }, [run?.id]);
@@ -187,20 +204,30 @@ export default function Workbench({
   useEffect(() => {
     if (follows.current && scrollRef.current)
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [run?.events.length, activityView]);
-  async function startRun() {
-    if (!prompt.trim()) return;
+  }, [run?.events.length, activityView, visible]);
+  async function startRun(message = prompt, editMessageId?: number) {
+    if (!message.trim()) return false;
+    let saved = false;
     await action("run", async () => {
-      const created = await api<RunRecord>("/api/runs", {
-        method: "POST",
-        body: json({ prompt: prompt.trim(), tabId }),
-      });
+      const created = await api<RunRecord>(
+        run ? `/api/runs/${run.id}/messages` : "/api/runs",
+        {
+          method: "POST",
+          body: json(
+            run
+              ? { message: message.trim(), tabId: tabId ?? null, editMessageId }
+              : { prompt: message.trim(), tabId: tabId ?? null },
+          ),
+        },
+      );
       mergeRun(created);
       selectRun(created.id);
-      setPrompt("");
+      if (editMessageId === undefined) setPrompt("");
       setManualShot(null);
       setMobileView("task");
+      saved = true;
     });
+    return saved;
   }
   async function capture(inspect = false) {
     await action(inspect ? "snapshot" : "screenshot", async () => {
@@ -223,169 +250,154 @@ export default function Workbench({
     state.bridge.connected &&
     !!state.settings.model &&
     !busy &&
+    !voiceBusy &&
     !pending;
   return (
-    <div className={`workspace mobile-${mobileView}`}>
-      <div className="mobile-view-tabs">
-        <button
-          className={mobileView === "task" ? "selected" : ""}
-          onClick={() => setMobileView("task")}
-        >
-          Task
-        </button>
-        <button
-          className={mobileView === "browser" ? "selected" : ""}
-          onClick={() => setMobileView("browser")}
-        >
-          Browser
-        </button>
-        <select
-          aria-label="Recent tasks"
-          value={run?.id || ""}
-          onChange={(e) => e.target.value && selectRun(e.target.value)}
-        >
-          <option value="">Recent tasks</option>
-          {state.runs.map((r) => (
-            <option value={r.id} key={r.id}>
-              {r.prompt}
-            </option>
-          ))}
-        </select>
-      </div>
-      <section className="task-panel" aria-label="Task and activity">
+    <div className={`workspace view-${mobileView}`}>
+      <div className="context-strip">
+        <ChoiceMenu
+          className="target-picker"
+          label="Chrome tab"
+          icon={<Globe size={14} />}
+          value={String(tabId ?? "")}
+          options={[
+            { value: "", label: "New Tab" },
+            ...tabs.map((tab) => ({
+              value: String(tab.id),
+              label: tab.title || tab.url,
+              description: tab.url,
+            })),
+          ]}
+          onChange={(value) => {
+            followsBrowser.current = false;
+            setTabId(value ? Number(value) : undefined);
+            setManualShot(null);
+          }}
+        />
         <div className="panel-toolbar">
-          <div className="view-tabs">
+          <div
+            className="view-switch"
+            role="group"
+            aria-label="View"
+            style={
+              {
+                "--view-index":
+                  mobileView === "browser"
+                    ? 0
+                    : activityView === "activity"
+                      ? 1
+                      : 2,
+              } as React.CSSProperties
+            }
+          >
+            <span className="view-switch-thumb" aria-hidden="true" />
             <button
-              className={activityView === "activity" ? "selected" : ""}
-              onClick={() => setActivityView("activity")}
+              type="button"
+              aria-label="Browser preview"
+              title="Browser preview"
+              aria-pressed={mobileView === "browser"}
+              disabled={!tabId}
+              onClick={() => {
+                setMobileView("browser");
+                if (!shot) void capture();
+              }}
             >
-              Activity
+              <Eye size={15} />
             </button>
             <button
-              className={activityView === "trace" ? "selected" : ""}
-              onClick={() => setActivityView("trace")}
+              type="button"
+              aria-label="Activity"
+              title="Activity"
+              aria-pressed={
+                mobileView === "task" && activityView === "activity"
+              }
+              onClick={() => {
+                setMobileView("task");
+                setActivityView("activity");
+              }}
             >
-              Trace
+              <AlignLeft size={15} />
             </button>
-          </div>
-          <div className="panel-toolbar-right">
-            {run && (
-              <span className={`run-status ${run.status}`} role="status">
-                <i className={`status-dot ${run.status}`} />
-                {statusLabels[run.status]}
-              </span>
-            )}
-            {run && (
-              <a
-                className="icon-button"
-                href={`/api/runs/${run.id}/export`}
-                download
-                aria-label="Export run"
-                title="Export run"
-              >
-                <ArrowDownToLine size={15} />
-              </a>
-            )}
+            <button
+              type="button"
+              aria-label="Trace"
+              title="Trace"
+              aria-pressed={mobileView === "task" && activityView === "trace"}
+              onClick={() => {
+                setMobileView("task");
+                setActivityView("trace");
+              }}
+            >
+              <Code2 size={15} />
+            </button>
           </div>
         </div>
-        {(approval || question) && (
+      </div>
+      <section className="task-panel" aria-label="Task and activity">
+        {approval && (
           <div
             className="decision-panel"
             role="region"
-            aria-label={approval ? "Approval required" : "Reply required"}
+            aria-label="Approval required"
           >
-            {approval ? (
-              <>
-                <strong>
-                  {toolTitle(approval.data.tool, approval.data.args)}
-                </strong>
-                <details>
-                  <summary>Action details</summary>
-                  <pre>
-                    {json({
-                      tool: approval.data.tool,
-                      args: approval.data.args,
-                    })}
-                  </pre>
-                </details>
-                <div className="decision-actions">
-                  <button
-                    className="button primary"
-                    disabled={!!pending}
-                    onClick={() =>
-                      action("approve", async () => {
-                        await api(`/api/runs/${run!.id}/approval`, {
-                          method: "POST",
-                          body: json({
-                            approvalId: approval.data.id,
-                            approved: true,
-                          }),
-                        });
-                      })
-                    }
-                  >
-                    <Check size={14} />
-                    Approve once
-                  </button>
-                  <button
-                    className="button secondary"
-                    disabled={!!pending}
-                    onClick={() =>
-                      action("deny", async () => {
-                        await api(`/api/runs/${run!.id}/approval`, {
-                          method: "POST",
-                          body: json({
-                            approvalId: approval.data.id,
-                            approved: false,
-                          }),
-                        });
-                      })
-                    }
-                  >
-                    Deny
-                  </button>
-                </div>
+            <>
+              <strong>
+                {toolTitle(approval.data.tool, approval.data.args)}
+              </strong>
+              <details>
+                <summary>Action details</summary>
+                <pre>
+                  {json({
+                    tool: approval.data.tool,
+                    args: approval.data.args,
+                  })}
+                </pre>
+              </details>
+              <div className="decision-actions">
                 <button
-                  className="text-button"
+                  className="button primary"
                   disabled={!!pending}
-                  onClick={() => changeApprovalMode("never")}
+                  onClick={() =>
+                    action("approve", async () => {
+                      await api(`/api/runs/${run!.id}/approval`, {
+                        method: "POST",
+                        body: json({
+                          approvalId: approval.data.id,
+                          approved: true,
+                        }),
+                      });
+                    })
+                  }
                 >
-                  Auto-approve and continue
+                  <Check size={14} />
+                  Approve once
                 </button>
-              </>
-            ) : (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  action("reply", async () => {
-                    await api(`/api/runs/${run!.id}/reply`, {
-                      method: "POST",
-                      body: json({ message: reply }),
-                    });
-                    setReply("");
-                  });
-                }}
+                <button
+                  className="button secondary"
+                  disabled={!!pending}
+                  onClick={() =>
+                    action("deny", async () => {
+                      await api(`/api/runs/${run!.id}/approval`, {
+                        method: "POST",
+                        body: json({
+                          approvalId: approval.data.id,
+                          approved: false,
+                        }),
+                      });
+                    })
+                  }
+                >
+                  Deny
+                </button>
+              </div>
+              <button
+                className="text-button"
+                disabled={!!pending}
+                onClick={() => changeApprovalMode("never")}
               >
-                <strong>Relay needs your input</strong>
-                <p>{String(question!.data.question)}</p>
-                <div className="reply-row">
-                  <input
-                    aria-label="Reply to Relay"
-                    value={reply}
-                    onChange={(e) => setReply(e.target.value)}
-                    autoFocus
-                    placeholder="Your answer"
-                  />
-                  <button
-                    className="button primary"
-                    aria-label="Send answer"
-                    disabled={!reply.trim() || !!pending}
-                  >
-                    <Send size={15} />
-                  </button>
-                </div>
-              </form>
-            )}
+                Auto-approve and continue
+              </button>
+            </>
           </div>
         )}
         <div
@@ -401,51 +413,36 @@ export default function Workbench({
         >
           {run ? (
             <>
-              <div className="user-message">{run.prompt}</div>
               {activityView === "trace" ? (
-                <TraceView events={run.events} />
+                <TraceView
+                  events={run.events}
+                  exportPending={!!pending}
+                  onExport={() => {
+                    void action("export-run", async () => {
+                      const record = await api<RunRecord>(
+                        `/api/runs/${run.id}/export`,
+                      );
+                      downloadJson(record, `relay-run-${run.id}.json`);
+                    });
+                  }}
+                />
               ) : (
-                <>
-                  <ExecutionLog run={run} key={run.id} />
-                  {run.events
-                    .filter(
-                      (e) =>
-                        e.type === "model_response" &&
-                        !e.data.message?.tool_calls?.length &&
-                        e.data.message?.content,
-                    )
-                    .map((e) => (
-                      <AssistantMessage
-                        key={e.id}
-                        content={String(e.data.message.content)}
-                      />
-                    ))}
-                  {run.events
-                    .filter((e) => ["error", "user_reply"].includes(e.type))
-                    .map((e) => (
-                      <div
-                        className={
-                          e.type === "error" ? "activity-error" : "user-message"
-                        }
-                        key={e.id}
-                      >
-                        {String(e.data.message)}
-                      </div>
-                    ))}
-                </>
-              )}
-              {run.status === "running" && (
-                <div className="working-indicator">
-                  <LoaderCircle size={14} className="spin" />
-                  Generating
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={stopRun}
-                  >
-                    Stop
-                  </button>
-                </div>
+                <Conversation
+                  editorRef={conversationRef}
+                  key={`${run.id}:${run.revision || 0}`}
+                  run={run}
+                  disabled={busy || !!pending}
+                  onEdit={(id, message) => startRun(message, id)}
+                  replyPending={!!pending}
+                  onReply={(message) =>
+                    action("reply", async () => {
+                      await api(`/api/runs/${run!.id}/reply`, {
+                        method: "POST",
+                        body: json({ message }),
+                      });
+                    })
+                  }
+                />
               )}
               {run.status === "stopped" && (
                 <div className="stopped-message">
@@ -453,7 +450,10 @@ export default function Workbench({
                   <button
                     type="button"
                     className="text-button"
-                    onClick={() => setPrompt(run.prompt)}
+                    onClick={() => {
+                      setActivityView("activity");
+                      setRetryEditRequested(true);
+                    }}
                   >
                     Edit & retry
                   </button>
@@ -463,9 +463,39 @@ export default function Workbench({
             </>
           ) : (
             <div className="task-empty">
-              <span className="empty-cursor">
-                <Globe size={32} strokeWidth={1.3} />
-              </span>
+              <h1>What’s the task?</h1>
+              {!state.settings.model ? (
+                <button
+                  className="setup-model"
+                  onClick={() => setPage("settings")}
+                >
+                  Connect a model
+                  <ArrowUp size={14} />
+                </button>
+              ) : (
+                <div className="quick-actions">
+                  <button
+                    onClick={() => {
+                      setPrompt(
+                        "Summarize the current page. Read its content and give me the key points.",
+                      );
+                      promptRef.current?.focus();
+                    }}
+                  >
+                    <AlignLeft size={16} />
+                    Summarize this page
+                  </button>
+                  <button
+                    onClick={() => {
+                      setPrompt("Find ");
+                      promptRef.current?.focus();
+                    }}
+                  >
+                    <Search size={16} />
+                    Find something
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -476,72 +506,82 @@ export default function Workbench({
             if (canRun) startRun();
           }}
         >
-          <div className="composer-model-row">
-            <ModelPicker
-              model={state.settings.model}
-              disabled={pending === "run-options"}
-              onSelect={(model) => runOptions({ model })}
-            />
-            <select
-              aria-label="Reasoning level"
-              value={state.settings.reasoningEffort}
-              onChange={(e) =>
-                runOptions({
-                  reasoningEffort: e.target
-                    .value as Settings["reasoningEffort"],
-                })
-              }
-              title={busy ? "For the next task" : "Reasoning level"}
-              disabled={pending === "run-options"}
-            >
-              {reasoningChoices.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
           <textarea
+            ref={promptRef}
             aria-label="Task prompt"
-            placeholder="Ask Relay to do something…"
-            rows={3}
+            placeholder={run ? "Reply to Relay…" : "Ask Relay…"}
+            rows={1}
+            readOnly={voiceBusy}
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             onKeyDown={(e) => {
-              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+              if (
+                e.key === "Enter" &&
+                !e.shiftKey &&
+                !e.nativeEvent.isComposing
+              ) {
                 e.preventDefault();
                 if (canRun) startRun();
               }
             }}
           />
           <div className="composer-controls">
-            <span
-              className={`connection-state ${streamConnected ? "" : "disconnected"}`}
-              title={
-                latestContext?.inputBudget &&
-                latestContext.inputBudget < contextWindow * 0.9
-                  ? `Endpoint advertises ${contextWindow.toLocaleString()} tokens; working input budget ${Math.floor(latestContext.inputBudget).toLocaleString()} after a context rejection. ${streamConnected ? "Server connected" : "Reconnecting"}`
-                  : streamConnected
-                    ? "Server connected"
-                    : "Reconnecting to server"
+            <ModelPicker
+              providerId={state.activeProviderId}
+              model={state.settings.model}
+              label={
+                state.modelInfo?.id === state.settings.model
+                  ? state.modelInfo.name
+                  : undefined
               }
-            >
-              <i
-                className={`status-dot ${streamConnected ? "completed" : "offline"}`}
-              />
-              {inputTokens != null
-                ? `${latestUsage?.prompt_tokens == null ? "~" : ""}${tokenCount(inputTokens)} / ${tokenCount(contextWindow)}`
-                : `${tokenCount(contextWindow)} context`}
-              {latestContext?.inputBudget &&
-                latestContext.inputBudget < contextWindow * 0.9 && (
-                  <span className="budget-adjusted">
-                    {tokenCount(latestContext.inputBudget)} input budget
-                  </span>
-                )}
-              {busy && (
-                <span className="next-task-label">Changes apply next task</span>
-              )}
-            </span>
+              disabled={pending === "run-options"}
+              onSelect={(model, _context, providerId) => runOptions({ model, providerId })}
+            />
+
+            <ChoiceMenu
+              label="Reasoning level"
+              icon={<Brain size={14} />}
+              placement="top"
+              value={resolvedReasoningEffort(state.settings, state.modelInfo)}
+              options={reasoningChoices}
+              onChange={(reasoningEffort) => runOptions({ reasoningEffort })}
+              disabled={
+                pending === "run-options" || reasoningChoices.length < 2
+              }
+            />
+            <ChoiceMenu
+              label="Approval mode"
+              icon={<ShieldCheck size={13} />}
+              placement="top"
+              value={
+                state.settings.approvalMode === "never" ? "never" : "risky"
+              }
+              displayLabel={
+                state.settings.approvalMode === "never" ? "Auto" : "Ask"
+              }
+              options={[
+                {
+                  value: "never",
+                  label: "Auto-approve",
+                  description: "Run enabled tools without pausing.",
+                },
+                {
+                  value: "risky",
+                  label: "Ask permission",
+                  description: "Review browser changes before they run.",
+                },
+              ]}
+              onChange={(mode) =>
+                changeApprovalMode(mode as Settings["approvalMode"])
+              }
+              disabled={pending === "approval-mode"}
+            />
+            <UsageRing
+              run={run}
+              model={state.modelInfo}
+              connected={streamConnected}
+            />
+            <VoiceInput input={promptRef} value={prompt} onChange={setPrompt} context={`${draftId}:${newChatVersion}`} visible={visible} onBusy={setVoiceBusy} />
             {busy ? (
               <button
                 className="run-button stop-generation"
@@ -558,7 +598,7 @@ export default function Workbench({
                 className="run-button"
                 type="submit"
                 aria-label="Run task"
-                title="Run task (Ctrl+Enter)"
+                title="Run task (Enter)"
                 disabled={!canRun}
               >
                 {pending === "run" ? (
@@ -578,22 +618,7 @@ export default function Workbench({
       >
         <div className="browser-toolbar">
           <Globe size={15} />
-          <select
-            aria-label="Chrome tab"
-            value={tabId ?? ""}
-            onChange={(e) => {
-              followsBrowser.current = false;
-              setTabId(e.target.value ? Number(e.target.value) : undefined);
-              setManualShot(null);
-            }}
-          >
-            <option value="">Select tab</option>
-            {tabs.map((t) => (
-              <option value={t.id} key={t.id}>
-                {t.title || t.url}
-              </option>
-            ))}
-          </select>
+          <h2>Preview</h2>
           <div className="browser-actions">
             <button
               className="icon-button"
@@ -646,16 +671,12 @@ export default function Workbench({
           ) : (
             <div className="browser-empty">
               <Monitor size={32} strokeWidth={1.25} />
-              <h2>
-                {state.bridge.connected
-                  ? "Chrome is connected"
-                  : "Connect Chrome"}
-              </h2>
+              <h2>{state.bridge.connected ? "" : "Chrome unavailable"}</h2>
               <button
                 className="button secondary"
                 disabled={state.bridge.connected && (!tabId || !!pending)}
                 onClick={() =>
-                  state.bridge.connected ? capture() : setPage("connection")
+                  state.bridge.connected ? capture() : setPage("settings")
                 }
               >
                 {state.bridge.connected ? (

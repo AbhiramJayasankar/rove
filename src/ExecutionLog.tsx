@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import QuestionActivity from "./QuestionActivity";
 import {
   Brain,
+  ArrowDownToLine,
   Check,
   ChevronDown,
   Copy,
@@ -21,8 +23,32 @@ function reasoningText(message: any): string {
     );
   return parts.filter((part) => typeof part === "string" && part).join("\n\n");
 }
-export default function ExecutionLog({ run }: { run: RunRecord }) {
+export default function ExecutionLog({
+  run,
+  onReply,
+  replyPending,
+}: {
+  run: RunRecord;
+  onReply?: (message: string) => Promise<void>;
+  replyPending?: boolean;
+}) {
   const [expanded, setExpanded] = useState(false);
+  const pendingQuestion =
+    run.status === "awaiting_approval"
+      ? run.events.findLast((event) =>
+          [
+            "user_question",
+            "user_reply",
+            "approval_required",
+            "approval_decision",
+          ].includes(event.type),
+        )
+      : undefined;
+  const questionId =
+    pendingQuestion?.type === "user_question" ? pendingQuestion.id : undefined;
+  useEffect(() => {
+    if (questionId !== undefined) setExpanded(true);
+  }, [questionId]);
   const requests = run.events.filter((e) => e.type === "model_request");
   const calls = run.events.filter((e) => e.type === "tool_call");
   const results = new Map(
@@ -36,6 +62,7 @@ export default function ExecutionLog({ run }: { run: RunRecord }) {
       .map((e) => [`${e.data.step}:${e.data.attempt || 1}`, e]),
   );
   const running = ["running", "awaiting_approval"].includes(run.status);
+  if (!running && !requests.length && !calls.length) return null;
   return (
     <section className="execution-ledger">
       <button
@@ -52,11 +79,13 @@ export default function ExecutionLog({ run }: { run: RunRecord }) {
           )}
         </span>
         <span>
-          <strong>Execution</strong>
-          <small>
-            {requests.length} {requests.length === 1 ? "step" : "steps"} ·{" "}
-            {calls.length} tool calls
-          </small>
+          <strong>
+            {calls.length
+              ? `${calls.length} ${calls.length === 1 ? "action" : "actions"}`
+              : running
+                ? "Working…"
+                : "Model response"}
+          </strong>
         </span>
         <ChevronDown size={16} className={expanded ? "" : "collapsed"} />
       </button>
@@ -134,29 +163,60 @@ export default function ExecutionLog({ run }: { run: RunRecord }) {
                     <div className="reasoning-text">{reason}</div>
                   </details>
                 )}
-                {content && <AssistantMessage content={String(content)} />}
+                {content &&
+                  (!response ||
+                    response.data.message?.tool_calls?.length > 0) && (
+                    <AssistantMessage content={String(content)} />
+                  )}
                 {stepCalls.length > 0 && (
                   <div className="step-tools">
-                    {stepCalls.map((call) => (
-                      <ToolActivity
-                        key={call.id}
-                        event={call}
-                        result={results.get(call.data.callId)}
-                        working={running}
-                      />
-                    ))}
+                    {stepCalls.map((call) => {
+                      if (call.data.name === "ask_user") {
+                        const nextCall =
+                          calls.find((item) => item.id > call.id)?.id ??
+                          Infinity;
+                        const question = run.events.find(
+                          (event) =>
+                            event.type === "user_question" &&
+                            event.id > call.id &&
+                            event.id < nextCall,
+                        );
+                        const answer =
+                          question &&
+                          run.events.find(
+                            (event) =>
+                              event.type === "user_reply" &&
+                              event.id > question.id &&
+                              event.id < nextCall,
+                          );
+                        return (
+                          <QuestionActivity
+                            key={call.id}
+                            question={String(
+                              question?.data.question ||
+                                call.data.args.question,
+                            )}
+                            answer={answer?.data.message}
+                            waiting={
+                              question?.id === questionId &&
+                              questionId !== undefined
+                            }
+                            disabled={replyPending}
+                            onReply={onReply}
+                          />
+                        );
+                      }
+                      return (
+                        <ToolActivity
+                          key={call.id}
+                          event={call}
+                          result={results.get(call.data.callId)}
+                          working={running}
+                        />
+                      );
+                    })}
                   </div>
                 )}
-                <details className="request-details">
-                  <summary>Request & response</summary>
-                  <pre>
-                    {json({
-                      request: request.data,
-                      response: response?.data,
-                      error: rejected?.data,
-                    })}
-                  </pre>
-                </details>
               </div>
             );
           })}
@@ -166,7 +226,15 @@ export default function ExecutionLog({ run }: { run: RunRecord }) {
   );
 }
 
-export function TraceView({ events }: { events: RunEvent[] }) {
+export function TraceView({
+  events,
+  onExport,
+  exportPending,
+}: {
+  events: RunEvent[];
+  onExport?: () => void;
+  exportPending?: boolean;
+}) {
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -186,6 +254,18 @@ export function TraceView({ events }: { events: RunEvent[] }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        {onExport && (
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Export run"
+            title="Export run"
+            disabled={exportPending}
+            onClick={onExport}
+          >
+            <ArrowDownToLine size={15} />
+          </button>
+        )}
         <button
           type="button"
           className="text-button"

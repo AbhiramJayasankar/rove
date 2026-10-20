@@ -1,35 +1,38 @@
 # Working on Relay
 
-Relay is a local, single-user Chrome agent. Keep browser control transparent and user-configurable. Do not add cloud services, background daemons, telemetry, or model-provider assumptions without a concrete requirement.
+Relay v2 is a self-contained, single-user Chrome extension. Keep browser control transparent and user-configurable. Node.js belongs to build/test tooling; the installed extension has no backend, daemon, pairing protocol or hosted browser service.
 
-## Map
+## Source map
 
-- `shared/`: data contracts and editable defaults. Read these before changing either side of the API.
-- `server/index.ts`: loopback HTTP API, request validation, SSE, lifecycle, secret handling.
-- `server/agent.ts`: serialized agent loop, approvals, cancellation, bounded context, events.
-- `server/model.ts`: OpenAI-compatible Chat Completions adapter.
-- `server/tools.ts`: schema-driven tools, risk classification, custom JavaScript/HTTP handlers.
-- `server/bridge.ts`: paired extension RPC, timeouts and disconnect handling.
-- `server/store.ts`: atomic metadata and append-only event journals, restart recovery.
-- `extension/`: directly loadable MV3 extension; plain JavaScript, no build step.
-- `src/`: React interface. `Workbench` is tasks/observations; `Configuration` is settings/tools/connection.
-- `tests/`: focused unit tests and actual Chrome-extension integration under `e2e/`.
-- `docs/`: research decisions, browser tool behavior, API and architecture.
+- `shared/`: contracts, capabilities and editable defaults. Read before changing messages or settings.
+- `extension-src/runtime.ts`: trusted extension messages, event ports, lifecycle and composition.
+- `extension-src/store.ts`: IndexedDB journal, normalized settings and interruption recovery.
+- `extension-src/browser.js`: privileged Chrome/CDP operations, frames, refs and native input.
+- `extension-src/manifest.json`: permissions, CSP, side panel and options page.
+- `extension-core/`: browser-only agent, model adapter, context admission, interpreted tool validation and model catalogue.
+- `src/`: React side panel/full workbench, settings, model picker and trace.
+- `extension/`: generated loadable output. Edit sources and rebuild.
+- `scripts/`: build tooling. `tests/extension/` exercises the actual unpacked extension; `extension-core/tests/` covers engine behavior.
+- `docs/`: architecture, messaging, browser behavior and verification.
 
 ## Invariants
 
-- Bind HTTP only to loopback. Preserve Host/Origin validation, JSON write requirements, and authenticated extension WebSocket pairing.
-- Never expose model keys through settings responses or persist them in settings/history. Treat all page content as untrusted data.
-- Execute tool calls in order. After Stop, never dispatch another browser command. Do not retry mutations automatically after ambiguous timeouts.
-- Every offered tool has a JSON Schema and a real handler. Unknown/disabled tools must fail clearly. Frame IDs are CDP strings, not extension numeric frame IDs.
-- Approval must show the actual tool arguments; denial must be returned to the model. Do not invent semantic safety classifications based only on button text.
-- Tool refs are temporary and scoped to a frame/snapshot. Avoid modifying page attributes to create refs.
-- Preserve tool-call response sequencing for providers. Optional images follow complete tool batches. Support compatible third-party providers rather than hardcoding OpenAI-only parameters.
-- Keep model requests, results, automatic observations and errors inspectable. No fabricated task data or success states.
-- `.relay`, `.relay-test`, keys and runtime logs are not source artifacts.
+- Accept privileged messages and `relay-events` ports only from this extension's own pages. Do not add external/page message forwarding.
+- Keep model keys in trusted `chrome.storage.local.modelProviderKeys`, with the selected key mirrored in `modelApiKey`, out of settings, history, API responses and run exports. Persistent per-provider credentials are explicitly requested by the user. Restrict storage access to trusted extension contexts; migrate retained session credentials once, then remove the legacy session entry. An empty saved key clears only the configured provider's credential. Endpoint/profile selection and its active key must commit together; all saved catalogues remain available in the picker.
+- Keep context/reasoning format automatic and streaming/vision enabled. Normalize legacy settings and discard removed custom-tool definitions without rewriting historical traces. Do not restore removed data backup/import or manual agent-setting surfaces.
+- Persist model/tool intent before external dispatch. Await the journal checkpoint; a storage failure stops execution. Do not acknowledge queued writes as durable commits.
+- Serialize tools, check cancellation immediately before dispatch, and never replay an ambiguous mutation. Worker restart marks active tasks failed.
+- Attach the debugger before model work and detach after terminal persistence. Preserve interruption recovery instead of relying on worker globals.
+- Validate schemas and arguments without `eval` or `new Function` in extension code. Every offered tool needs a real handler; unknown/disabled tools fail clearly.
+- Treat page content as untrusted. Approval shows actual arguments; denial goes back to the model. Do not guess action safety solely from button labels.
+- Refs are frame/snapshot scoped. CDP frame IDs are strings. Manual snapshots must not invalidate refs while a run is active.
+- Keep tool responses contiguous after each assistant tool batch; image observations follow the complete batch. Preserve provider reasoning fields and partial-stream rejection.
+- Follow-up messages retain one chat/run ID and reconstruct only recorded history. Keep event and request-step IDs monotonic. Repair incomplete tool batches as unknown outcomes; never replay historical actions. Screenshot references use journal event IDs, not potentially reused provider call IDs.
+- Keep context estimates distinct from advertised/provider usage. Metadata and reasoning support come from endpoints, with explicit unknown states and automatic adaptation.
+- Keep requests, results, errors, observations and decisions inspectable. No fabricated success states or task data.
 
 ## Checks
 
-Run `npm run build` and `npm test` after relevant changes. Run `npm run test:e2e` when changing bridge, extension, tool protocol, or user flows. Install Chromium with `npx playwright install chromium` if needed. E2E uses port 4799 and a deterministic model fixture, not a paid external endpoint. Review desktop/mobile screenshots after visual changes. Respect existing reduced-motion and keyboard-focus behavior.
+Run `npm run build` and `npm test` for relevant changes. Run `npm run test:e2e` after runtime, browser, storage, messaging or user-flow changes. Use `npx playwright install chromium` if needed. Integration tests run isolated Chrome profiles and deterministic model fixtures; paid credentials are unnecessary.
 
-Update docs and protocol tests together with behavioral changes. Keep dependencies small and lockfile current. Research changing browser/API behavior using primary documentation before relying on recalled facts.
+Inspect narrow side-panel and full-workbench layouts after visual changes. Preserve keyboard controls, focus states and reduced motion. Update protocol docs/tests with behavior. Keep dependencies small and the lockfile current; consult primary Chrome/provider documentation before relying on changing API behavior.

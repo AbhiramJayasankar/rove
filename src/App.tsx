@@ -1,40 +1,42 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  ArrowUpRight,
+  ArrowLeft,
   Check,
   CircleAlert,
+  History,
   LoaderCircle,
   Plus,
-  Plug,
   Route,
   Settings2,
-  Square,
+  Moon,
+  Sun,
   X,
 } from "lucide-react";
-import type {
-  AppState,
-  CustomTool,
-  RunEvent,
-  RunRecord,
-  Settings,
-} from "../shared/types";
+import type { AppState, RunEvent, RunRecord, Settings } from "../shared/types";
 import { DEFAULT_SETTINGS } from "../shared/defaults";
-import { api, json, type Action, type Page, type Pairing } from "./ui";
+import { api, json, type Action, type Page } from "./ui";
+import { RuntimeEventSource as EventSource } from "./transport";
 import Workbench from "./Workbench";
 import Configuration from "./Configuration";
+import HistoryDialog from "./HistoryDialog";
+import { applyTheme, readTheme } from "./theme";
 
 export default function App() {
+  const [theme, setTheme] = useState(readTheme);
+  useEffect(() => applyTheme(theme), [theme]);
+  const historyDialog = useRef<HTMLDialogElement>(null);
   const [state, setState] = useState<AppState | null>(null);
   const [draft, setDraft] = useState<Settings>(DEFAULT_SETTINGS);
+  const [providerName, setProviderName] = useState("");
+  const providerRef = useRef<string | undefined>(undefined);
   const [page, setPage] = useState<Page>("workbench");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [newChatVersion, setNewChatVersion] = useState(0);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [pending, setPending] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [keyChanged, setKeyChanged] = useState(false);
-  const [pairing, setPairing] = useState<Pairing | null>(null);
-  const [customText, setCustomText] = useState("[]");
   const [streamConnected, setStreamConnected] = useState(false);
   const run = state?.runs.find((r) => r.id === selectedId);
   const activeRun = state?.runs.find((r) => r.id === state.activeRunId);
@@ -43,7 +45,9 @@ export default function App() {
   function mergeRun(incoming: RunRecord) {
     setState((previous) => {
       if (!previous) return previous;
-      const old = previous.runs.find((r) => r.id === incoming.id);
+      const existing = previous.runs.find((r) => r.id === incoming.id);
+      if ((incoming.revision || 0) < (existing?.revision || 0)) return previous;
+      const old = incoming.revision === existing?.revision ? existing : undefined;
       const older =
         (incoming.events.at(-1)?.id || 0) < (old?.events.at(-1)?.id || 0);
       const events = [
@@ -69,7 +73,7 @@ export default function App() {
         runs: [
           merged,
           ...previous.runs.filter((r) => r.id !== incoming.id),
-        ].sort((a, b) => b.createdAt.localeCompare(a.createdAt)),
+        ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)),
       };
     });
   }
@@ -80,15 +84,35 @@ export default function App() {
       .then((initial) => {
         if (cancelled) return;
         setState(initial);
+        providerRef.current = initial.activeProviderId;
         setDraft(initial.settings);
-        setCustomText(json(initial.settings.customTools));
+        setProviderName(initial.providers.find(provider => provider.id === initial.activeProviderId)?.name || "Provider");
         setSelectedId(initial.activeRunId || initial.runs[0]?.id || null);
         source = new EventSource("/api/events");
         source.onopen = () => setStreamConnected(true);
         source.onerror = () => setStreamConnected(false);
-        source.addEventListener("state", (event) =>
-          setState(JSON.parse((event as MessageEvent).data)),
-        );
+        source.addEventListener("state", (event) => {
+          const incoming: AppState = JSON.parse(event.data);
+          setState((old) => ({
+            ...incoming,
+            runs: incoming.runs.map((record) => {
+              const previous = old?.runs.find((item) => item.id === record.id);
+              return previous?.events.length && previous.revision === record.revision
+                ? {
+                    ...record,
+                    events: [
+                      ...new Map(
+                        [...previous.events, ...record.events].map((item) => [
+                          item.id,
+                          item,
+                        ]),
+                      ).values(),
+                    ].sort((a, b) => a.id - b.id),
+                  }
+                : record;
+            }),
+          }));
+        });
         source.addEventListener("bridge", (event) =>
           setState((old) =>
             old
@@ -103,9 +127,15 @@ export default function App() {
         });
         source.addEventListener("settings", (event) => {
           const settings = JSON.parse((event as MessageEvent).data);
+          if (settings.activeProviderId !== providerRef.current) {
+            setApiKey(""); setKeyChanged(false); setDraft(settings.settings);
+            providerRef.current = settings.activeProviderId;
+          }
           setState((old) => (old ? { ...old, ...settings } : old));
+          setProviderName(settings.providers?.find((provider: { id: string }) => provider.id === settings.activeProviderId)?.name || "Provider");
           setDraft((old) => ({
             ...old,
+            baseUrl: settings.settings.baseUrl,
             approvalMode: settings.settings.approvalMode,
             model: settings.settings.model,
             reasoningEffort: settings.settings.reasoningEffort,
@@ -196,11 +226,19 @@ export default function App() {
     };
   }, [state?.settings.baseUrl, state?.settings.model]);
   useEffect(() => {
-    if (page === "connection")
-      api<Pairing>("/api/pairing")
-        .then(setPairing)
-        .catch((e) => setError(e.message));
-  }, [page]);
+    if (!selectedId) return;
+    let cancelled = false;
+    api<RunRecord>(`/api/runs/${selectedId}`)
+      .then((record) => {
+        if (!cancelled) mergeRun(record);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedId]);
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(""), 3000);
@@ -220,29 +258,23 @@ export default function App() {
   function update<K extends keyof Settings>(key: K, value: Settings[K]) {
     setDraft((old) => ({ ...old, [key]: value }));
   }
-  async function saveSettings() {
+  async function saveSettings(saveVoice?: () => Promise<void>) {
     await action("save", async () => {
-      let customTools: CustomTool[];
-      try {
-        customTools = JSON.parse(customText);
-      } catch {
-        throw new Error("Custom tools must be valid JSON.");
-      }
-      if (!Array.isArray(customTools))
-        throw new Error("Custom tools must be an array.");
+      await saveVoice?.();
       const result = await api<{ settings: Settings; hasApiKey: boolean }>(
         "/api/settings",
         {
           method: "PUT",
           body: json({
             ...draft,
-            customTools,
+            providerName,
+            providerId: state?.activeProviderId,
+
             ...(keyChanged ? { apiKey } : {}),
           }),
         },
       );
       setDraft(result.settings);
-      setCustomText(json(result.settings.customTools));
       setState((old) => (old ? { ...old, ...result } : old));
       setApiKey("");
       setKeyChanged(false);
@@ -250,139 +282,110 @@ export default function App() {
     });
   }
   async function changeApprovalMode(mode: Settings["approvalMode"]) {
+    const previous = state?.settings.approvalMode || "never";
+    setState((old) =>
+      old ? { ...old, settings: { ...old.settings, approvalMode: mode } } : old,
+    );
+    update("approvalMode", mode);
     await action("approval-mode", async () => {
-      const result = await api<{ settings: Settings; hasApiKey: boolean }>(
-        "/api/approval-mode",
-        { method: "PUT", body: json({ mode }) },
-      );
-      setState((old) => (old ? { ...old, ...result } : old));
-      update("approvalMode", mode);
+      try {
+        const result = await api<{ settings: Settings; hasApiKey: boolean }>(
+          "/api/approval-mode",
+          { method: "PUT", body: json({ mode }) },
+        );
+        setState((old) => (old ? { ...old, ...result } : old));
+      } catch (error) {
+        setState((old) =>
+          old
+            ? { ...old, settings: { ...old.settings, approvalMode: previous } }
+            : old,
+        );
+        update("approvalMode", previous);
+        throw error;
+      }
     });
   }
-  async function copy(value: string) {
-    try {
-      await navigator.clipboard.writeText(value);
-      setNotice("Copied");
-    } catch {
-      setError("Select the text and copy it manually.");
-    }
+  async function changeProvider(id: string, model?: string) {
+    await action("provider", async () => {
+      const add = id.startsWith("add:");
+      const result = await api<Pick<AppState, "settings" | "providers" | "activeProviderId" | "hasApiKey" | "modelInfo">>("/api/providers", {
+        method: id === "remove" ? "DELETE" : add ? "POST" : "PUT",
+        body: json(id === "remove" ? { id: state?.activeProviderId } : add ? {
+          name: id === "add:openrouter" ? "OpenRouter" : "New provider",
+          baseUrl: id === "add:openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1",
+        } : { id, model }),
+      });
+      setState(old => old ? { ...old, ...result } : old); setDraft(result.settings);
+      setProviderName(result.providers.find(provider => provider.id === result.activeProviderId)?.name || "Provider");
+      setApiKey(""); setKeyChanged(false);
+    });
   }
-  const pageTitle =
-    page === "workbench" ? run?.prompt || "New task" : "Settings";
+
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <header className="extension-header">
         <button
-          className="brand"
-          aria-label="Relay workbench"
+          className={page === "workbench" ? "brand" : "back-to-chat"}
+          aria-label={page === "workbench" ? "Relay workbench" : "Back to chat"}
           onClick={() => setPage("workbench")}
         >
-          <Route size={22} />
-          <span>Relay</span>
+          {page === "workbench" ? (
+            <>
+              <Route size={20} />
+              <span>Relay</span>
+            </>
+          ) : (
+            <>
+              <ArrowLeft size={17} />
+              <span>Back to chat</span>
+            </>
+          )}
         </button>
-        <button
-          className="new-task"
-          aria-label="New task"
-          title="New task"
-          onClick={() => {
-            setSelectedId(null);
-            setPage("workbench");
-          }}
-        >
-          <Plus size={17} />
-          <span>New task</span>
-        </button>
-        <div className="run-list" aria-label="Task history">
-          {state?.runs.map((item) => (
+        <div className="header-actions">
+          <button
+            className="icon-button"
+            aria-label={theme === "light" ? "Use dark mode" : "Use light mode"}
+            title={theme === "light" ? "Dark mode" : "Light mode"}
+            onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+          >
+            {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
+          </button>
+          <button
+            className="icon-button"
+            aria-label="Task history"
+            title="History"
+            onClick={() => historyDialog.current?.showModal()}
+          >
+            <History size={18} />
+          </button>
+          {!busy && (
             <button
-              key={item.id}
-              title={item.prompt}
-              aria-label={item.prompt}
-              className={`run-item ${selectedId === item.id && page === "workbench" ? "selected" : ""}`}
+              className="icon-button"
+              aria-label="New task"
+              title="New task"
               onClick={() => {
-                setSelectedId(item.id);
+                setSelectedId(null);
+                setNewChatVersion((value) => value + 1);
                 setPage("workbench");
               }}
             >
-              <span className={`status-dot ${item.status}`} />
-              <span className="run-title">{item.prompt}</span>
+              <Plus size={20} />
             </button>
-          ))}
-        </div>
-        <div className="sidebar-bottom">
+          )}
           <button
-            className={`sidebar-item ${page === "connection" ? "selected" : ""}`}
-            aria-label="Chrome connection"
-            title="Chrome connection"
-            onClick={() => setPage("connection")}
-          >
-            <Plug size={17} />
-            <span>Chrome</span>
-            <i
-              className={`status-dot ${state?.bridge.connected ? "completed" : "offline"}`}
-            />
-          </button>
-          <button
-            className={`sidebar-item ${!["workbench", "connection"].includes(page) ? "selected" : ""}`}
+            className={`icon-button ${page !== "workbench" ? "selected" : ""}`}
             aria-label="Settings"
             title="Settings"
-            onClick={() => setPage("settings")}
+            aria-pressed={page !== "workbench"}
+            onClick={() =>
+              setPage(page === "workbench" ? "settings" : "workbench")
+            }
           >
-            <Settings2 size={17} />
-            <span>Settings</span>
+            <Settings2 size={18} />
           </button>
         </div>
-      </aside>
+      </header>
       <main className="main-shell">
-        <header className="topbar">
-          <h1 title={pageTitle}>{pageTitle}</h1>
-          <div className="topbar-actions">
-            {page === "workbench" && state && (
-              <label
-                className="auto-control"
-                title="Automatically run enabled tools. Questions still pause for your answer."
-              >
-                <input
-                  type="checkbox"
-                  role="switch"
-                  aria-label="Auto-approve"
-                  checked={state.settings.approvalMode === "never"}
-                  disabled={pending === "approval-mode"}
-                  onChange={(e) =>
-                    changeApprovalMode(e.target.checked ? "never" : "risky")
-                  }
-                />
-                <span className="switch" aria-hidden="true" />
-                <span>Auto-approve</span>
-              </label>
-            )}
-            {busy && (
-              <button
-                className="button danger compact"
-                disabled={pending === "stop"}
-                onClick={() =>
-                  action("stop", async () => {
-                    await api(`/api/runs/${activeRun!.id}/stop`, {
-                      method: "POST",
-                    });
-                  })
-                }
-              >
-                <Square size={12} fill="currentColor" />
-                Stop
-              </button>
-            )}
-            <button
-              className="model-button"
-              aria-label="Model settings"
-              title={state?.settings.model || "Set up model"}
-              onClick={() => setPage("settings")}
-            >
-              {state?.settings.model || "Set up model"}
-              <ArrowUpRight size={13} />
-            </button>
-          </div>
-        </header>
         {error && (
           <div className="message error" role="alert">
             <CircleAlert size={17} />
@@ -407,46 +410,60 @@ export default function App() {
             <LoaderCircle size={22} className="spin" />
             <span>Connecting…</span>
           </div>
-        ) : page === "workbench" ? (
-          <Workbench
-            state={state}
-            setState={setState}
-            run={run}
-            activeRun={activeRun}
-            busy={busy}
-            pending={pending}
-            action={action}
-            setPage={setPage}
-            selectRun={setSelectedId}
-            mergeRun={mergeRun}
-            streamConnected={streamConnected}
-            changeApprovalMode={changeApprovalMode}
-          />
         ) : (
-          <Configuration
-            state={state}
-            draft={draft}
-            update={update}
-            page={page}
-            setPage={setPage}
-            pending={pending}
-            action={action}
-            saveSettings={saveSettings}
-            apiKey={apiKey}
-            setApiKey={(value) => {
-              setApiKey(value);
-              setKeyChanged(true);
-            }}
-            keyChanged={keyChanged}
-            pairing={pairing}
-            setPairing={setPairing}
-            customText={customText}
-            setCustomText={setCustomText}
-            copy={copy}
-            notice={setNotice}
-          />
+          <>
+            <div className="workbench-slot" hidden={page !== "workbench"}>
+              <Workbench
+                newChatVersion={newChatVersion}
+                state={state}
+                setState={setState}
+                run={run}
+                activeRun={activeRun}
+                busy={busy}
+                pending={pending}
+                action={action}
+                setPage={setPage}
+                selectRun={setSelectedId}
+                mergeRun={mergeRun}
+                streamConnected={streamConnected}
+                changeApprovalMode={changeApprovalMode}
+                visible={page === "workbench"}
+              />
+            </div>
+            {page !== "workbench" && (
+              <Configuration
+                providerName={providerName}
+                setProviderName={setProviderName}
+                changeProvider={changeProvider}
+                state={state}
+                draft={draft}
+                update={update}
+                page={page}
+                setPage={setPage}
+                pending={pending}
+                action={action}
+                saveSettings={saveSettings}
+                apiKey={apiKey}
+                setApiKey={(value) => {
+                  setApiKey(value);
+                  setKeyChanged(true);
+                }}
+                keyChanged={keyChanged}
+                notice={setNotice}
+              />
+            )}
+          </>
         )}
       </main>
+      <HistoryDialog
+        dialogRef={historyDialog}
+        runs={state?.runs || []}
+        selectedId={selectedId}
+        onSelect={(id) => {
+          setSelectedId(id);
+          setPage("workbench");
+        }}
+      />
     </div>
   );
 }
