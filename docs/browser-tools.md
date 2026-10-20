@@ -36,7 +36,7 @@ Forced service-worker termination can leave Chrome's extension-owned debugger se
 
 ## Tabs, frames, and references
 
-Before using a cached debugger attachment, each browser operation probes the root session. If Chrome has disconnected it, Relay clears the stale cache and stops an active task. It does not replay the rejected command. A new task or manual observation acquires a fresh session. Browser detach notifications also stop an active task immediately, including cancellation from Chrome's debugger banner.
+Before using a cached debugger attachment, each browser operation probes the root session. If Chrome has disconnected it, Relay clears the stale cache and stops an active task. It does not replay the rejected command. A new task or manual observation acquires a fresh session. A detach notification stops an active task only when the user cancels Chrome's debugger banner or the tab the task is working in is lost. A different tab it used earlier, or a command timeout, is reported to the model on its next use instead.
 
 Most tools accept an optional numeric `tabId`. An explicit ID is preferable: without one the bridge uses its last controlled tab, or chooses an active controllable tab. `browser_tabs` returns IDs, titles, URLs, active state, and a `controllable` flag. A tab listed by Chrome is not necessarily controllable.
 
