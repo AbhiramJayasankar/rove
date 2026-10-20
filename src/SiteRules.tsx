@@ -2,6 +2,14 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { normalizePattern, type SiteAction, type SiteRule } from "../shared/siteRules";
 import { useT } from "./i18n";
+import Tooltip from "./Tooltip";
+
+const ruleHint = (action: SiteAction, t: (text: string) => string) =>
+  action === "allow"
+    ? t("Act on this site without asking. Dangerous tools still ask in Ask first mode.")
+    : action === "ask"
+      ? t("Always ask before acting here, even in Auto-approve.")
+      : t("Never open or act on this site.");
 
 const actions: { value: SiteAction; label: string }[] = [
   { value: "allow", label: "Allow" },
@@ -22,6 +30,12 @@ export default function SiteRules({ rules, onChange }: { rules: SiteRule[]; onCh
     <>
       <div className="settings-heading">
         <h2 className="settings-title">{t("Site rules")}</h2>
+        <Tooltip label={t("About site rules")}>
+          <p>{t("A rule covers a site and its subdomains. The most specific rule wins; a tie takes the stricter choice.")}</p>
+          <p><b>{t("Allow")}.</b> {t("Act on this site without asking. Dangerous tools still ask in Ask first mode.")}</p>
+          <p><b>{t("Ask")}.</b> {t("Always ask before acting here, even in Auto-approve.")}</p>
+          <p><b>{t("Block")}.</b> {t("Never open or act on this site.")}</p>
+        </Tooltip>
       </div>
       <div className="panel rules-panel">
         {rules.map((rule) => (
@@ -35,6 +49,7 @@ export default function SiteRules({ rules, onChange }: { rules: SiteRule[]; onCh
                   role="radio"
                   aria-checked={rule.action === choice.value}
                   className={`rule-${choice.value}`}
+                  title={ruleHint(choice.value, t)}
                   onClick={() => onChange(rules.map((item) => (item.pattern === rule.pattern ? { ...item, action: choice.value } : item)))}
                 >
                   {t(choice.label)}

@@ -28,6 +28,8 @@ import ModelPicker from "./ModelPicker";
 import UsageRing from "./UsageRing";
 import ShortcutMenu, { shortcutMatches, slashQuery } from "./ShortcutMenu";
 import AttachButton from "./AttachButton";
+import Tooltip from "./Tooltip";
+import { ToolDetails } from "./toolInfo";
 import { attachmentPayload, type Attachment } from "./attachments";
 import { shortcutText, useShortcuts, type Shortcut } from "./shortcuts";
 import VoiceInput from "./VoiceInput";
@@ -385,6 +387,11 @@ export default function Workbench({
             <>
               <strong>
                 {toolTitle(approval.data.tool, approval.data.args, t)}
+                {state.tools.find((tool) => tool.name === approval.data.tool) && (
+                  <Tooltip label={t("About {name}", { name: toolTitle(approval.data.tool, {}, t) })} width={320}>
+                    <ToolDetails tool={state.tools.find((tool) => tool.name === approval.data.tool)!} t={t} />
+                  </Tooltip>
+                )}
               </strong>
               {approval.data.reason === "site rule" && (
                 <p className="decision-note">{t("Your site rules ask before acting on {site}.", { site: String(approval.data.site) })}</p>

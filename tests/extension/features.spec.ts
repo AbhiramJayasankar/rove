@@ -98,3 +98,29 @@ test("attaches a text file from the paperclip, shows it on the message, and send
   // The message in the chat keeps a chip for what was attached.
   await expect(ui.locator(".user-message").getByText("notes.txt")).toBeVisible();
 });
+
+test("tool tooltips explain each tool, its risk and its inputs, and group headings explain themselves", async () => {
+  await ui.getByRole("button", { name: "Settings", exact: true }).click();
+  await ui.getByRole("button", { name: "Tools", exact: true }).click();
+  await ui.getByRole("button", { name: "About Read page", exact: true }).hover();
+  const tip = ui.getByRole("tooltip");
+  await expect(tip).toContainText("browser_snapshot");
+  await expect(tip).toContainText("Only reads or observes");
+  await expect(tip).toContainText("Never asks for approval");
+  await expect(tip).toContainText("textOffset");
+  await expect(tip).toContainText("whole number");
+  await ui.screenshot({ path: "test-results/tool-tooltip.png" });
+  await ui.mouse.move(5, 400);
+  await expect(tip).toHaveCount(0);
+  // Keyboard users get the same explanation, and Escape closes it.
+  await ui.getByRole("button", { name: "About Open page", exact: true }).focus();
+  await expect(ui.getByRole("tooltip")).toContainText("url");
+  await expect(ui.getByRole("tooltip")).toContainText("required");
+  await ui.keyboard.press("Escape");
+  await expect(ui.getByRole("tooltip")).toHaveCount(0);
+  await ui.getByRole("button", { name: "About Dangerous", exact: true }).hover();
+  await expect(ui.getByRole("tooltip")).toContainText("Off by default");
+  await ui.getByRole("button", { name: "About site rules", exact: true }).hover();
+  await expect(ui.getByRole("tooltip")).toContainText("most specific rule wins");
+  await ui.getByRole("button", { name: "Back to chat", exact: true }).click();
+});

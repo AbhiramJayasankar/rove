@@ -19,6 +19,8 @@ import {
 import type { AppState, Settings } from "../shared/types";
 import { DEFAULT_PROMPT } from "../shared/defaults";
 import ModelChecklist from "./ModelChecklist";
+import Tooltip from "./Tooltip";
+import { ToolDetails, approvalNote, riskExplanation, riskLabel } from "./toolInfo";
 import ShortcutsEditor from "./ShortcutsEditor";
 import SiteRules from "./SiteRules";
 import { useShortcutsEditor } from "./shortcuts";
@@ -301,8 +303,13 @@ export default function Configuration({
           <section className="tools-settings">
             <div className="settings-heading">
               <h2 className="settings-title">{t("Browser tools")}</h2>
-              <span className="tool-count" aria-label={t("{n} of {total} enabled", { n: enabledCount, total: state.tools.length })}>
-                <strong>{enabledCount}</strong>/{state.tools.length}
+              <span className="tool-count-wrap">
+                <span className="tool-count" aria-label={t("{n} of {total} enabled", { n: enabledCount, total: state.tools.length })}>
+                  <strong>{enabledCount}</strong>/{state.tools.length}
+                </span>
+                <Tooltip label={t("About tool switches")}>
+                  <p>{t("Tools the model can use. A tool you turn off is hidden from the model completely.")}</p>
+                </Tooltip>
               </span>
             </div>
             <input
@@ -316,7 +323,11 @@ export default function Configuration({
             {groups.map(({ risk, items }) => (
               <div className="tool-group" key={risk}>
                 <h3 className={`tool-group-title ${risk}`}>
-                  {risk === "read" ? t("Look") : risk === "write" ? t("Act") : t("Dangerous")}
+                  {riskLabel(risk, t)}
+                  <Tooltip label={t("About {name}", { name: riskLabel(risk, t) })}>
+                    <p>{riskExplanation(risk, t)}</p>
+                    <p>{approvalNote(risk, t)}</p>
+                  </Tooltip>
                 </h3>
                 <div className="panel tools-list">
                   {items.map((tool) => (
@@ -332,6 +343,9 @@ export default function Configuration({
                           </pre>
                         </details>
                       </div>
+                      <Tooltip label={t("About {name}", { name: toolTitle(tool.name, {}, t) })} width={320}>
+                        <ToolDetails tool={tool} t={t} />
+                      </Tooltip>
                       <label className="tool-toggle">
                         <input
                           type="checkbox"
