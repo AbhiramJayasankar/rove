@@ -1,11 +1,16 @@
 import { useState } from "react";
 import {
   Check,
+  Cpu,
   Eye,
   EyeOff,
   LoaderCircle,
+  Minus,
+  Plus,
   RotateCcw,
+  ScrollText,
   Trash2,
+  Wrench,
 } from "lucide-react";
 import type { AppState, Settings } from "../shared/types";
 import { DEFAULT_PROMPT } from "../shared/defaults";
@@ -55,27 +60,37 @@ export default function Configuration({
     state.modelInfo?.id === draft.model
       ? state.modelInfo
       : null;
-  const tabs: [Page, string][] = [
-    ["settings", "Model"],
-    ["instructions", "Instructions"],
-    ["tools", "Tools"],
+  const tabs: [Page, string, typeof Cpu][] = [
+    ["settings", "Model", Cpu],
+    ["instructions", "Instructions", ScrollText],
+    ["tools", "Tools", Wrench],
   ];
+  const enabledCount = state.tools.length - draft.disabledTools.length;
   const tools = state.tools.filter((tool) =>
     (tool.name + tool.description)
       .toLowerCase()
       .includes(toolSearch.toLowerCase()),
   );
+  const groups = (["read", "write", "danger"] as const)
+    .map((risk) => ({ risk, items: tools.filter((tool) => tool.risk === risk) }))
+    .filter((group) => group.items.length);
   return (
     <section className="settings-page">
       <div className="settings-nav">
-        <nav aria-label="Settings sections">
-          {tabs.map(([id, label]) => (
+        <nav
+          aria-label="Settings sections"
+          className="settings-tabs"
+          style={{ "--tab-index": tabs.findIndex(([id]) => id === page) } as React.CSSProperties}
+        >
+          <span className="settings-tabs-thumb" aria-hidden="true" />
+          {tabs.map(([id, label, Icon]) => (
             <button
               aria-current={page === id ? "page" : undefined}
               className={page === id ? "selected" : ""}
               key={id}
               onClick={() => setPage(id)}
             >
+              <Icon size={15} aria-hidden="true" />
               {label}
             </button>
           ))}
@@ -89,20 +104,15 @@ export default function Configuration({
         )}
         {page === "settings" ? (
           <section className="connection-settings">
-            <div className="settings-heading">
-              <h1>Language model</h1>
-            </div>
-            <div className="connection-fields">
-              <div className="field">
-                <span>Provider</span>
-                <div className="provider-picker-row">
-                  <ChoiceMenu label="Configure provider" value={state.activeProviderId} options={[
-                    ...state.providers.map(provider => ({ value: provider.id, label: provider.name })),
-                    { value: "add:openrouter", label: "+ Add OpenRouter" },
-                    { value: "add:custom", label: "+ Add compatible provider" },
-                  ]} onChange={id => void changeProvider(id)} disabled={!!pending || !!state.activeRunId} />
-                  <button type="button" className="icon-button" aria-label="Remove provider" title="Remove provider" disabled={!!pending || !!state.activeRunId || state.providers.length < 2} onClick={() => void changeProvider("remove")}><Trash2 size={15} /></button>
-                </div>
+            <h2 className="settings-title">Language model</h2>
+            <div className="panel provider-panel">
+              <div className="provider-picker-row">
+                <ChoiceMenu label="Configure provider" value={state.activeProviderId} options={[
+                  ...state.providers.map(provider => ({ value: provider.id, label: provider.name })),
+                  { value: "add:openrouter", label: "+ Add OpenRouter" },
+                  { value: "add:custom", label: "+ Add compatible provider" },
+                ]} onChange={id => void changeProvider(id)} disabled={!!pending || !!state.activeRunId} />
+                <button type="button" className="icon-button" aria-label="Remove provider" title="Remove provider" disabled={!!pending || !!state.activeRunId || state.providers.length < 2} onClick={() => void changeProvider("remove")}><Trash2 size={15} /></button>
               </div>
               <label className="field"><span>Provider name</span><input value={providerName} maxLength={80} onChange={event => setProviderName(event.target.value)} /></label>
               <label className="field">
@@ -163,6 +173,8 @@ export default function Configuration({
                   )}
                 </div>
               </div>
+            </div>
+            <div className="panel model-panel">
               <div className="field model-connection-field">
                 <span>Model</span>
                 <ModelPicker
@@ -179,43 +191,47 @@ export default function Configuration({
                     update("reasoningEffort", "default");
                   }}
                 />
+                {info && (info.contextWindow || info.maxOutputTokens) && (
+                  <div className="connection-facts">
+                    {info.contextWindow && (
+                      <span>
+                        <strong>{tokenCount(info.contextWindow)}</strong> context
+                      </span>
+                    )}
+                    {info.maxOutputTokens && (
+                      <span>
+                        <strong>{tokenCount(info.maxOutputTokens)}</strong> max output
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+              <div className="tool-round-limit">
+                <label htmlFor="step-limit">Step limit</label>
+                <div className="stepper">
+                  <button type="button" className="icon-button" aria-label="Fewer steps" disabled={!!state.activeRunId || draft.maxSteps <= 1} onClick={() => update("maxSteps", Math.max(1, draft.maxSteps - 1))}><Minus size={14} /></button>
+                  <input
+                    id="step-limit"
+                    type="number"
+                    min={1}
+                    max={200}
+                    step={1}
+                    value={draft.maxSteps}
+                    disabled={!!state.activeRunId}
+                    onChange={(event) =>
+                      update("maxSteps", Math.max(1, Math.min(200, Math.trunc(event.target.valueAsNumber) || 1)))
+                    }
+                  />
+                  <button type="button" className="icon-button" aria-label="More steps" disabled={!!state.activeRunId || draft.maxSteps >= 200} onClick={() => update("maxSteps", Math.min(200, draft.maxSteps + 1))}><Plus size={14} /></button>
+                </div>
               </div>
             </div>
-            {info && (
-              <div className="connection-facts">
-                {info.contextWindow && (
-                  <span>
-                    <strong>{tokenCount(info.contextWindow)}</strong> context
-                  </span>
-                )}
-                {info.maxOutputTokens && (
-                  <span>
-                    <strong>{tokenCount(info.maxOutputTokens)}</strong> max
-                    output
-                  </span>
-                )}
-              </div>
-            )}
-            <label className="field tool-round-limit">
-              <span>Step limit</span>
-              <input
-                type="number"
-                min={1}
-                max={200}
-                step={1}
-                value={draft.maxSteps}
-                disabled={!!state.activeRunId}
-                onChange={(event) =>
-                  update("maxSteps", Math.max(1, Math.min(200, Math.trunc(event.target.valueAsNumber) || 1)))
-                }
-              />
-            </label>
             <VoiceSettings voice={voice} />
           </section>
         ) : page === "instructions" ? (
           <section className="instructions-settings">
             <div className="settings-heading">
-              <h1>System instructions</h1>
+              <h2 className="settings-title">System instructions</h2>
               <button
                 type="button"
                 className="icon-button"
@@ -226,21 +242,22 @@ export default function Configuration({
                 <RotateCcw size={16} />
               </button>
             </div>
-            <textarea
-              aria-label="System instructions"
-              className="instructions-editor"
-              value={draft.systemPrompt}
-              onChange={(e) => update("systemPrompt", e.target.value)}
-              spellCheck={false}
-            />
+            <div className="panel editor-panel">
+              <textarea
+                aria-label="System instructions"
+                className="instructions-editor"
+                value={draft.systemPrompt}
+                onChange={(e) => update("systemPrompt", e.target.value)}
+                spellCheck={false}
+              />
+            </div>
           </section>
         ) : (
           <section className="tools-settings">
             <div className="settings-heading">
-              <h1>Browser tools</h1>
-              <span className="tool-count">
-                {state.tools.length - draft.disabledTools.length} /{" "}
-                {state.tools.length}
+              <h2 className="settings-title">Browser tools</h2>
+              <span className="tool-count" aria-label={`${enabledCount} of ${state.tools.length} enabled`}>
+                <strong>{enabledCount}</strong>/{state.tools.length}
               </span>
             </div>
             <input
@@ -251,51 +268,49 @@ export default function Configuration({
               value={toolSearch}
               onChange={(e) => setToolSearch(e.target.value)}
             />
-            <div className="tools-list">
-              {tools.map((tool) => (
-                <div className="tool-row" key={tool.name}>
-                  <div className="tool-definition">
-                    <details>
-                      <summary>
-                        <strong>{toolTitle(tool.name, {})}</strong>
-                        <span
-                          className={
-                            tool.risk === "danger"
-                              ? "risk-tag danger"
-                              : "risk-tag"
+            {groups.map(({ risk, items }) => (
+              <div className="tool-group" key={risk}>
+                <h3 className={`tool-group-title ${risk}`}>
+                  {risk === "read" ? "Look" : risk === "write" ? "Act" : "Dangerous"}
+                </h3>
+                <div className="panel tools-list">
+                  {items.map((tool) => (
+                    <div className="tool-row" key={tool.name}>
+                      <div className="tool-definition">
+                        <details>
+                          <summary>
+                            <strong>{toolTitle(tool.name, {})}</strong>
+                          </summary>
+                          <p>{tool.description}</p>
+                          <pre>
+                            {json({ name: tool.name, parameters: tool.parameters })}
+                          </pre>
+                        </details>
+                      </div>
+                      <label className="tool-toggle">
+                        <input
+                          type="checkbox"
+                          role="switch"
+                          aria-label={"Enable " + tool.name}
+                          checked={!draft.disabledTools.includes(tool.name)}
+                          onChange={(e) =>
+                            update(
+                              "disabledTools",
+                              e.target.checked
+                                ? draft.disabledTools.filter(
+                                    (name) => name !== tool.name,
+                                  )
+                                : [...draft.disabledTools, tool.name],
+                            )
                           }
-                        >
-                          {tool.risk}
-                        </span>
-                      </summary>
-                      <p>{tool.description}</p>
-                      <pre>
-                        {json({ name: tool.name, parameters: tool.parameters })}
-                      </pre>
-                    </details>
-                  </div>
-                  <label className="tool-toggle">
-                    <input
-                      type="checkbox"
-                      role="switch"
-                      aria-label={"Enable " + tool.name}
-                      checked={!draft.disabledTools.includes(tool.name)}
-                      onChange={(e) =>
-                        update(
-                          "disabledTools",
-                          e.target.checked
-                            ? draft.disabledTools.filter(
-                                (name) => name !== tool.name,
-                              )
-                            : [...draft.disabledTools, tool.name],
-                        )
-                      }
-                    />
-                    <span className="switch" aria-hidden="true" />
-                  </label>
+                        />
+                        <span className="switch" aria-hidden="true" />
+                      </label>
+                    </div>
+                  ))}
                 </div>
-              ))}
-            </div>
+              </div>
+            ))}
           </section>
         )}
       </div>

@@ -98,8 +98,7 @@ test("API dictation uses only the voice key and configured backend; settings per
     await chrome.runtime.sendMessage({ type: "relay-api", path: "/api/settings", method: "PUT", body: { ...response.data.settings, apiKey: "model-secret" } });
   });
   await ui.getByRole("button", { name: "Settings", exact: true }).click();
-  await ui.getByRole("combobox", { name: "Dictation backend" }).click();
-  await ui.getByRole("option", { name: "Groq / compatible API" }).click();
+  await ui.getByRole("radio", { name: /Groq \/ compatible API/ }).click();
   await ui.getByLabel("Voice API key", { exact: false }).fill("voice-secret");
   await expect(ui.getByRole("button", { name: /Save voice settings/ })).toHaveCount(0);
   await ui.getByRole("button", { name: "Save changes", exact: true }).click();

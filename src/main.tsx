@@ -5,6 +5,7 @@ import VoiceCapture from "./VoiceCapture";
 import "./style.css";
 import "./execution.css";
 import "./composer.css";
+import "./settings.css";
 import { applyTheme, readTheme } from "./theme";
 applyTheme(readTheme());
 
