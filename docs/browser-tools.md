@@ -101,3 +101,9 @@ Return JSON-serializable data. Page exceptions become tool errors. These scripts
 - Stop prevents the agent from scheduling further actions. An action already dispatched to Chrome may finish; actions are not rolled back. After a transport timeout or disconnect, inspect browser state before retrying.
 - A navigation waits up to roughly 12 seconds for load completion; highly dynamic pages may need another snapshot or a bounded wait. A failed frame/context/ref should be rediscovered, not guessed.
 - If an action opens a JavaScript dialog, Relay reports an actionable tool error and leaves the dialog visible. Use `browser_dialog` next; the pending native input or script may complete after it is handled. This prevents the serial command queue from deadlocking on a modal.
+
+## Focused snapshots and coordinates
+
+Snapshots accept `query` (case-insensitive accessible-name/link match) and `viewportOnly`. Pagination offsets apply to the filtered set. Purely structural roles such as group, text and main are not listed as interactive unless independently focusable. Each element includes `inViewport`; links include `href`. Snapshot and screenshot results include viewport width/height, `devicePixelRatio`, and the CSS coordinate space.
+
+A screenshot preserves native resolution. Divide image pixel coordinates by its reported device pixel ratio before issuing pointer input. Explicit pointer coordinates outside the CSS viewport fail with an actionable error. References remain preferable: the extension scrolls and remeasures their centre at dispatch time.

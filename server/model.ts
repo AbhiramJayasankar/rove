@@ -24,13 +24,140 @@ function redact(value: string, key: string): string {
   return key ? value.split(key).join("[REDACTED]") : value;
 }
 
+export function generationOptions(settings: Settings): Record<string, unknown> {
+  const result: Record<string, unknown> = {
+    max_tokens: settings.maxOutputTokens,
+  };
+  const effort = settings.reasoningEffort;
+  if (effort !== "default") {
+    const format =
+      settings.reasoningFormat === "auto"
+        ? /mimo/i.test(settings.model)
+          ? "thinking"
+          : "reasoning_effort"
+        : settings.reasoningFormat;
+    if (format === "thinking")
+      result.thinking = { type: effort === "none" ? "disabled" : "enabled" };
+    else result.reasoning_effort = effort;
+  }
+  return result;
+}
+
+export type ModelDelta = { content?: string; reasoning?: string };
+
+async function streamedCompletion(
+  response: Response,
+  onDelta?: (delta: ModelDelta) => void,
+): Promise<any> {
+  if (!response.body) throw new Error("The model returned an empty stream.");
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "",
+    bytes = 0,
+    finished = false;
+  const message: any = { role: "assistant", content: "" };
+  const calls = new Map<number, any>();
+  let usage: any, id: string | undefined;
+  const consume = (block: string) => {
+    const payload = block
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trimStart())
+      .join("\n");
+    if (!payload) return;
+    if (payload.trim() === "[DONE]") {
+      finished = true;
+      return;
+    }
+    let chunk: any;
+    try {
+      chunk = JSON.parse(payload);
+    } catch {
+      throw new Error("The model returned malformed streaming JSON.");
+    }
+    if (chunk.error)
+      throw new Error(chunk.error.message || "Model stream failed.");
+    id = chunk.id || id;
+    usage = chunk.usage || usage;
+    const choice =
+      chunk.choices?.find((c: any) => c.index === 0) || chunk.choices?.[0];
+    if (choice?.finish_reason === "length")
+      throw new Error(
+        "Model output limit reached. Increase maximum output tokens in Model settings.",
+      );
+    if (choice?.finish_reason) finished = true;
+    const delta = choice?.delta;
+    if (!delta) return;
+    for (const key of [
+      "content",
+      "reasoning_content",
+      "reasoning",
+      "refusal",
+    ]) {
+      if (typeof delta[key] !== "string") continue;
+      message[key] = (message[key] || "") + delta[key];
+    }
+    if (Array.isArray(delta.reasoning_details))
+      message.reasoning_details = [
+        ...(message.reasoning_details || []),
+        ...delta.reasoning_details,
+      ];
+    for (const call of delta.tool_calls || []) {
+      const index = call.index ?? 0;
+      const current = calls.get(index) || {
+        id: "",
+        type: "function",
+        function: { name: "", arguments: "" },
+      };
+      if (call.id) current.id += call.id;
+      if (call.function?.name) current.function.name += call.function.name;
+      if (call.function?.arguments)
+        current.function.arguments += call.function.arguments;
+      calls.set(index, current);
+    }
+    onDelta?.({
+      content: delta.content,
+      reasoning: delta.reasoning_content ?? delta.reasoning,
+    });
+  };
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > 16_000_000) throw new Error("Model response exceeds 16 MB.");
+      buffer += decoder.decode(value, { stream: true });
+      let separator: RegExpExecArray | null;
+      while ((separator = /\r?\n\r?\n/.exec(buffer))) {
+        consume(buffer.slice(0, separator.index));
+        buffer = buffer.slice(separator.index + separator[0].length);
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) consume(buffer);
+    if (!finished)
+      throw new Error(
+        "Model stream ended before completion. No partial tool calls were executed.",
+      );
+  } finally {
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+  if (calls.size)
+    message.tool_calls = [...calls.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, call]) => call);
+  return { id, choices: [{ message }], usage };
+}
+
 export async function complete(
   settings: Settings,
   apiKey: string,
   messages: any[],
   tools: ToolDefinition[],
   signal: AbortSignal,
-): Promise<{ message: any; usage?: any }> {
+  onDelta?: (delta: ModelDelta) => void,
+): Promise<{ message: any; usage?: any; requestId?: string }> {
   if (!settings.model.trim())
     throw new Error("Choose a model in Settings before starting a run.");
   const endpoint = completionUrl(settings.baseUrl);
@@ -45,7 +172,8 @@ export async function complete(
       body: JSON.stringify({
         model: settings.model,
         messages,
-        stream: false,
+        stream: settings.stream,
+        ...generationOptions(settings),
         ...(tools.length
           ? {
               tools: tools.map(({ name, description, parameters }) => ({
@@ -56,7 +184,10 @@ export async function complete(
             }
           : {}),
       }),
-      signal: AbortSignal.any([signal, AbortSignal.timeout(120000)]),
+      signal: AbortSignal.any([
+        signal,
+        AbortSignal.timeout(settings.modelTimeoutSeconds * 1000),
+      ]),
       redirect: "error",
     });
   } catch (error) {
@@ -68,22 +199,34 @@ export async function complete(
       ),
     );
   }
-  const raw = await readBounded(response);
-  if (!response.ok)
+  if (!response.ok) {
+    const raw = await readBounded(response);
     throw new Error(
       redact(
         `Model endpoint returned HTTP ${response.status}: ${raw.slice(0, 3000)}`,
         apiKey,
       ),
     );
+  }
   let data: any;
   try {
-    data = JSON.parse(raw);
-  } catch {
+    data = response.headers.get("content-type")?.includes("text/event-stream")
+      ? await streamedCompletion(response, onDelta)
+      : JSON.parse(await readBounded(response, 16_000_000));
+  } catch (error) {
+    if (signal.aborted) throw signal.reason;
+    if (!(error instanceof SyntaxError))
+      throw new Error(
+        redact(error instanceof Error ? error.message : String(error), apiKey),
+      );
     throw new Error(
       "Model endpoint returned invalid JSON. Use an OpenAI-compatible Chat Completions endpoint.",
     );
   }
+  if (data.choices?.[0]?.finish_reason === "length")
+    throw new Error(
+      "Model output limit reached. Increase maximum output tokens in Model settings.",
+    );
   const message = data?.choices?.[0]?.message;
   if (
     !message ||
@@ -117,9 +260,13 @@ export async function complete(
         ? { reasoning_content: message.reasoning_content }
         : {}),
       ...(message.reasoning != null ? { reasoning: message.reasoning } : {}),
+      ...(message.reasoning_details != null
+        ? { reasoning_details: message.reasoning_details }
+        : {}),
       ...(message.refusal != null ? { refusal: message.refusal } : {}),
     },
     ...(data.usage ? { usage: data.usage } : {}),
+    requestId: response.headers.get("x-request-id") || data.id,
   };
 }
 

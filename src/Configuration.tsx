@@ -8,6 +8,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type { AppState, CustomTool, Settings } from "../shared/types";
+import ModelPicker, { isThinkingModel } from "./ModelPicker";
 import { DEFAULT_PROMPT } from "../shared/defaults";
 import { api, json, type Action, type Page, type Pairing } from "./ui";
 type Props = {
@@ -148,14 +149,17 @@ export default function Configuration({
                     placeholder="https://api.openai.com/v1"
                   />
                 </label>
-                <label className="field full">
-                  <span>Model ID</span>
-                  <input
-                    value={draft.model}
-                    onChange={(e) => update("model", e.target.value)}
-                    placeholder="Model ID"
+                <div className="field full">
+                  <span>Model</span>
+                  <ModelPicker
+                    model={draft.model}
+                    onSelect={(model, context) => {
+                      update("model", model);
+                      if (context && context > draft.maxOutputTokens + 2048)
+                        update("contextWindow", context);
+                    }}
                   />
-                </label>
+                </div>
                 <div className="field full">
                   <label htmlFor="provider-key">
                     API key
@@ -230,6 +234,94 @@ export default function Configuration({
               <h2>Execution</h2>
               <div className="form-grid">
                 <label className="field">
+                  <span>Context window (tokens)</span>
+                  <input
+                    type="number"
+                    min="4096"
+                    max="4000000"
+                    value={draft.contextWindow}
+                    onChange={(e) =>
+                      update("contextWindow", Number(e.target.value))
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Maximum output tokens</span>
+                  <input
+                    type="number"
+                    min="256"
+                    max="256000"
+                    value={draft.maxOutputTokens}
+                    onChange={(e) =>
+                      update("maxOutputTokens", Number(e.target.value))
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Reasoning</span>
+                  <select
+                    value={draft.reasoningEffort}
+                    onChange={(e) =>
+                      update(
+                        "reasoningEffort",
+                        e.target.value as Settings["reasoningEffort"],
+                      )
+                    }
+                  >
+                    <option value="default">Provider default</option>
+                    <option value="none">Off</option>
+                    {isThinkingModel(draft.model, draft.reasoningFormat) ? (
+                      <option value="high">On</option>
+                    ) : (
+                      <>
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                      </>
+                    )}
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Reasoning API format</span>
+                  <select
+                    value={draft.reasoningFormat}
+                    onChange={(e) =>
+                      update(
+                        "reasoningFormat",
+                        e.target.value as Settings["reasoningFormat"],
+                      )
+                    }
+                  >
+                    <option value="auto">Auto (MiMo: on/off)</option>
+                    <option value="reasoning_effort">reasoning_effort</option>
+                    <option value="thinking">thinking.type (on/off)</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Screenshots kept in model context</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="20"
+                    value={draft.maxImages}
+                    onChange={(e) =>
+                      update("maxImages", Number(e.target.value))
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Model timeout (seconds)</span>
+                  <input
+                    type="number"
+                    min="15"
+                    max="1800"
+                    value={draft.modelTimeoutSeconds}
+                    onChange={(e) =>
+                      update("modelTimeoutSeconds", Number(e.target.value))
+                    }
+                  />
+                </label>
+                <label className="field">
                   <span>Approvals</span>
                   <select
                     value={draft.approvalMode}
@@ -256,6 +348,16 @@ export default function Configuration({
                   />
                 </label>
               </div>
+              <label className="toggle-row">
+                <span>Stream responses & reasoning</span>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={draft.stream}
+                  onChange={(e) => update("stream", e.target.checked)}
+                />
+                <span className="switch" aria-hidden="true" />
+              </label>
               <label className="toggle-row">
                 <span>Send screenshots to model</span>
                 <input

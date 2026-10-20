@@ -71,6 +71,16 @@ JavaScript handlers run as async function bodies **in the selected page**, with 
 
 **Auto-approve** is on by default. The switch beside Stop applies immediately to the current run and persists for future runs; enabling it releases a pending tool approval. Questions still wait for your answer. Turn the switch off for **Review interactions**, or select **Review every tool** in Settings. A decision panel stays above the scrolling activity. **Activity** groups actions and results; **Trace** retains every model request, response, observation, and decision. Generic JavaScript, raw CDP, and file uploads begin disabled. The effective system message is inspectable in every model-request event. Custom tools with `approval: true` are reviewed when interaction review is enabled; auto-approval skips those prompts too. See [design decisions](docs/design.md).
 
+## Context, models, and reasoning
+
+Choose a model from the prompt dock; Relay fetches the configured endpoint's model catalogue, supports search, defaults to free-tagged IDs, and shows context sizes supplied by the provider. Model and reasoning choices apply to the next task. Manual IDs are a fallback rather than a setup requirement.
+
+The default context window is 1,048,576 tokens, with 16,384 reserved output tokens and four retained screenshots. All are editable in Model settings. Image transport size no longer evicts text history. Context estimates and provider-reported input usage are visible; the estimate is not an exact tokenizer for every provider.
+
+Expand **Execution** to inspect each step's full provider-returned reasoning, tool arguments/results, timing, and request/response. **Trace** supports search, expand/collapse, copying, screenshot inspection, and complete JSON download. Provider reasoning is displayed as returned; Relay does not manufacture reasoning when an endpoint does not expose it. Responses stream by default. Stop from the prompt dock or press Escape; interrupted text/reasoning remains inspectable and partial tool calls never execute.
+
+MiMo's documented thinking switch is on/off. Auto format uses that switch for MiMo; other endpoints can use standard `reasoning_effort` levels. See [interface decisions](docs/interface-plan.md) and [architecture](docs/architecture.md).
+
 ## Development
 
 ```sh

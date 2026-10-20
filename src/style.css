@@ -1,17 +1,17 @@
 :root {
-  font-family: "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
   font-size: 14px;
   font-synthesis: none;
-  color: #2b2c26;
-  background: #f5f4f0;
-  --ink: #2b2c26;
-  --muted: #74756b;
+  color: #302d31;
+  background: #f7f7f4;
+  --ink: #302d31;
+  --muted: #777277;
   --surface: #fff;
-  --canvas: #f5f4f0;
-  --line: #e1e1d9;
-  --accent: #526344;
-  --accent-hover: #425337;
-  --accent-soft: #e9ede3;
+  --canvas: #f7f7f4;
+  --line: #dddcd7;
+  --accent: #69425a;
+  --accent-hover: #513146;
+  --accent-soft: #f1e9ee;
   --danger: #a84b3e;
   --warning: #9b722e;
 }
@@ -57,7 +57,7 @@ summary:focus-visible {
 input:focus,
 textarea:focus,
 select:focus {
-  outline: 2px solid #879376;
+  outline: 2px solid #9d7c91;
   outline-offset: 1px;
 }
 a {
@@ -110,23 +110,25 @@ input[type="checkbox"] {
   overflow: hidden;
 }
 .sidebar {
-  width: 204px;
+  width: 212px;
   flex-shrink: 0;
-  border-right: 1px solid var(--line);
+  border-right: 0;
   display: flex;
   flex-direction: column;
-  padding: 24px 12px 12px;
-  background: #efeee9;
+  padding: 26px 14px 14px;
+  background: #302b31;
+  color: #e5dfe4;
 }
 .brand {
   display: flex;
   gap: 10px;
   align-items: center;
   padding: 0 10px 28px;
-  font-size: 21px;
+  font-size: 26px;
   font-weight: 650;
-  letter-spacing: -0.7px;
-  color: #3e4d34;
+  letter-spacing: -1px;
+  color: #fff;
+  font-family: Bahnschrift, "Trebuchet MS", sans-serif;
 }
 .brand svg {
   stroke-width: 1.8;
@@ -135,16 +137,17 @@ input[type="checkbox"] {
   display: flex;
   align-items: center;
   gap: 10px;
-  background: #fff;
-  border: 1px solid #d6d7cd;
-  border-radius: 8px;
-  min-height: 40px;
+  background: #4b3d49;
+  border: 1px solid #62505e;
+  border-radius: 7px;
+  min-height: 43px;
   padding: 0 11px;
   text-align: left;
   font-weight: 500;
+  color: #fff;
 }
 .new-task:hover {
-  border-color: #a5ad98;
+  border-color: #b38ca5;
 }
 .run-list {
   flex: 1;
@@ -165,11 +168,11 @@ input[type="checkbox"] {
 }
 .run-item:hover,
 .sidebar-item:hover {
-  background: #e6e6de;
+  background: #443a43;
 }
 .run-item.selected,
 .sidebar-item.selected {
-  background: #dedfd4;
+  background: #5a4254;
 }
 .run-title {
   min-width: 0;
@@ -191,7 +194,7 @@ input[type="checkbox"] {
   min-height: 42px;
   padding: 0 11px;
   border-radius: 6px;
-  color: #55564d;
+  color: #d7cbd4;
 }
 .sidebar-item > .status-dot {
   margin-left: auto;
@@ -230,19 +233,21 @@ input[type="checkbox"] {
   align-items: center;
   justify-content: space-between;
   gap: 18px;
-  height: 66px;
+  height: 68px;
   flex-shrink: 0;
-  padding: 0 25px;
-  background: #fafaf7;
+  padding: 0 24px;
+  background: #fff;
   border-bottom: 1px solid var(--line);
 }
 .topbar h1 {
-  font-size: 15px;
+  font-size: 16px;
   letter-spacing: -0.2px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  font-family: Bahnschrift, "Trebuchet MS", sans-serif;
+  font-weight: 500;
 }
 .topbar-actions {
   display: flex;
@@ -429,11 +434,11 @@ input:focus-visible + .switch {
 }
 .workspace {
   display: grid;
-  grid-template-columns: minmax(320px, 0.84fr) minmax(0, 1.55fr);
+  grid-template-columns: minmax(390px, 0.94fr) minmax(0, 1.35fr);
   flex: 1;
   min-height: 0;
-  margin: 20px;
-  gap: 18px;
+  margin: 0;
+  gap: 0;
 }
 .task-panel {
   display: flex;
@@ -441,17 +446,18 @@ input:focus-visible + .switch {
   min-width: 0;
   min-height: 0;
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  border: 0;
+  border-radius: 0;
   overflow: hidden;
+  border-right: 1px solid var(--line);
 }
 .panel-toolbar {
-  min-height: 48px;
+  min-height: 52px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 0 15px;
+  padding: 0 22px;
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
@@ -488,18 +494,18 @@ input:focus-visible + .switch {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 20px 17px;
+  padding: 26px 24px;
   scrollbar-width: thin;
   scrollbar-color: #cdcec3 transparent;
 }
 .user-message {
-  padding: 12px 14px;
-  background: #eeefe8;
-  border-radius: 10px 10px 2px 10px;
-  font-size: 13px;
+  padding: 15px 16px;
+  background: #f3edf1;
+  border-radius: 12px 12px 3px 12px;
+  font-size: 14px;
   line-height: 1.65;
   overflow-wrap: anywhere;
-  margin: 0 0 22px 25px;
+  margin: 0 0 24px 28px;
 }
 .assistant-message {
   display: flex;
@@ -546,7 +552,7 @@ input:focus-visible + .switch {
   margin: 5px 0;
 }
 .markdown a {
-  color: #526344;
+  color: #69425a;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -676,35 +682,38 @@ input:focus-visible + .switch {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  align-items: center;
-  gap: 20px;
-  padding: 20px;
-  text-align: center;
+  align-items: flex-start;
+  gap: 25px;
+  padding: 24px 16px;
+  text-align: left;
 }
 .task-empty h2 {
-  font-size: 20px;
-  font-weight: 500;
-  line-height: 1.4;
+  font-size: 30px;
+  font-weight: 400;
+  line-height: 1.22;
   max-width: 220px;
-  color: #5e6154;
+  color: #4b3947;
+  font-family: Bahnschrift, "Trebuchet MS", sans-serif;
+  letter-spacing: -0.9px;
 }
 .empty-cursor {
-  width: 45px;
-  height: 45px;
-  border: 1px solid #d8decf;
-  background: #f4f6ef;
-  border-radius: 13px;
+  width: auto;
+  height: auto;
+  border: 0;
+  background: none;
+  border-radius: 0;
   display: grid;
   place-items: center;
-  color: var(--accent);
+  color: #9b7790;
 }
 .task-composer {
-  margin: 0 13px 13px;
+  margin: 12px 18px 18px;
   flex-shrink: 0;
-  border: 1px solid #d8d9ce;
-  border-radius: 9px;
-  background: #fdfdfa;
+  border: 1px solid #c9bcc5;
+  border-radius: 13px;
+  background: #fff;
   overflow: hidden;
+  box-shadow: 0 4px 16px #302b3108;
 }
 .task-composer:focus-within {
   border-color: #899779;
@@ -816,9 +825,9 @@ input:focus-visible + .switch {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #e9e9e2;
+  border: 0;
+  border-radius: 0;
+  background: #dddcd8;
 }
 .browser-stage:fullscreen {
   border: 0;
@@ -830,11 +839,12 @@ input:focus-visible + .switch {
   align-items: center;
   gap: 9px;
   min-height: 48px;
-  background: #fafaf7;
-  border-bottom: 1px solid var(--line);
-  padding: 0 11px 0 15px;
+  background: #373139;
+  border-bottom: 1px solid #504551;
+  padding: 0 18px;
   flex-shrink: 0;
-  color: #727568;
+  color: #ece4eb;
+  height: 52px;
 }
 .browser-toolbar > select {
   flex: 1;
@@ -845,7 +855,7 @@ input:focus-visible + .switch {
   font-size: 12px;
   text-overflow: ellipsis;
   padding: 8px 0;
-  color: #45483e;
+  color: #f5eff3;
   outline-offset: 0;
 }
 .browser-actions {
@@ -856,12 +866,12 @@ input:focus-visible + .switch {
 .browser-url {
   padding: 7px 15px;
   font-size: 10px;
-  color: #797c6f;
-  border-bottom: 1px solid #dedfd5;
+  color: #6a6267;
+  border-bottom: 1px solid #d4d0d2;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  background: #f5f5ef;
+  background: #ecebe7;
   flex-shrink: 0;
 }
 .browser-viewport {
@@ -872,7 +882,8 @@ input:focus-visible + .switch {
   align-items: center;
   justify-content: center;
   overflow: auto;
-  padding: 14px;
+  padding: 22px;
+  background: #dcdad6;
 }
 .browser-viewport.has-shot {
   align-items: flex-start;
@@ -883,8 +894,8 @@ input:focus-visible + .switch {
   height: auto;
   object-fit: contain;
   background: white;
-  box-shadow: 0 2px 12px #363b2710;
-  border-radius: 2px;
+  box-shadow: 0 6px 26px #302b3124;
+  border-radius: 3px;
 }
 .browser-empty {
   display: flex;
@@ -1050,7 +1061,7 @@ input:focus-visible + .switch {
   background: transparent;
 }
 .password-field:focus-within {
-  outline: 2px solid #879376;
+  outline: 2px solid #9d7c91;
   outline-offset: 1px;
 }
 .password-field input:focus {
@@ -1234,7 +1245,7 @@ input:focus-visible + .switch {
 }
 @media (min-width: 1600px) {
   .workspace {
-    grid-template-columns: minmax(360px, 470px) minmax(0, 1fr);
+    grid-template-columns: minmax(420px, 540px) minmax(0, 1fr);
   }
 }
 @media (max-width: 1150px) {
@@ -1249,8 +1260,8 @@ input:focus-visible + .switch {
     gap: 12px;
   }
   .workspace {
-    margin: 15px;
-    gap: 13px;
+    margin: 0;
+    gap: 0;
     grid-template-columns: minmax(310px, 0.95fr) minmax(0, 1.3fr);
   }
   .model-button {

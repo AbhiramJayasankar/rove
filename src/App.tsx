@@ -107,6 +107,9 @@ export default function App() {
           setDraft((old) => ({
             ...old,
             approvalMode: settings.settings.approvalMode,
+            model: settings.settings.model,
+            reasoningEffort: settings.settings.reasoningEffort,
+            contextWindow: settings.settings.contextWindow,
           }));
         });
         source.addEventListener("run_status", (event) => {

@@ -8,14 +8,94 @@ let context: BrowserContext;
 let fixture: http.Server;
 let fixtureUrl = "";
 let completeRequests = 0;
+let streamCancelled = false;
 
 test.beforeAll(async () => {
   fixture = http.createServer(async (req, res) => {
+    if (req.url === "/v1/models") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(
+        JSON.stringify({
+          data: [
+            {
+              id: "deterministic-integration-fixture:free",
+              name: "Fixture Free",
+              context_length: 1048576,
+            },
+            {
+              id: "other-free:free",
+              name: "Other Free",
+              context_length: 262144,
+            },
+            { id: "paid-model", name: "Paid Model", context_length: 128000 },
+          ],
+        }),
+      );
+      return;
+    }
+
     if (req.url?.startsWith("/v1/chat/completions")) {
       let body = "";
       for await (const chunk of req) body += chunk;
       const input = JSON.parse(body);
       completeRequests++;
+      if (
+        String(
+          input.messages.find((m: any) => m.role === "user")?.content,
+        ).includes("Stream stop fixture")
+      ) {
+        streamCancelled = false;
+        res.writeHead(200, { "content-type": "text/event-stream" });
+        res.write(
+          "data: " +
+            JSON.stringify({
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    reasoning_content:
+                      "Checking the page before taking action.",
+                  },
+                },
+              ],
+            }) +
+            "\n\n",
+        );
+        const timer = setTimeout(() => {
+          res.write(
+            "data: " +
+              JSON.stringify({
+                choices: [
+                  {
+                    index: 0,
+                    delta: {
+                      tool_calls: [
+                        {
+                          index: 0,
+                          id: "must-not-run",
+                          type: "function",
+                          function: {
+                            name: "browser_close_tab",
+                            arguments: "{}",
+                          },
+                        },
+                      ],
+                    },
+                    finish_reason: "tool_calls",
+                  },
+                ],
+              }) +
+              "\n\ndata: [DONE]\n\n",
+          );
+          res.end();
+        }, 30000);
+        res.on("close", () => {
+          streamCancelled = true;
+          clearTimeout(timer);
+        });
+        return;
+      }
+
       const results = input.messages.filter((m: any) => m.role === "tool");
       const call = (name: string, args: any) => ({
         role: "assistant",
@@ -84,6 +164,8 @@ test.beforeAll(async () => {
           role: "assistant",
           content: "Verified: the page saved the greeting for Relay verified.",
         };
+      message.reasoning_content =
+        "Inspect the current page, use its live element references, and verify the result.";
       res.writeHead(200, { "content-type": "application/json" });
       res.end(
         JSON.stringify({
@@ -126,7 +208,7 @@ test.beforeAll(async () => {
       return;
     }
     res.end(
-      `<!doctype html><html><head><title>Relay test workspace</title></head><body style="font:18px system-ui;padding:40px;background:#eef3fa"><h1>Browser connection verified</h1><p>A real page controlled by the Relay extension.</p><label>Your name <input aria-label="Your name"></label><button onclick="document.querySelector('#result').textContent='Hello, '+document.querySelector('input').value">Save greeting</button><p id="result" role="status">Waiting for a greeting</p><select aria-label="Priority"><option value="normal">Normal</option><option value="high">High</option></select><iframe src="/frame" title="Child frame" style="display:block;margin-top:24px"></iframe><a href="/next">Next page</a></body></html>`,
+      `<!doctype html><html><head><title>Relay test workspace</title></head><body style="font:18px system-ui;padding:40px;background:#f6f4f1"><h1>Browser connection verified</h1><p>A real page controlled by the Relay extension.</p><label>Your name <input aria-label="Your name"></label><button onclick="document.querySelector('#result').textContent='Hello, '+document.querySelector('input').value">Save greeting</button><p id="result" role="status">Waiting for a greeting</p><select aria-label="Priority"><option value="normal">Normal</option><option value="high">High</option></select><iframe src="/frame" title="Child frame" style="display:block;margin-top:24px"></iframe><a href="/next">Next page</a></body></html>`,
     );
   });
   await new Promise<void>((resolve) => fixture.listen(0, "127.0.0.1", resolve));
@@ -218,6 +300,22 @@ test("real extension controls DOM, frames, screenshot, approvals and the full mo
   await expect(target.getByLabel("Priority")).toHaveValue("high");
   const screenshot = await action("browser_screenshot");
   expect(screenshot.dataUrl).toMatch(/^data:image/);
+  expect(screenshot.viewport).toMatchObject({
+    width: 1440,
+    height: 960,
+    coordinateSpace: "CSS pixels",
+  });
+  const outside = await request.post("/api/browser", {
+    data: { action: "browser_click", args: { tabId, x: 99999, y: 10 } },
+  });
+  expect(outside.ok()).toBe(false);
+  expect((await outside.json()).error).toContain("outside");
+  const filtered = await action("browser_snapshot", {
+    query: "Save greeting",
+    viewportOnly: true,
+  });
+  expect(filtered.elements).toHaveLength(1);
+  expect(filtered.elements[0].name).toBe("Save greeting");
   const long = await action("browser_navigate", { url: `${fixtureUrl}/long` });
   expect(long.hasMoreText).toBe(true);
   expect(long.totalElements).toBe(180);
@@ -341,10 +439,48 @@ test("real extension controls DOM, frames, screenshot, approvals and the full mo
     ui.getByRole("button", { name: "New task", exact: true }),
   ).toBeVisible();
   await expect(ui.locator(".browser-viewport img")).toBeVisible();
+  await ui.getByRole("button", { name: "Execution", exact: false }).click();
+  await ui.locator(".reasoning-block summary").first().click();
+  await expect(ui.locator(".reasoning-text").first()).toContainText(
+    "Inspect the current page",
+  );
+  await ui.locator(".tool-activity-summary").first().click();
+  await expect(ui.locator(".tool-activity pre").first()).toBeVisible();
   await ui.screenshot({
     path: "test-results/relay-desktop.png",
     fullPage: true,
   });
+  await ui.getByRole("button", { name: "Choose model", exact: true }).click();
+  await expect(
+    ui.getByRole("dialog", { name: "Choose a model" }),
+  ).toBeVisible();
+  await expect(
+    ui.getByRole("button", {
+      name: "Use deterministic-integration-fixture:free",
+    }),
+  ).toBeVisible();
+  await expect(ui.getByRole("button", { name: "Use paid-model" })).toHaveCount(
+    0,
+  );
+  await ui.getByLabel("Search models").fill("Fixture");
+  await ui.screenshot({
+    path: "test-results/relay-model-picker.png",
+    fullPage: true,
+  });
+  await ui
+    .getByRole("button", { name: "Use deterministic-integration-fixture:free" })
+    .click();
+  await expect(
+    ui.getByRole("button", { name: "Choose model", exact: true }),
+  ).toContainText("deterministic-integration-fixture:free");
+  await ui.getByLabel("Reasoning level").selectOption("low");
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get("/api/state")).json()).settings
+          .reasoningEffort,
+    )
+    .toBe("low");
   await ui
     .getByLabel("Task prompt")
     .fill("Ask user fixture: ask me which greeting to use.");
@@ -421,6 +557,25 @@ test("real extension controls DOM, frames, screenshot, approvals and the full mo
     path: "test-results/relay-mobile-browser.png",
     fullPage: true,
   });
+  await ui.getByRole("button", { name: "Task", exact: true }).click();
+  await ui
+    .getByLabel("Task prompt")
+    .fill("Stream stop fixture: inspect without closing any tab.");
+  await ui.getByRole("button", { name: "Run task", exact: true }).click();
+  await ui.getByRole("button", { name: "Execution", exact: false }).click();
+  await expect(ui.locator(".reasoning-text")).toContainText(
+    "Checking the page before taking action.",
+  );
+  await ui
+    .getByRole("button", { name: "Stop generation", exact: true })
+    .click();
+  await expect(ui.getByText("Stopped", { exact: true }).first()).toBeVisible();
+  await expect.poll(() => streamCancelled).toBe(true);
+  const stopped = (await (await request.get("/api/state")).json()).runs[0];
+  expect(stopped.status).toBe("stopped");
+  expect(
+    stopped.events.filter((e: any) => e.type === "tool_call"),
+  ).toHaveLength(0);
   // Leave the user's workspace unconfigured rather than pointing at a stopped test provider.
   await request.put("/api/settings", { data: DEFAULT_SETTINGS });
 });

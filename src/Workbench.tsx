@@ -18,8 +18,11 @@ import {
   Plug,
   RefreshCw,
   Send,
+  Square,
   X,
 } from "lucide-react";
+import ModelPicker, { isThinkingModel, tokenCount } from "./ModelPicker";
+import ExecutionLog, { TraceView } from "./ExecutionLog";
 import type { AppState, RunRecord, Settings } from "../shared/types";
 import {
   api,
@@ -49,6 +52,7 @@ type Props = {
 };
 export default function Workbench({
   state,
+  setState,
   run,
   activeRun,
   busy,
@@ -123,15 +127,44 @@ export default function Workbench({
     run?.status === "awaiting_approval" && pause?.type === "user_question"
       ? pause
       : undefined;
-  const results = new Map(
-    run?.events
-      .filter((e) => e.type === "tool_result")
-      .map((e) => [e.data.callId, e]),
-  );
-  const activity =
-    run?.events.filter((e) =>
-      ["assistant", "tool_call", "error", "user_reply"].includes(e.type),
-    ) || [];
+  const latestContext = run?.events.findLast(
+    (e) => e.type === "context_usage",
+  )?.data;
+  const latestUsage = run?.events.findLast((e) => e.type === "model_response")
+    ?.data.usage;
+  const inputTokens =
+    latestUsage?.prompt_tokens ?? latestContext?.estimatedTokens;
+  const contextWindow =
+    latestContext?.contextWindow || state.settings.contextWindow;
+  async function runOptions(options: Partial<Settings>) {
+    await action("run-options", async () => {
+      const result = await api<{ settings: Settings; hasApiKey: boolean }>(
+        "/api/run-options",
+        { method: "PUT", body: json(options) },
+      );
+      setState((old) => (old ? { ...old, ...result } : old));
+    });
+  }
+  async function stopRun() {
+    if (!activeRun) return;
+    await action("stop", () =>
+      api(`/api/runs/${activeRun.id}/stop`, { method: "POST" }),
+    );
+  }
+  useEffect(() => {
+    const escape = (event: KeyboardEvent) => {
+      if (
+        event.key === "Escape" &&
+        activeRun &&
+        !document.querySelector("dialog[open]")
+      ) {
+        event.preventDefault();
+        void stopRun();
+      }
+    };
+    window.addEventListener("keydown", escape);
+    return () => window.removeEventListener("keydown", escape);
+  }, [activeRun?.id]);
   useEffect(() => {
     if (!tabs.some((t) => t.id === tabId))
       setTabId(tabs.find((t) => t.active)?.id || tabs[0]?.id);
@@ -365,37 +398,61 @@ export default function Workbench({
           {run ? (
             <>
               <div className="user-message">{run.prompt}</div>
-              {activityView === "trace"
-                ? run.events.map((e) => <TimelineEvent event={e} key={e.id} />)
-                : activity.map((e) =>
-                    e.type === "assistant" ? (
+              {activityView === "trace" ? (
+                <TraceView events={run.events} />
+              ) : (
+                <>
+                  <ExecutionLog run={run} key={run.id} />
+                  {run.events
+                    .filter(
+                      (e) =>
+                        e.type === "model_response" &&
+                        !e.data.message?.tool_calls?.length &&
+                        e.data.message?.content,
+                    )
+                    .map((e) => (
                       <AssistantMessage
                         key={e.id}
-                        content={String(e.data.content)}
+                        content={String(e.data.message.content)}
                       />
-                    ) : e.type === "tool_call" ? (
-                      <ToolActivity
+                    ))}
+                  {run.events
+                    .filter((e) => ["error", "user_reply"].includes(e.type))
+                    .map((e) => (
+                      <div
+                        className={
+                          e.type === "error" ? "activity-error" : "user-message"
+                        }
                         key={e.id}
-                        event={e}
-                        result={results.get(e.data.callId)}
-                        working={["running", "awaiting_approval"].includes(
-                          run.status,
-                        )}
-                      />
-                    ) : e.type === "user_reply" ? (
-                      <div className="user-message" key={e.id}>
+                      >
                         {String(e.data.message)}
                       </div>
-                    ) : (
-                      <div className="activity-error" role="alert" key={e.id}>
-                        {String(e.data.message)}
-                      </div>
-                    ),
-                  )}
+                    ))}
+                </>
+              )}
               {run.status === "running" && (
                 <div className="working-indicator">
                   <LoaderCircle size={14} className="spin" />
-                  Working
+                  Generating
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={stopRun}
+                  >
+                    Stop
+                  </button>
+                </div>
+              )}
+              {run.status === "stopped" && (
+                <div className="stopped-message">
+                  Stopped{" "}
+                  <button
+                    type="button"
+                    className="text-button"
+                    onClick={() => setPrompt(run.prompt)}
+                  >
+                    Edit & retry
+                  </button>
                 </div>
               )}
               <div ref={bottomRef} />
@@ -403,9 +460,8 @@ export default function Workbench({
           ) : (
             <div className="task-empty">
               <span className="empty-cursor">
-                <ArrowUp size={22} />
+                <Globe size={32} strokeWidth={1.3} />
               </span>
-              <h2>What would you like to do?</h2>
             </div>
           )}
         </div>
@@ -416,6 +472,47 @@ export default function Workbench({
             if (canRun) startRun();
           }}
         >
+          <div className="composer-model-row">
+            <ModelPicker
+              model={state.settings.model}
+              disabled={pending === "run-options"}
+              onSelect={(model, context) =>
+                runOptions({
+                  model,
+                  ...(context && context > state.settings.maxOutputTokens + 2048
+                    ? { contextWindow: context }
+                    : {}),
+                })
+              }
+            />
+            <select
+              aria-label="Reasoning level"
+              value={state.settings.reasoningEffort}
+              onChange={(e) =>
+                runOptions({
+                  reasoningEffort: e.target
+                    .value as Settings["reasoningEffort"],
+                })
+              }
+              title={busy ? "For the next task" : "Reasoning level"}
+              disabled={pending === "run-options"}
+            >
+              <option value="default">Thinking: default</option>
+              <option value="none">Thinking: off</option>
+              {isThinkingModel(
+                state.settings.model,
+                state.settings.reasoningFormat,
+              ) ? (
+                <option value="high">Thinking: on</option>
+              ) : (
+                <>
+                  <option value="low">Think: low</option>
+                  <option value="medium">Think: medium</option>
+                  <option value="high">Think: high</option>
+                </>
+              )}
+            </select>
+          </div>
           <textarea
             aria-label="Task prompt"
             placeholder="Ask Relay to do something…"
@@ -439,25 +536,39 @@ export default function Workbench({
               <i
                 className={`status-dot ${streamConnected ? "completed" : "offline"}`}
               />
-              {busy
-                ? "Task in progress"
-                : state.bridge.connected
-                  ? "Chrome connected"
-                  : "Chrome disconnected"}
-            </span>
-            <button
-              className="run-button"
-              type="submit"
-              aria-label="Run task"
-              title="Run task (Ctrl+Enter)"
-              disabled={!canRun}
-            >
-              {pending === "run" ? (
-                <LoaderCircle size={17} className="spin" />
-              ) : (
-                <ArrowUp size={18} />
+              {inputTokens != null
+                ? `${latestUsage?.prompt_tokens == null ? "~" : ""}${tokenCount(inputTokens)} / ${tokenCount(contextWindow)}`
+                : `${tokenCount(contextWindow)} context`}
+              {busy && (
+                <span className="next-task-label">Changes apply next task</span>
               )}
-            </button>
+            </span>
+            {busy ? (
+              <button
+                className="run-button stop-generation"
+                type="button"
+                aria-label="Stop generation"
+                title="Stop (Escape)"
+                disabled={pending === "stop"}
+                onClick={stopRun}
+              >
+                <Square size={16} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                className="run-button"
+                type="submit"
+                aria-label="Run task"
+                title="Run task (Ctrl+Enter)"
+                disabled={!canRun}
+              >
+                {pending === "run" ? (
+                  <LoaderCircle size={17} className="spin" />
+                ) : (
+                  <ArrowUp size={18} />
+                )}
+              </button>
+            )}
           </div>
         </form>
       </section>

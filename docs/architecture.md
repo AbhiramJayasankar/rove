@@ -31,7 +31,9 @@ The extension has no model credentials and no agent prompt. It executes one expl
 5. Capture passive screenshots after successful browser operations. Show observations in the UI; include images in model context only when vision is enabled. Image payloads are stored once as screenshot events rather than duplicated in request traces.
 6. Continue until a final model answer, a step limit, an error, or a user stop. `ask_user` pauses the same run and resumes with the user's reply.
 
-Context is bounded, retaining complete tool-call groups and at most two recent images. HTTP/model requests and tool outputs have limits and timeouts. No automatic retries are applied to ambiguous browser mutations.
+Context is bounded by a configurable token estimate, defaulting to 1,048,576 tokens with an output reserve. Base64 image bytes are never treated as text tokens. Up to four recent images are retained independently (configurable); complete tool-call groups and provider reasoning remain until the selected budget requires eviction. Each request logs its estimate, any removed messages/images, and subsequent provider-reported usage. The estimate is provider-neutral, not an exact tokenizer. HTTP/model requests and tool outputs have limits and timeouts. No automatic retries are applied to ambiguous browser mutations.
+
+Streaming Chat Completions are assembled incrementally, including provider-returned reasoning and fragmented tool calls. Partial tool calls never execute. Stream deltas are journaled and shown live; completed reasoning is retained without display truncation. MiMo auto-detection uses documented binary `thinking.type`; generic endpoints can use `reasoning_effort`.
 
 Stop aborts pending model/HTTP requests, wakes approval waits, and prevents further browser dispatch. Chrome does not provide rollback for an action already sent. A disconnected extension rejects pending commands; reconnect never replays them. A process restart marks interrupted runs failed with an explicit event.
 

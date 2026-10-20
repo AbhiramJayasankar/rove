@@ -41,18 +41,20 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
   ),
   tool(
     "browser_snapshot",
-    "Read page text and interactive element refs, optionally in a frame. Use textOffset/elementOffset to paginate long pages. Refs expire after fresh snapshots or page changes.",
+    "Read page text and actionable element refs. Use query to find matching labels/links, viewportOnly for visible controls, or nextElementOffset to paginate. Prefer refs over coordinate guesses. Refs expire after fresh snapshots or page changes.",
     {
       ...target,
       textOffset: { type: "integer", minimum: 0 },
       textLimit: { type: "integer", minimum: 100, maximum: 18000 },
       elementOffset: { type: "integer", minimum: 0 },
       elementLimit: { type: "integer", minimum: 1, maximum: 200 },
+      query: { type: "string", maxLength: 200 },
+      viewportOnly: { type: "boolean" },
     },
   ),
   tool(
     "browser_screenshot",
-    "Capture the visible tab as an image. Use for visual inspection and coordinate actions.",
+    "Capture the visible tab with viewport CSS size and devicePixelRatio. Pointer tools use CSS coordinates: divide screenshot pixel coordinates by devicePixelRatio. Prefer element refs when available.",
     { tabId: tab },
   ),
   tool(

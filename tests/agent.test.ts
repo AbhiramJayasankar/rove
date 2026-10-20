@@ -62,6 +62,41 @@ function setup(overrides: Partial<Settings> = {}, apiKey = "") {
 }
 
 describe("agent execution loop", () => {
+  it("preserves long provider reasoning in the trace and subsequent requests", async () => {
+    const reasoning = "Reasoning detail. ".repeat(3000);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            choices: [
+              {
+                message: {
+                  role: "assistant",
+                  content: null,
+                  reasoning_content: reasoning,
+                  tool_calls: [call("one", "browser_tabs", {})],
+                },
+              },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(response("Done."));
+    vi.stubGlobal("fetch", fetchMock);
+    const ctx = setup();
+    ctx.engine.start("Inspect tabs.");
+    await until(() => !ctx.engine.activeRunId);
+    expect(
+      ctx.events.find((e) => e.type === "model_response")?.data.message
+        .reasoning_content,
+    ).toBe(reasoning);
+    expect(
+      JSON.parse(fetchMock.mock.calls[1][1].body).messages.find(
+        (m: any) => m.role === "assistant",
+      ).reasoning_content,
+    ).toBe(reasoning);
+  });
   it("enables auto-approval on a paused run and executes later tools without more approval pauses", async () => {
     vi.stubGlobal(
       "fetch",

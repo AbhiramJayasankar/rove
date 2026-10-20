@@ -8,7 +8,9 @@ import { Store } from "./store";
 import { ChromeBridge } from "./bridge";
 import { AgentEngine } from "./agent";
 import { BUILTIN_TOOLS, validateCustomTools } from "./tools";
-import { testModel } from "./model";
+import { testModel, completionUrl } from "./model";
+import { readBounded } from "./tools";
+import { DEFAULT_SETTINGS } from "../shared/defaults";
 import type { AppState, RunRecord, Settings } from "../shared/types";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -121,24 +123,55 @@ const customToolSchema = z.object({
     }),
   ]),
 });
-const settingsSchema = z.object({
-  baseUrl: z
-    .url()
-    .refine(
-      (url) =>
-        ["http:", "https:"].includes(new URL(url).protocol) &&
-        !new URL(url).username &&
-        !new URL(url).password,
-      "Use an HTTP(S) endpoint without embedded credentials.",
-    ),
-  model: z.string().max(200),
-  systemPrompt: z.string().min(1).max(100000),
-  maxSteps: z.number().int().min(1).max(200),
-  approvalMode: z.enum(["always", "risky", "never"]),
-  vision: z.boolean(),
-  disabledTools: z.array(z.string()).max(100),
-  customTools: z.array(customToolSchema).max(50),
-});
+const settingsSchema = z
+  .object({
+    baseUrl: z
+      .url()
+      .refine(
+        (url) =>
+          ["http:", "https:"].includes(new URL(url).protocol) &&
+          !new URL(url).username &&
+          !new URL(url).password,
+        "Use an HTTP(S) endpoint without embedded credentials.",
+      ),
+    model: z.string().max(200),
+    systemPrompt: z.string().min(1).max(100000),
+    maxSteps: z.number().int().min(1).max(200),
+    contextWindow: z
+      .number()
+      .int()
+      .min(4096)
+      .max(4000000)
+      .default(DEFAULT_SETTINGS.contextWindow),
+    maxOutputTokens: z
+      .number()
+      .int()
+      .min(256)
+      .max(256000)
+      .default(DEFAULT_SETTINGS.maxOutputTokens),
+    maxImages: z
+      .number()
+      .int()
+      .min(0)
+      .max(20)
+      .default(DEFAULT_SETTINGS.maxImages),
+    reasoningEffort: z
+      .enum(["default", "none", "low", "medium", "high"])
+      .default("default"),
+    reasoningFormat: z
+      .enum(["auto", "reasoning_effort", "thinking"])
+      .default("auto"),
+    stream: z.boolean().default(true),
+    modelTimeoutSeconds: z.number().int().min(15).max(1800).default(300),
+    approvalMode: z.enum(["always", "risky", "never"]),
+    vision: z.boolean(),
+    disabledTools: z.array(z.string()).max(100),
+    customTools: z.array(customToolSchema).max(50),
+  })
+  .refine(
+    (s) => s.maxOutputTokens + 2048 < s.contextWindow,
+    "Context window must exceed output tokens plus 2,048 reserved tokens.",
+  );
 function parse<T>(schema: z.ZodType<T>, input: unknown): T {
   return schema.parse(input);
 }
@@ -182,6 +215,82 @@ app.put("/api/approval-mode", (req, res) => {
   broadcast("settings", result);
   engine.setApprovalMode(mode);
   res.json(result);
+});
+app.put("/api/run-options", (req, res) => {
+  const options = parse(
+    z
+      .object({
+        model: z.string().min(1).max(200).optional(),
+        reasoningEffort: z
+          .enum(["default", "none", "low", "medium", "high"])
+          .optional(),
+        contextWindow: z.number().int().min(4096).max(4000000).optional(),
+      })
+      .strict(),
+    req.body,
+  );
+  const settings = parse(settingsSchema, {
+    ...store.settings,
+    ...options,
+  }) as Settings;
+  store.saveSettings(settings);
+  const result = { settings, hasApiKey: Boolean(apiKey) };
+  broadcast("settings", result);
+  res.json(result);
+});
+let modelCache: { key: string; at: number; models: unknown[] } | undefined;
+app.get("/api/models", async (req, res) => {
+  const cacheKey = `${store.settings.baseUrl}:${apiKey}`;
+  if (
+    !req.query.refresh &&
+    modelCache?.key === cacheKey &&
+    Date.now() - modelCache.at < 60000
+  ) {
+    res.json({ models: modelCache.models });
+    return;
+  }
+  try {
+    const url = completionUrl(store.settings.baseUrl).replace(
+      /\/chat\/completions$/,
+      "/models",
+    );
+    const response = await fetch(url, {
+      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
+      signal: AbortSignal.timeout(20000),
+      redirect: "error",
+    });
+    if (!response.ok)
+      throw new Error(
+        `Model catalogue returned HTTP ${response.status}. You can still enter a model ID.`,
+      );
+    const data = JSON.parse(await readBounded(response, 8_000_000));
+    const entries = Array.isArray(data) ? data : data.data || data.models;
+    if (!Array.isArray(entries))
+      throw new Error(
+        "The endpoint did not return a model list. Enter a model ID manually.",
+      );
+    const models = entries
+      .filter((m) => typeof m.id === "string")
+      .map((m) => ({
+        id: m.id,
+        name: m.name || m.id,
+        contextWindow:
+          Number(
+            m.context_length ||
+              m.context_window ||
+              m.max_model_len ||
+              m.top_provider?.context_length,
+          ) || undefined,
+        free: /(?:^|[:/ -])free(?:$|[:/ -])/i.test(m.id),
+        owner: m.owned_by || m.architecture?.instruct_type,
+      }));
+    modelCache = { key: cacheKey, at: Date.now(), models };
+    res.json({ models });
+  } catch (error) {
+    res.status(502).json({
+      error: redact(error instanceof Error ? error.message : String(error)),
+    });
+  }
 });
 app.post("/api/model/test", async (req, res) => {
   const candidate = parse(settingsSchema, {

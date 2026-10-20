@@ -131,16 +131,33 @@ async function cdp(tabId, method, params = {}, sessionId) {
     method,
     params,
   );
-  if (!state || !canWaitForDialog) return command;
-  let interrupt;
-  const modal = new Promise((_, reject) => {
-    interrupt = () => reject(dialogError());
-    state.dialogWaiters.add(interrupt);
+  let interrupt, timeout;
+  const deadline = new Promise((_, reject) => {
+    timeout = setTimeout(() => {
+      // A suspended renderer must not hold the serial command queue forever.
+      // Detach cancels outstanding CDP work; never replay the browser action.
+      chrome.debugger.detach({ tabId }).catch(() => {});
+      attached.delete(tabId);
+      reject(
+        new Error(
+          `Chrome timed out during ${method}. The tab may be suspended or paused. Bring it to the foreground and inspect it before retrying. The action was not replayed.`,
+        ),
+      );
+    }, 15000);
   });
+  const waits = [command, deadline];
+  if (state && canWaitForDialog)
+    waits.push(
+      new Promise((_, reject) => {
+        interrupt = () => reject(dialogError());
+        state.dialogWaiters.add(interrupt);
+      }),
+    );
   try {
-    return await Promise.race([command, modal]);
+    return await Promise.race(waits);
   } finally {
-    state.dialogWaiters.delete(interrupt);
+    clearTimeout(timeout);
+    if (interrupt) state.dialogWaiters.delete(interrupt);
   }
 }
 async function initializeSession(tabId, sessionId) {
@@ -371,18 +388,33 @@ function snapshotInPage(prefix, options) {
       }
       const tag = el.tagName.toLowerCase();
       if (!visible(el) || el.closest("[inert]")) continue;
-      const interactive = el.matches(
-        "a[href],button,input:not([type=hidden]),textarea,select,summary,[role],[contenteditable=true],[tabindex]",
-      );
+      const interactive =
+        el.matches(
+          "a[href],button,input:not([type=hidden]),textarea,select,summary,[role=button],[role=link],[role=checkbox],[role=radio],[role=combobox],[role=textbox],[role=searchbox],[role=menuitem],[role=option],[role=tab],[role=slider],[role=switch],[role=spinbutton],[contenteditable=true]",
+        ) || el.tabIndex >= 0;
       if (!interactive) continue;
+      const r = el.getBoundingClientRect();
+      const inViewport =
+        r.bottom > 0 &&
+        r.right > 0 &&
+        r.top < innerHeight &&
+        r.left < innerWidth;
+      if (options.viewportOnly && !inViewport) continue;
+      const label = name(el);
+      if (
+        options.query &&
+        !`${label} ${el.getAttribute("href") || ""}`
+          .toLowerCase()
+          .includes(options.query.toLowerCase())
+      )
+        continue;
       const index = totalElements++;
       if (
         index < options.elementOffset ||
         elements.length >= options.elementLimit
       )
         continue;
-      const r = el.getBoundingClientRect(),
-        ref = prefix + ":" + (index + 1);
+      const ref = prefix + ":" + (index + 1);
       globalThis.__relayRefs.set(ref, el);
       const role =
         el.getAttribute("role") ||
@@ -405,13 +437,15 @@ function snapshotInPage(prefix, options) {
       const item = {
         ref,
         role,
-        name: name(el),
+        name: label,
         tag,
         x: r.x,
         y: r.y,
         width: r.width,
         height: r.height,
+        inViewport,
       };
+      if (tag === "a") item.href = el.href;
       if ("value" in el && el.type !== "password")
         item.value = String(el.value).slice(0, 300);
       if (el.disabled) item.disabled = true;
@@ -433,6 +467,12 @@ function snapshotInPage(prefix, options) {
   return {
     url: location.href,
     title: document.title,
+    viewport: {
+      width: innerWidth,
+      height: innerHeight,
+      devicePixelRatio,
+      coordinateSpace: "CSS pixels",
+    },
     text: text.slice(
       options.textOffset,
       options.textOffset + options.textLimit,
@@ -453,6 +493,8 @@ async function snapshot(tabId, frameId, args = {}) {
     textLimit: args.textLimit ?? 6000,
     elementOffset: args.elementOffset ?? 0,
     elementLimit: args.elementLimit ?? 60,
+    query: args.query || "",
+    viewportOnly: !!args.viewportOnly,
   };
   for (const [key, min, max] of [
     ["textOffset", 0, Number.MAX_SAFE_INTEGER],
@@ -555,6 +597,23 @@ async function pointFromArgs(
     throw new Error(
       `Pointer action requires ${refKey} or numeric ${xKey} and ${yKey}.`,
     );
+  if (!args[refKey]) {
+    const frame = await frameContext(tabId);
+    const viewport = await evaluate(
+      tabId,
+      frame,
+      "({width:innerWidth,height:innerHeight,devicePixelRatio})",
+    );
+    if (
+      point.x < 0 ||
+      point.y < 0 ||
+      point.x >= viewport.width ||
+      point.y >= viewport.height
+    )
+      throw new Error(
+        `Coordinates (${point.x}, ${point.y}) are outside the ${viewport.width}x${viewport.height} CSS-pixel viewport. Screenshot pixels must be divided by devicePixelRatio ${viewport.devicePixelRatio}; use a snapshot ref when possible.`,
+      );
+  }
   return point;
 }
 const keyDefinitions = {
@@ -684,6 +743,12 @@ async function perform(action, args = {}) {
     case "browser_snapshot":
       return snapshot(tabId, args.frameId, args);
     case "browser_screenshot": {
+      const rootFrame = await frameContext(tabId);
+      const viewport = await evaluate(
+        tabId,
+        rootFrame,
+        "({width:innerWidth,height:innerHeight,devicePixelRatio,coordinateSpace:'CSS pixels'})",
+      );
       const image = await cdp(tabId, "Page.captureScreenshot", {
         format: "jpeg",
         quality: 75,
@@ -693,6 +758,11 @@ async function perform(action, args = {}) {
         tabId,
         url: tab.url,
         title: tab.title,
+        viewport,
+        imageSize: {
+          width: Math.round(viewport.width * viewport.devicePixelRatio),
+          height: Math.round(viewport.height * viewport.devicePixelRatio),
+        },
         dataUrl: "data:image/jpeg;base64," + image.data,
       };
     }

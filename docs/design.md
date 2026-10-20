@@ -1,5 +1,7 @@
 # Interface decisions
 
+The current execution-ledger design and revised palette are documented in [the latest interface plan](interface-plan.md). The notes below preserve the preceding iteration.
+
 The redesign applies the current [Anthropic frontend-design skill](https://raw.githubusercontent.com/anthropics/skills/main/skills/frontend-design/SKILL.md), pulled directly from Anthropic's GitHub repository on 2026-10-20. The brief is a browser-control application: remove blue tones and unnecessary captions, expose automatic approval, and make the primary task easy to operate.
 
 ## Direction

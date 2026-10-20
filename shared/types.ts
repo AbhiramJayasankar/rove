@@ -19,6 +19,13 @@ export interface Settings {
   model: string;
   systemPrompt: string;
   maxSteps: number;
+  contextWindow: number;
+  maxOutputTokens: number;
+  maxImages: number;
+  reasoningEffort: "default" | "none" | "low" | "medium" | "high";
+  reasoningFormat: "auto" | "reasoning_effort" | "thinking";
+  stream: boolean;
+  modelTimeoutSeconds: number;
   approvalMode: "always" | "risky" | "never";
   vision: boolean;
   disabledTools: string[];

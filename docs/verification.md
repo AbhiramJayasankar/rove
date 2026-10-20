@@ -3,7 +3,7 @@
 Verified locally on Windows on **2026-10-20**, with Node.js 24 and Playwright Chromium 156. Chrome 125+ is the implementation's minimum; the integration test covers the installed test browser version.
 
 - `npm run build`: TypeScript checking and production Vite build pass.
-- `npm test`: **24 tests pass**, covering the agent/model loop, approval denial and cancellation, live auto-approval changes, questions/replies, selected-tab routing, vision sequencing, schema validation, provider compatibility/errors, key redaction, long snapshot compaction, array tool results, historical configuration, and persistence/restart recovery including transient Windows file locks.
+- `npm test`: **31 tests pass**, covering the agent/model loop, approval denial and cancellation, live auto-approval changes, questions/replies, selected-tab routing, vision sequencing, schema validation, provider compatibility/errors, key redaction, long snapshot compaction, array tool results, historical configuration, and persistence/restart recovery including transient Windows file locks.
 - `npm run test:e2e`: **2 integration tests pass**, exercising the actual MV3 extension, real browser page state, loopback backend, deterministic OpenAI-compatible model endpoint, and React interface.
 - `npm audit`: no known vulnerabilities reported in the installed dependency tree at verification time.
 - Production `npm start` smoke check: built interface loads successfully in Chromium, with no page errors, an empty task history, and no configured endpoint key or model. The local app is left running at port 4789 for handoff.
@@ -15,3 +15,11 @@ Desktop and mobile layouts were visually inspected. Screenshots in `docs/screens
 The automated suite uses an isolated browser and deterministic provider. Separately, the user's regular Chrome was paired and a real Token Harbor `mimo-v2.6-flash:free` run opened Amazon.in and verified its URL/title. The key is held in server memory and excluded from source. The redesign's UI test verifies that enabling auto-approval while paused resumes the task, prevents later approval pauses, persists after reload, and keeps the decision panel visible independently of activity scrolling. Desktop, mobile task/browser, model, instructions, and tools views were visually inspected.
 
 The source repository includes CI commands for Linux. The CI workflow has been authored but was not executed on GitHub in this session. No repository was published or pushed remotely.
+
+The context/observability update adds regression coverage for large image payloads retaining earlier steps, independent image retention, atomic tool-group eviction, untruncated long reasoning, fragmented SSE/tool-call assembly, incomplete-stream rejection, and provider-appropriate reasoning parameters. The real browser suite additionally verifies catalogue search/free filtering/model selection inside chat, reasoning selection, full reasoning/tool result expansion, snapshot query/viewport filtering, coordinate rejection, and cancellation of an upstream live stream before any partial tool call executes.
+
+The user's Token Harbor catalogue was fetched successfully (69 entries, four free-tagged models). A real `mimo-v2.6-flash:free` connection test with streaming and `thinking.type: enabled` verified valid function calling. The existing Chrome extension was reloaded for viewport metadata and filtering.
+
+A live read-only snapshot of a background Amazon tab timed out after extension reload. This prompted a per-CDP-command deadline and debugger detach, preventing a suspended renderer from holding the serial extension queue indefinitely; no timed-out action is replayed. The automated browser suite covers active pages and isolated frames, not every suspended-tab state.
+
+The final command-deadline source passed the browser suite, but its last reload in the user's regular Chrome was blocked when Computer Use could not establish the current browser URL. Reload the existing Relay extension once to activate that final deadline change. The preceding viewport/filtering update was already reloaded successfully.
