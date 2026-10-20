@@ -1056,3 +1056,104 @@
   background: var(--panel);
   justify-content: space-between;
 }
+
+/* Model details */
+.settings-page .model-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 18px;
+  background: var(--field);
+}
+.model-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+}
+.model-facts > div {
+  display: grid;
+  grid-template-columns: minmax(96px, 36%) 1fr;
+  gap: 4px 12px;
+  padding: 5px 0;
+}
+.model-details .model-facts > div {
+  padding: 7px 12px;
+  border-radius: 10px;
+  background: var(--panel);
+  margin-bottom: 2px;
+}
+.model-facts dt {
+  color: var(--muted);
+  font-size: 12px;
+}
+.model-facts dd {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
+}
+.model-facts dd.unreported {
+  color: var(--muted);
+  font-weight: 400;
+}
+.raw-details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 2px;
+}
+.raw-details pre {
+  max-height: 260px;
+  margin: 6px 0 0;
+  padding: 12px;
+  overflow: auto;
+  border-radius: 12px;
+  background: var(--panel);
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.checklist-item {
+  display: flex;
+  align-items: center;
+  border-radius: 10px;
+  transition: background 120ms;
+}
+.checklist-item:hover {
+  background: var(--panel);
+}
+.checklist-item .checklist-row {
+  flex: 1;
+  min-width: 0;
+}
+.checklist-item .checklist-row:hover {
+  background: transparent;
+}
+.catalogue-row {
+  display: flex;
+  align-items: center;
+  border-radius: 12px;
+}
+.catalogue-row:hover {
+  background: var(--panel);
+}
+.catalogue-row .catalogue-model {
+  flex: 1;
+  min-width: 0;
+}
+.catalogue-row .catalogue-model:hover {
+  background: transparent;
+}
+.catalogue-row .catalogue-model[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+.catalogue-row .tooltip-trigger {
+  margin-right: 6px;
+}
+.tooltip-panel .model-facts > div {
+  grid-template-columns: minmax(84px, 38%) 1fr;
+}

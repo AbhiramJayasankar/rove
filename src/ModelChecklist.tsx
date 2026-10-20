@@ -5,6 +5,8 @@ import { tokenCount } from "./ModelPicker";
 import type { ModelInfo } from "../shared/types";
 import type { ModelVisibility } from "./modelVisibility";
 import { useT } from "./i18n";
+import Tooltip from "./Tooltip";
+import { ModelFactList } from "./ModelFacts";
 
 export default function ModelChecklist({
   providerId,
@@ -128,7 +130,8 @@ export default function ModelChecklist({
       </div>
       <div className="checklist-list" role="group" aria-label={t("Models shown in chat")}>
         {shown.map((info) => (
-          <label className="checklist-row" key={info.id}>
+          <div className="checklist-item" key={info.id}>
+          <label className="checklist-row">
             <input
               type="checkbox"
               checked={isOn(info.id)}
@@ -144,6 +147,11 @@ export default function ModelChecklist({
             </span>
             {info.contextWindow && <small>{tokenCount(info.contextWindow)}</small>}
           </label>
+          <Tooltip label={t("Details for {name}", { name: info.name })} width={340}>
+            <strong className="tool-details-name">{info.name}</strong>
+            <ModelFactList model={info} />
+          </Tooltip>
+          </div>
         ))}
         {loading && !models.length && <p className="checklist-empty">{t("Loading models…")}</p>}
         {!loading && error && <p className="checklist-empty">{error}</p>}

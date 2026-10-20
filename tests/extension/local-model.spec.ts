@@ -90,3 +90,21 @@ test("invalid request fields are refused", async () => {
   const result = await ui.evaluate(() => chrome.runtime.sendMessage({ type: "rove-api", path: "/api/model-override", method: "PUT", body: { baseUrl: "http://x/v1", model: "m", override: { reasoning: [{ value: "a", label: "A", body: '{"messages":[]}' }] } } }));
   expect(result.ok).toBe(false);
 });
+
+test("model details show what the endpoint reports, in Settings and in the picker", async () => {
+  await ui.getByRole("button", { name: "Settings", exact: true }).click();
+  const details = ui.locator(".model-details");
+  await expect(details.getByText("65,536 tokens").first()).toBeVisible();
+  await expect(details.getByText("Off · On (Custom levels)")).toBeVisible();
+  await expect(details.getByText("Not reported").first()).toBeVisible();
+  await details.getByText("Raw endpoint data").click();
+  await expect(details.locator("pre")).toContainText('"owned_by": "llamacpp"');
+  await details.scrollIntoViewIfNeeded();
+  await ui.screenshot({ path: "test-results/model-details.png", fullPage: true });
+
+  await ui.getByRole("button", { name: "New task", exact: true }).click();
+  await ui.getByRole("button", { name: "Choose model", exact: true }).click();
+  await ui.getByRole("button", { name: "Details for ling" }).hover();
+  await expect(ui.getByRole("tooltip")).toContainText("Context window");
+  await ui.screenshot({ path: "test-results/model-picker-details.png" });
+});

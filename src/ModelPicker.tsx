@@ -13,6 +13,8 @@ import { usePopover } from "./Popover";
 import { useVisibleModels } from "./modelVisibility";
 import type { ModelInfo } from "../shared/types";
 import { useT } from "./i18n";
+import Tooltip from "./Tooltip";
+import { ModelFactList } from "./ModelFacts";
 export const tokenCount = (count: number) =>
   count >= 1_000_000
     ? `${(count / 1_000_000).toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}M`
@@ -178,6 +180,7 @@ export default function ModelPicker({
               aria-label={t("Available models")}
             >
               {filtered.map((info, index) => (
+                <div className="catalogue-row" role="presentation" key={`${info.providerId || ""}:${info.id}`}>
                 <button
                   ref={(element) => {
                     options.current[index] = element;
@@ -186,7 +189,6 @@ export default function ModelPicker({
                   role="option"
                   aria-selected={info.id === model && (!providerId || info.providerId === providerId)}
                   aria-label={info.name}
-                  key={`${info.providerId || ""}:${info.id}`}
                   className="catalogue-model"
                   onClick={() => choose(info)}
                   onKeyDown={(event) => {
@@ -210,6 +212,11 @@ export default function ModelPicker({
                     {info.id === model && (!providerId || info.providerId === providerId) && <Check size={13} />}
                   </span>
                 </button>
+                <Tooltip label={t("Details for {name}", { name: info.name })} width={340}>
+                  <strong className="tool-details-name">{info.name}</strong>
+                  <ModelFactList model={info} />
+                </Tooltip>
+                </div>
               ))}
               {loading && !models.length && (
                 <div className="catalogue-empty">{t("Loading models…")}</div>

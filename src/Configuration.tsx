@@ -20,6 +20,7 @@ import type { AppState, Settings } from "../shared/types";
 import { DEFAULT_PROMPT } from "../shared/defaults";
 import ModelChecklist from "./ModelChecklist";
 import ModelAbilities from "./ModelAbilities";
+import { ModelDetails } from "./ModelFacts";
 import Tooltip from "./Tooltip";
 import { ToolDetails, approvalNote, riskExplanation, riskLabel } from "./toolInfo";
 import ShortcutsEditor from "./ShortcutsEditor";
@@ -204,7 +205,10 @@ export default function Configuration({
                 />
               </div>
               {state.modelInfo?.id === draft.model && state.settings.baseUrl === draft.baseUrl && (
-                <ModelAbilities model={state.modelInfo} endpoint={state.settings.baseUrl} />
+                <>
+                  <ModelDetails model={state.modelInfo} />
+                  <ModelAbilities model={state.modelInfo} endpoint={state.settings.baseUrl} />
+                </>
               )}
               <div className="tool-round-limit">
                 <label htmlFor="step-limit">{t("Step limit")}</label>

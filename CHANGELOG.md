@@ -21,6 +21,7 @@ Closes the main gaps against other bring-your-own-model browser agents.
 - Time sent on every message, and a copy button on your messages and Rove's answers.
 
 - Model abilities in Settings → Model: send images always or never for a given model, and replace its reasoning control with your own levels (each level is JSON merged into the request, with presets for llama.cpp, vLLM, DeepSeek, OpenAI and OpenRouter styles).
+- Model details: what the endpoint reports for a model (context, max input and output, input and output types, tool calling, images, reasoning, price, accepted parameters, size and quantization when given) with "Not reported" where it is silent, plus the raw endpoint entry. Shown on the Model settings page, and as an info popover on every model in the picker and in the chat checklist.
 - llama.cpp servers are detected: Rove reads the loaded context size, whether the model accepts images and whether it has a thinking switch.
 
 ### Changed
