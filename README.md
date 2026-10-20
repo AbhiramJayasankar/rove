@@ -85,6 +85,17 @@ API clips stay below 25 MB and 10 minutes. Paid OpenRouter STT stops recording a
 
 After building, reload Rove on `chrome://extensions`, reopen its side panel, and refresh open workbench tabs. No manifest permission or CSP changes are needed. See [verification](docs/verification.md#voice-input-verification) for detailed checks.
 
+## Prompts, rules and attachments
+
+- **Standing instructions** (Settings, Instructions) are added to every task, after the system instructions.
+- **Saved prompts**: add them in Settings, Instructions. Type `/` in the message box to search and insert one; an optional start page is prefixed as "Start at ...". Nothing is sent until you press Send.
+- **Site rules** (Settings, Tools) set Allow, Ask or Block for a site and its subdomains. They override Auto-approve and Ask first for that site; Ask cannot be answered by switching to Auto-approve; Block never reaches the browser and the model is told why. The most specific rule wins, and a tie takes the stricter action. A rule checks the address a tool acts on, so a link that leads to a blocked site is caught on the next tool call.
+- **Attachments**: the paperclip adds up to five images (5 MB each) or text files (200,000 characters each), or a screenshot of the selected tab. Images need a vision model. File contents are treated as untrusted data.
+- **Reports**: the agent can save a `.md`, `.txt`, `.csv`, `.json` or `.html` report to Downloads/Rove with `browser_save_file`. File names are bare names; folders and other types are refused.
+- **Export**: the trace view exports a run as JSON or a readable Markdown transcript.
+- **Languages**: English, Simplified Chinese and Traditional Chinese. Settings, Language defaults to following Chrome. The system prompt and the model's answers are not translated.
+- **Shortcut**: Alt+Shift+N is registered for the toolbar action; change it at `chrome://extensions/shortcuts`.
+
 ## Versions
 
 The version lives in `package.json`; `npm run build` copies it into the extension manifest and the app, which shows it in Settings with a "What's new" view. Every user-visible change is recorded in [CHANGELOG.md](CHANGELOG.md), and a test keeps the package, manifest and changelog in step. Rove was called Relay before 2.1.0; saved history, providers and keys carry over.
