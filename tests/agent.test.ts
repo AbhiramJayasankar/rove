@@ -62,6 +62,63 @@ function setup(overrides: Partial<Settings> = {}, apiKey = "") {
 }
 
 describe("agent execution loop", () => {
+  it("enables auto-approval on a paused run and executes later tools without more approval pauses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          response(null, [
+            call("one", "browser_click", { ref: "e1" }),
+            call("two", "browser_type", { text: "test" }),
+          ]),
+        )
+        .mockResolvedValueOnce(response("Done.")),
+    );
+    const ctx = setup({ approvalMode: "always" });
+    const run = ctx.engine.start("Fill the form.", 7);
+    await until(() => ctx.events.some((e) => e.type === "approval_required"));
+    expect(ctx.execute).not.toHaveBeenCalled();
+    ctx.engine.setApprovalMode("never");
+    await until(() => !ctx.engine.activeRunId);
+    expect(run.status).toBe("completed");
+    expect(ctx.execute.mock.calls.map((c) => c[0])).toEqual([
+      "browser_click",
+      "browser_screenshot",
+      "browser_type",
+      "browser_screenshot",
+    ]);
+    expect(
+      ctx.events.filter((e) => e.type === "approval_required"),
+    ).toHaveLength(1);
+    expect(
+      ctx.events.find((e) => e.type === "approval_decision")?.data.source,
+    ).toBe("automatic");
+  });
+  it("keeps a user question paused when auto-approval is enabled", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          response(null, [
+            call("question", "ask_user", { question: "Which option?" }),
+          ]),
+        )
+        .mockResolvedValueOnce(response("Done.")),
+    );
+    const ctx = setup({ approvalMode: "always" });
+    const run = ctx.engine.start("Choose an option.");
+    await until(() => ctx.events.some((e) => e.type === "user_question"));
+    ctx.engine.setApprovalMode("never");
+    expect(run.status).toBe("awaiting_approval");
+    expect(
+      ctx.events.filter((e) => e.type === "approval_decision"),
+    ).toHaveLength(0);
+    ctx.engine.reply(run.id, "First option");
+    await until(() => !ctx.engine.activeRunId);
+    expect(run.status).toBe("completed");
+  });
   it("keeps long page snapshots valid and preserves refs, frame IDs and pagination before text", async () => {
     const fetchMock = vi
       .fn()

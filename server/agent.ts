@@ -21,6 +21,7 @@ type Active = {
   pending?: Pending;
   selectedTab?: number;
   apiKey: string;
+  approvalMode: Settings["approvalMode"];
 };
 type Options = {
   transport: BrowserTransport;
@@ -110,13 +111,11 @@ function boundedSnapshot(source: Record<string, any>): string {
               : value;
       }
       if (Array.isArray(element.options)) {
-        item.options = element.options
-          .slice(0, 5)
-          .map((option: any) => ({
-            value: String(option.value).slice(0, 120),
-            label: String(option.label).slice(0, 80),
-            selected: !!option.selected,
-          }));
+        item.options = element.options.slice(0, 5).map((option: any) => ({
+          value: String(option.value).slice(0, 120),
+          label: String(option.label).slice(0, 80),
+          selected: !!option.selected,
+        }));
         item.optionsTruncated = element.options.length > 5;
       }
       return item;
@@ -262,6 +261,7 @@ export class AgentEngine {
       controller: new AbortController(),
       selectedTab: tabId,
       apiKey: this.options.getApiKey(),
+      approvalMode: this.options.getSettings().approvalMode,
     };
     this.active = active;
     this.event(active, "status", { status: "running" });
@@ -278,13 +278,32 @@ export class AgentEngine {
     this.finish(active, "stopped", "Stopped by the user.");
   }
 
-  approve(runId: string, approvalId: string, approved: boolean): void {
+  setApprovalMode(mode: Settings["approvalMode"]): void {
+    const active = this.active;
+    if (!active) return;
+    active.approvalMode = mode;
+    this.event(active, "approval_mode_changed", { mode });
+    if (mode === "never" && active.pending?.kind === "approval") {
+      this.approve(active.run.id, active.pending.id, true, true);
+    }
+  }
+
+  approve(
+    runId: string,
+    approvalId: string,
+    approved: boolean,
+    automatic = false,
+  ): void {
     const active = this.requireActive(runId);
     const pending = active.pending;
     if (!pending || pending.kind !== "approval" || pending.id !== approvalId)
       throw new Error("This approval is no longer pending.");
     active.pending = undefined;
-    this.event(active, "approval_decision", { id: approvalId, approved });
+    this.event(active, "approval_decision", {
+      id: approvalId,
+      approved,
+      source: automatic ? "automatic" : "manual",
+    });
     this.setStatus(active, "running");
     pending.resolve(approved);
   }
@@ -486,8 +505,8 @@ export class AgentEngine {
               };
             } else {
               const needsApproval =
-                settings.approvalMode === "always" ||
-                (settings.approvalMode === "risky" &&
+                active.approvalMode === "always" ||
+                (active.approvalMode === "risky" &&
                   isToolRisky(name, settings));
               if (
                 needsApproval &&

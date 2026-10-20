@@ -7,31 +7,28 @@ import {
 } from "react";
 import {
   ArrowDownToLine,
-  ArrowRight,
+  ArrowUp,
   Check,
-  CircleHelp,
+  ChevronDown,
   Code2,
-  Eye,
-  Globe2,
+  Globe,
   LoaderCircle,
+  Maximize2,
   Monitor,
-  MousePointer2,
-  Play,
   Plug,
   RefreshCw,
   Send,
-  ShieldCheck,
-  Square,
-  Terminal,
   X,
 } from "lucide-react";
-import type { AppState, RunRecord, TabInfo } from "../shared/types";
+import type { AppState, RunRecord, Settings } from "../shared/types";
 import {
   api,
+  AssistantMessage,
   json,
   statusLabels,
-  time,
   TimelineEvent,
+  ToolActivity,
+  toolTitle,
   type Action,
   type Page,
   type Shot,
@@ -48,10 +45,10 @@ type Props = {
   selectRun: (id: string) => void;
   mergeRun: (run: RunRecord) => void;
   streamConnected: boolean;
+  changeApprovalMode: (mode: Settings["approvalMode"]) => Promise<void>;
 };
 export default function Workbench({
   state,
-  setState,
   run,
   activeRun,
   busy,
@@ -61,6 +58,7 @@ export default function Workbench({
   selectRun,
   mergeRun,
   streamConnected,
+  changeApprovalMode,
 }: Props) {
   const [prompt, setPrompt] = useState("");
   const tabs = state.bridge.tabs.filter((tab) => {
@@ -69,8 +67,8 @@ export default function Workbench({
       return (
         ["http:", "https:", "file:"].includes(url.protocol) &&
         !(
-          url.port === window.location.port &&
-          ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+          url.port === location.port &&
+          ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname)
         )
       );
     } catch {
@@ -83,44 +81,76 @@ export default function Workbench({
   const [manualShot, setManualShot] = useState<Shot | null>(null);
   const [reply, setReply] = useState("");
   const [snapshot, setSnapshot] = useState<unknown>(null);
-  const endRef = useRef<HTMLDivElement>(null);
-  const connected = state.bridge.connected;
-  const selectedTab = tabs.find((t) => t.id === tabId);
-  const shots = run?.events.filter((e) => e.type === "screenshot") || [];
-  const shot =
-    manualShot || (shots[shots.length - 1]?.data as Shot | undefined);
-  const pauseEvents = (run?.events || []).filter((e) =>
-    [
-      "user_question",
-      "user_reply",
-      "approval_required",
-      "approval_decision",
-    ].includes(e.type),
+  const [activityView, setActivityView] = useState<"activity" | "trace">(
+    "activity",
   );
-  const lastPause = pauseEvents[pauseEvents.length - 1];
-  const lastQuestion =
-    lastPause?.type === "user_question" ? lastPause : undefined;
-  const waitingQuestion =
-    !!lastQuestion &&
-    ["running", "awaiting_approval"].includes(run?.status || "");
+  const [mobileView, setMobileView] = useState<"task" | "browser">("task");
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const follows = useRef(true);
+  const followsBrowser = useRef(true);
+  const browserRef = useRef<HTMLElement>(null);
+  const shots = run?.events.filter((e) => e.type === "screenshot") || [];
+  const runShot = shots.at(-1)?.data as Shot | undefined;
+  const previousShot = state.runs
+    .flatMap((r) =>
+      r.events.filter(
+        (e) => e.type === "screenshot" && (!tabId || e.data.tabId === tabId),
+      ),
+    )
+    .sort((a, b) => b.time.localeCompare(a.time))[0]?.data as Shot | undefined;
+  const shot =
+    manualShot ||
+    (runShot && (!tabId || !runShot.tabId || runShot.tabId === tabId)
+      ? runShot
+      : previousShot);
+  const selectedTab = tabs.find((t) => t.id === tabId);
+  const pause = [...(run?.events || [])]
+    .reverse()
+    .find((e) =>
+      [
+        "approval_required",
+        "approval_decision",
+        "user_question",
+        "user_reply",
+      ].includes(e.type),
+    );
   const approval =
-    lastPause?.type === "approval_required" ? lastPause : undefined;
+    run?.status === "awaiting_approval" && pause?.type === "approval_required"
+      ? pause
+      : undefined;
+  const question =
+    run?.status === "awaiting_approval" && pause?.type === "user_question"
+      ? pause
+      : undefined;
+  const results = new Map(
+    run?.events
+      .filter((e) => e.type === "tool_result")
+      .map((e) => [e.data.callId, e]),
+  );
+  const activity =
+    run?.events.filter((e) =>
+      ["assistant", "tool_call", "error", "user_reply"].includes(e.type),
+    ) || [];
+  useEffect(() => {
+    if (!tabs.some((t) => t.id === tabId))
+      setTabId(tabs.find((t) => t.active)?.id || tabs[0]?.id);
+  }, [state.bridge.tabs, tabId]);
   useEffect(() => {
     setManualShot(null);
     setSnapshot(null);
     setReply("");
+    follows.current = true;
+    followsBrowser.current = true;
   }, [run?.id]);
   useEffect(() => {
     setManualShot(null);
-  }, [shots.length]);
+    if (followsBrowser.current && runShot?.tabId) setTabId(runShot.tabId);
+  }, [shots.length, run?.id]);
   useEffect(() => {
-    if (!tabs.some((tab) => tab.id === tabId))
-      setTabId(tabs.find((t) => t.active)?.id || tabs[0]?.id);
-  }, [state.bridge.tabs, tabId]);
-  useEffect(() => {
-    if (run?.status === "running")
-      endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [run?.events.length]);
+    if (follows.current && scrollRef.current)
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [run?.events.length, activityView]);
   async function startRun() {
     if (!prompt.trim()) return;
     await action("run", async () => {
@@ -132,511 +162,423 @@ export default function Workbench({
       selectRun(created.id);
       setPrompt("");
       setManualShot(null);
+      setMobileView("task");
     });
   }
-  async function refreshBrowser(screenshotOnly = true) {
-    await action(screenshotOnly ? "screenshot" : "snapshot", async () => {
-      if (!tabId) throw new Error("Select a Chrome tab first.");
+  async function capture(inspect = false) {
+    await action(inspect ? "snapshot" : "screenshot", async () => {
       const result = await api<any>("/api/browser", {
         method: "POST",
         body: json({
-          action: screenshotOnly ? "browser_screenshot" : "browser_snapshot",
+          action: inspect ? "browser_snapshot" : "browser_screenshot",
           args: { tabId },
         }),
       });
-      if (screenshotOnly) {
-        if (!result.dataUrl)
-          throw new Error(
-            "Chrome returned no screenshot. Choose a normal webpage and try again.",
-          );
-        setManualShot({
-          dataUrl: result.dataUrl,
-          url: result.url || selectedTab?.url,
-          title: result.title || selectedTab?.title,
-        });
-      } else setSnapshot(result);
+      if (inspect) setSnapshot(result);
+      else {
+        if (!result.dataUrl) throw new Error("No screenshot returned.");
+        setManualShot(result);
+      }
     });
   }
-  function host(url?: string) {
-    if (!url) return "Your Chrome browser";
-    try {
-      return new URL(url).hostname || url;
-    } catch {
-      return url;
-    }
-  }
+  const canRun =
+    !!prompt.trim() &&
+    state.bridge.connected &&
+    !!state.settings.model &&
+    !busy &&
+    !pending;
   return (
-    <>
-      <section className="workspace-heading">
-        <div>
-          <div className="section-kicker">
-            <span className="tiny-browser" /> Browser workbench
-          </div>
-          <h1>
-            {!run
-              ? "What should your browser do?"
-              : run.status === "completed"
-                ? "Task complete."
-                : run.status === "failed"
-                  ? "Task needs attention."
-                  : run.status === "stopped"
-                    ? "Task stopped."
-                    : run.status === "awaiting_approval"
-                      ? "Your input is needed."
-                      : "A task in motion."}
-          </h1>
-          <p>
-            {run
-              ? "Follow the decisions, inspect the actions, stay in control."
-              : "Give your browser a task. See every step it takes."}
-          </p>
-        </div>
-        <div className="heading-actions">
-          {run && (
-            <a
-              className="button secondary compact"
-              href={`/api/runs/${run.id}/export`}
-              download
-            >
-              <ArrowDownToLine size={15} />
-              Export run
-            </a>
-          )}
-          {busy && (
-            <button
-              className="button danger compact"
-              disabled={pending === "stop"}
-              onClick={() =>
-                action("stop", async () => {
-                  const stopped = await api<RunRecord>(
-                    `/api/runs/${activeRun!.id}/stop`,
-                    { method: "POST" },
-                  );
-                  if (stopped?.id) mergeRun(stopped);
-                })
-              }
-            >
-              <Square size={13} fill="currentColor" />
-              Stop task
-            </button>
-          )}
-        </div>
-      </section>
-      {state.runs.length > 0 && (
+    <div className={`workspace mobile-${mobileView}`}>
+      <div className="mobile-view-tabs">
+        <button
+          className={mobileView === "task" ? "selected" : ""}
+          onClick={() => setMobileView("task")}
+        >
+          Task
+        </button>
+        <button
+          className={mobileView === "browser" ? "selected" : ""}
+          onClick={() => setMobileView("browser")}
+        >
+          Browser
+        </button>
         <select
-          className="mobile-history"
           aria-label="Recent tasks"
           value={run?.id || ""}
-          onChange={(e) => {
-            if (e.target.value) selectRun(e.target.value);
-          }}
+          onChange={(e) => e.target.value && selectRun(e.target.value)}
         >
           <option value="">Recent tasks</option>
-          {state.runs.map((item) => (
-            <option key={item.id} value={item.id}>
-              {item.prompt}
+          {state.runs.map((r) => (
+            <option value={r.id} key={r.id}>
+              {r.prompt}
             </option>
           ))}
         </select>
-      )}
-      {(!connected || !state.settings.model) && (
-        <div className="setup-strip">
-          <span className="setup-icon">
-            <Plug size={18} />
-          </span>
-          <div>
-            <strong>
-              {!connected
-                ? "One connection. Your whole browser."
-                : "Choose the model that drives Relay."}
-            </strong>
-            <p>
-              {!connected
-                ? "Connect the Chrome extension to work with your existing tabs and sessions."
-                : "Add an OpenAI-compatible endpoint and model to start your first task."}
-            </p>
-          </div>
-          <button
-            className="text-button"
-            onClick={() => setPage(!connected ? "connection" : "settings")}
-          >
-            {!connected ? "Connect Chrome" : "Set up model"}
-            <ArrowRight size={16} />
-          </button>
-        </div>
-      )}
-      <div className="workbench-grid">
-        <section className="task-panel" aria-label="Task and activity">
-          <div className="task-composer">
-            <div className="panel-label">
-              <span>
-                <Terminal size={16} />
-                {run ? "Next task" : "Your task"}
-              </span>
-              <span className="subtle">Plain language. Real actions.</span>
-            </div>
-            <textarea
-              aria-label="Task prompt"
-              placeholder="Find the best train options for Friday, compare the departure times, and put a shortlist together…"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              onKeyDown={(e) => {
-                if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                  e.preventDefault();
-                  if (!busy && connected && state.settings.model && !pending)
-                    startRun();
-                }
-              }}
-            />
-            <div className="composer-footer">
-              <span>
-                <ShieldCheck size={14} />
-                {state.settings.approvalMode === "always"
-                  ? "Approve every action"
-                  : state.settings.approvalMode === "risky"
-                    ? "Approve sensitive actions"
-                    : "Automatic actions"}
-              </span>
-              <button
-                className="button primary"
-                onClick={startRun}
-                disabled={
-                  !prompt.trim() ||
-                  !connected ||
-                  !state.settings.model ||
-                  busy ||
-                  !!pending
-                }
-              >
-                {pending === "run" ? (
-                  <LoaderCircle size={16} className="spin" />
-                ) : (
-                  <Play size={15} fill="currentColor" />
-                )}
-                Run task
-              </button>
-            </div>
-          </div>
-          <div className="activity-heading">
-            <h2>
-              Activity{" "}
-              {run && (
-                <span className={`status-pill ${run.status}`}>
-                  {statusLabels[run.status]}
-                </span>
-              )}
-            </h2>
-            <span>
-              {run
-                ? `${run.events.length} events`
-                : "Waiting for your first task"}
-            </span>
-          </div>
-          <div className="activity-scroll" aria-live="polite">
-            {run ? (
-              <>
-                <div className="user-task">
-                  <span className="user-avatar">You</span>
-                  <div>
-                    <p>{run.prompt}</p>
-                    <time>{time(run.createdAt)}</time>
-                  </div>
-                </div>
-                <div className="timeline">
-                  {run.events.map((event) => (
-                    <TimelineEvent key={event.id} event={event} />
-                  ))}
-                  <div ref={endRef} />
-                </div>
-                {run.status === "awaiting_approval" && approval && (
-                  <div className="decision-panel">
-                    <span className="decision-title">
-                      <ShieldCheck size={18} />
-                      Your approval is needed
-                    </span>
-                    <p>
-                      Relay wants to use <strong>{approval.data.tool}</strong>.
-                    </p>
-                    <details>
-                      <summary>Review action details</summary>
-                      <pre>{json(approval.data.args)}</pre>
-                    </details>
-                    <div>
-                      <button
-                        className="button primary"
-                        disabled={!!pending}
-                        onClick={() =>
-                          action("approve", async () => {
-                            await api(`/api/runs/${run.id}/approval`, {
-                              method: "POST",
-                              body: json({
-                                approvalId: approval.data.id,
-                                approved: true,
-                              }),
-                            });
-                          })
-                        }
-                      >
-                        <Check size={15} />
-                        Approve once
-                      </button>
-                      <button
-                        className="button secondary"
-                        disabled={!!pending}
-                        onClick={() =>
-                          action("deny", async () => {
-                            await api(`/api/runs/${run.id}/approval`, {
-                              method: "POST",
-                              body: json({
-                                approvalId: approval.data.id,
-                                approved: false,
-                              }),
-                            });
-                          })
-                        }
-                      >
-                        Deny action
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {waitingQuestion && (
-                  <form
-                    className="decision-panel"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      action("reply", async () => {
-                        await api(`/api/runs/${run.id}/reply`, {
-                          method: "POST",
-                          body: json({ message: reply }),
-                        });
-                        setReply("");
-                      });
-                    }}
-                  >
-                    <span className="decision-title">
-                      <CircleHelp size={18} />
-                      Relay needs your input
-                    </span>
-                    <p>{String(lastQuestion?.data.question || "")}</p>
-                    <textarea
-                      aria-label="Reply to Relay"
-                      value={reply}
-                      onChange={(e) => setReply(e.target.value)}
-                      placeholder="Your answer or additional instructions"
-                    />
-                    <button
-                      className="button primary"
-                      disabled={!reply.trim() || !!pending}
-                    >
-                      <Send size={15} />
-                      Send answer
-                    </button>
-                  </form>
-                )}
-              </>
-            ) : (
-              <div className="activity-empty">
-                <span className="empty-orbit">
-                  <MousePointer2 size={24} />
-                </span>
-                <h3>A clear view of every move.</h3>
-                <p>
-                  Plans, browser actions, tool results, and approvals appear
-                  here as your task runs.
-                </p>
-                <div className="transparency-note">
-                  <Eye size={15} />
-                  Full requests and results are always inspectable.
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="task-panel-footer">
-            <span className={`status-dot ${streamConnected ? "online" : ""}`} />
-            {streamConnected ? "Live activity" : "Reconnecting…"}
-            <span>Ctrl + Enter to run</span>
-          </div>
-        </section>
-        <section className="browser-stage" aria-label="Browser view">
-          <div className="browser-stage-heading">
-            <h2>
-              <Monitor size={17} />
-              Browser view
-            </h2>
-            <span className="live-badge">
-              <span className={`status-dot ${connected ? "online" : ""}`} />
-              {connected ? "Connected" : "Offline"}
-            </span>
-          </div>
-          <div className="browser-window">
-            <div className="browser-tabbar">
-              <span className="browser-dots">
-                <i />
-                <i />
-                <i />
-              </span>
-              <span className="browser-tab">
-                <Globe2 size={14} />
-                <span>
-                  {shot?.title || selectedTab?.title || "Your Chrome session"}
-                </span>
-              </span>
-              <button
-                className="icon-button"
-                title="Refresh available tabs"
-                aria-label="Refresh available tabs"
-                onClick={() =>
-                  action("tabs", async () => {
-                    const tabs = await api<TabInfo[]>("/api/tabs");
-                    setState((s) =>
-                      s ? { ...s, bridge: { ...s.bridge, tabs } } : s,
-                    );
-                  })
-                }
-              >
-                <RefreshCw size={14} />
-              </button>
-            </div>
-            <div className="browser-address">
-              <ShieldCheck size={14} />
-              <select
-                aria-label="Chrome tab"
-                value={tabId ?? ""}
-                onChange={(e) => {
-                  setTabId(e.target.value ? Number(e.target.value) : undefined);
-                  setManualShot(null);
-                }}
-              >
-                <option value="">Select a Chrome tab</option>
-                {tabs.map((tab) => (
-                  <option value={tab.id} key={tab.id}>
-                    {tab.title || tab.url}
-                  </option>
-                ))}
-              </select>
-              <span title={shot?.url || selectedTab?.url}>
-                {host(shot?.url || selectedTab?.url)}
-              </span>
-            </div>
-            <div className={`browser-viewport ${shot ? "has-shot" : ""}`}>
-              {shot ? (
-                <img
-                  src={shot.dataUrl}
-                  alt={`Chrome view: ${shot.title || "current page"}`}
-                />
-              ) : (
-                <div className="browser-placeholder">
-                  <div className="browser-illustration">
-                    <div className="illustration-window">
-                      <div>
-                        <i />
-                        <i />
-                        <i />
-                      </div>
-                      <span />
-                      <span />
-                      <span />
-                      <MousePointer2 size={26} />
-                    </div>
-                    <span className="illustration-plug">
-                      <Plug size={23} />
-                    </span>
-                  </div>
-                  <h3>
-                    {connected
-                      ? "Your browser is ready."
-                      : "Bring your own browser."}
-                  </h3>
-                  <p>
-                    {connected
-                      ? "Select a tab and take a screenshot, or start a task to watch the browser as Relay works."
-                      : "Your tabs, your sessions, your tools. Connect Chrome to see your browser here."}
-                  </p>
-                  <button
-                    className="button secondary"
-                    disabled={(connected && !tabId) || !!pending}
-                    onClick={() =>
-                      connected ? refreshBrowser() : setPage("connection")
-                    }
-                  >
-                    {connected ? <Eye size={15} /> : <Plug size={15} />}
-                    {connected ? "Take screenshot" : "Connect Chrome"}
-                  </button>
-                </div>
-              )}
-            </div>
-            <div className="browser-window-footer">
-              <span>
-                <Eye size={14} />
-                {shot
-                  ? "Latest captured screenshot"
-                  : "Screenshots appear during the task"}
-              </span>
-              <button
-                className="icon-button"
-                aria-label="Take browser screenshot"
-                disabled={!connected || !tabId || !!pending}
-                onClick={() => refreshBrowser()}
-              >
-                <RefreshCw
-                  size={15}
-                  className={pending === "screenshot" ? "spin" : ""}
-                />
-              </button>
-            </div>
-          </div>
-          <div className="browser-tools">
-            <span>
-              <ShieldCheck size={15} />
-              You can take over in Chrome at any time.
-            </span>
+      </div>
+      <section className="task-panel" aria-label="Task and activity">
+        <div className="panel-toolbar">
+          <div className="view-tabs">
             <button
-              className="text-button"
-              disabled={!connected || !tabId || !!pending || busy}
-              title={
-                busy
-                  ? "Stop the task before inspecting page refs."
-                  : "Read a fresh page snapshot"
-              }
-              onClick={() => refreshBrowser(false)}
+              className={activityView === "activity" ? "selected" : ""}
+              onClick={() => setActivityView("activity")}
             >
-              <Code2 size={14} />
-              Inspect page
+              Activity
+            </button>
+            <button
+              className={activityView === "trace" ? "selected" : ""}
+              onClick={() => setActivityView("trace")}
+            >
+              Trace
             </button>
           </div>
-          {snapshot !== null && (
-            <details className="snapshot-result" open>
-              <summary>
-                Current page snapshot
-                <button
-                  className="icon-button"
-                  aria-label="Close snapshot"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    setSnapshot(null);
-                  }}
-                >
-                  <X size={14} />
-                </button>
-              </summary>
-              <pre>{json(snapshot)}</pre>
-            </details>
-          )}
-          <div className="session-note">
-            <span className="session-note-icon">
-              <ShieldCheck size={20} />
-            </span>
-            <div>
-              <strong>Built around your control</strong>
-              <p>
-                Relay uses your chosen model and the tools you enable. Change
-                the instructions, inspect the requests, or stop any task.
-              </p>
-            </div>
+          <div className="panel-toolbar-right">
+            {run && (
+              <span className={`run-status ${run.status}`} role="status">
+                <i className={`status-dot ${run.status}`} />
+                {statusLabels[run.status]}
+              </span>
+            )}
+            {run && (
+              <a
+                className="icon-button"
+                href={`/api/runs/${run.id}/export`}
+                download
+                aria-label="Export run"
+                title="Export run"
+              >
+                <ArrowDownToLine size={15} />
+              </a>
+            )}
           </div>
-        </section>
-      </div>
-    </>
+        </div>
+        {(approval || question) && (
+          <div
+            className="decision-panel"
+            role="region"
+            aria-label={approval ? "Approval required" : "Reply required"}
+          >
+            {approval ? (
+              <>
+                <strong>
+                  {toolTitle(approval.data.tool, approval.data.args)}
+                </strong>
+                <details>
+                  <summary>Action details</summary>
+                  <pre>
+                    {json({
+                      tool: approval.data.tool,
+                      args: approval.data.args,
+                    })}
+                  </pre>
+                </details>
+                <div className="decision-actions">
+                  <button
+                    className="button primary"
+                    disabled={!!pending}
+                    onClick={() =>
+                      action("approve", async () => {
+                        await api(`/api/runs/${run!.id}/approval`, {
+                          method: "POST",
+                          body: json({
+                            approvalId: approval.data.id,
+                            approved: true,
+                          }),
+                        });
+                      })
+                    }
+                  >
+                    <Check size={14} />
+                    Approve once
+                  </button>
+                  <button
+                    className="button secondary"
+                    disabled={!!pending}
+                    onClick={() =>
+                      action("deny", async () => {
+                        await api(`/api/runs/${run!.id}/approval`, {
+                          method: "POST",
+                          body: json({
+                            approvalId: approval.data.id,
+                            approved: false,
+                          }),
+                        });
+                      })
+                    }
+                  >
+                    Deny
+                  </button>
+                </div>
+                <button
+                  className="text-button"
+                  disabled={!!pending}
+                  onClick={() => changeApprovalMode("never")}
+                >
+                  Auto-approve and continue
+                </button>
+              </>
+            ) : (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  action("reply", async () => {
+                    await api(`/api/runs/${run!.id}/reply`, {
+                      method: "POST",
+                      body: json({ message: reply }),
+                    });
+                    setReply("");
+                  });
+                }}
+              >
+                <strong>Relay needs your input</strong>
+                <p>{String(question!.data.question)}</p>
+                <div className="reply-row">
+                  <input
+                    aria-label="Reply to Relay"
+                    value={reply}
+                    onChange={(e) => setReply(e.target.value)}
+                    autoFocus
+                    placeholder="Your answer"
+                  />
+                  <button
+                    className="button primary"
+                    aria-label="Send answer"
+                    disabled={!reply.trim() || !!pending}
+                  >
+                    <Send size={15} />
+                  </button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
+        <div
+          className="activity-scroll"
+          ref={scrollRef}
+          onScroll={() => {
+            const el = scrollRef.current;
+            if (el)
+              follows.current =
+                el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+          }}
+          aria-live="polite"
+        >
+          {run ? (
+            <>
+              <div className="user-message">{run.prompt}</div>
+              {activityView === "trace"
+                ? run.events.map((e) => <TimelineEvent event={e} key={e.id} />)
+                : activity.map((e) =>
+                    e.type === "assistant" ? (
+                      <AssistantMessage
+                        key={e.id}
+                        content={String(e.data.content)}
+                      />
+                    ) : e.type === "tool_call" ? (
+                      <ToolActivity
+                        key={e.id}
+                        event={e}
+                        result={results.get(e.data.callId)}
+                        working={["running", "awaiting_approval"].includes(
+                          run.status,
+                        )}
+                      />
+                    ) : e.type === "user_reply" ? (
+                      <div className="user-message" key={e.id}>
+                        {String(e.data.message)}
+                      </div>
+                    ) : (
+                      <div className="activity-error" role="alert" key={e.id}>
+                        {String(e.data.message)}
+                      </div>
+                    ),
+                  )}
+              {run.status === "running" && (
+                <div className="working-indicator">
+                  <LoaderCircle size={14} className="spin" />
+                  Working
+                </div>
+              )}
+              <div ref={bottomRef} />
+            </>
+          ) : (
+            <div className="task-empty">
+              <span className="empty-cursor">
+                <ArrowUp size={22} />
+              </span>
+              <h2>What would you like to do?</h2>
+            </div>
+          )}
+        </div>
+        <form
+          className="task-composer"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canRun) startRun();
+          }}
+        >
+          <textarea
+            aria-label="Task prompt"
+            placeholder="Ask Relay to do something…"
+            rows={3}
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                e.preventDefault();
+                if (canRun) startRun();
+              }
+            }}
+          />
+          <div className="composer-controls">
+            <span
+              className={`connection-state ${streamConnected ? "" : "disconnected"}`}
+              title={
+                streamConnected ? "Server connected" : "Reconnecting to server"
+              }
+            >
+              <i
+                className={`status-dot ${streamConnected ? "completed" : "offline"}`}
+              />
+              {busy
+                ? "Task in progress"
+                : state.bridge.connected
+                  ? "Chrome connected"
+                  : "Chrome disconnected"}
+            </span>
+            <button
+              className="run-button"
+              type="submit"
+              aria-label="Run task"
+              title="Run task (Ctrl+Enter)"
+              disabled={!canRun}
+            >
+              {pending === "run" ? (
+                <LoaderCircle size={17} className="spin" />
+              ) : (
+                <ArrowUp size={18} />
+              )}
+            </button>
+          </div>
+        </form>
+      </section>
+      <section
+        className="browser-stage"
+        aria-label="Browser view"
+        ref={browserRef}
+      >
+        <div className="browser-toolbar">
+          <Globe size={15} />
+          <select
+            aria-label="Chrome tab"
+            value={tabId ?? ""}
+            onChange={(e) => {
+              followsBrowser.current = false;
+              setTabId(e.target.value ? Number(e.target.value) : undefined);
+              setManualShot(null);
+            }}
+          >
+            <option value="">Select tab</option>
+            {tabs.map((t) => (
+              <option value={t.id} key={t.id}>
+                {t.title || t.url}
+              </option>
+            ))}
+          </select>
+          <div className="browser-actions">
+            <button
+              className="icon-button"
+              aria-label="Inspect page"
+              title={
+                busy ? "Stop the task before inspecting refs" : "Inspect page"
+              }
+              disabled={!state.bridge.connected || !tabId || !!pending || busy}
+              onClick={() => capture(true)}
+            >
+              <Code2 size={16} />
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Take browser screenshot"
+              title="Refresh screenshot"
+              disabled={!state.bridge.connected || !tabId || !!pending}
+              onClick={() => capture()}
+            >
+              <RefreshCw
+                size={16}
+                className={pending === "screenshot" ? "spin" : ""}
+              />
+            </button>
+            <button
+              className="icon-button"
+              aria-label="Expand browser view"
+              title="Expand browser view"
+              onClick={() => {
+                if (document.fullscreenElement)
+                  document.exitFullscreen().catch(() => {});
+                else browserRef.current?.requestFullscreen().catch(() => {});
+              }}
+            >
+              <Maximize2 size={16} />
+            </button>
+          </div>
+        </div>
+        {shot?.url && (
+          <div className="browser-url" title={shot.url}>
+            {shot.url}
+          </div>
+        )}
+        <div className={`browser-viewport ${shot ? "has-shot" : ""}`}>
+          {shot ? (
+            <img
+              src={shot.dataUrl}
+              alt={`Chrome view: ${shot.title || "current page"}`}
+            />
+          ) : (
+            <div className="browser-empty">
+              <Monitor size={32} strokeWidth={1.25} />
+              <h2>
+                {state.bridge.connected
+                  ? "Chrome is connected"
+                  : "Connect Chrome"}
+              </h2>
+              <button
+                className="button secondary"
+                disabled={state.bridge.connected && (!tabId || !!pending)}
+                onClick={() =>
+                  state.bridge.connected ? capture() : setPage("connection")
+                }
+              >
+                {state.bridge.connected ? (
+                  <>
+                    <RefreshCw size={14} />
+                    Take screenshot
+                  </>
+                ) : (
+                  <>
+                    <Plug size={14} />
+                    Connect Chrome
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+        </div>
+        {snapshot !== null && (
+          <div className="snapshot-drawer">
+            <div className="panel-toolbar">
+              <strong>Page snapshot</strong>
+              <button
+                className="icon-button"
+                aria-label="Close snapshot"
+                onClick={() => setSnapshot(null)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <pre>{json(snapshot)}</pre>
+          </div>
+        )}
+      </section>
+    </div>
   );
 }

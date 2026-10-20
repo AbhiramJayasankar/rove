@@ -6,7 +6,7 @@ export const DEFAULT_SETTINGS: Settings = {
   model: "",
   systemPrompt: DEFAULT_PROMPT,
   maxSteps: 40,
-  approvalMode: "risky",
+  approvalMode: "never",
   vision: false,
   disabledTools: ["browser_evaluate", "browser_cdp", "browser_upload"],
   customTools: [],

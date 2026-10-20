@@ -38,6 +38,17 @@ test.beforeAll(async () => {
       else if (
         String(
           input.messages.find((m: any) => m.role === "user")?.content,
+        ).includes("Auto approval fixture")
+      )
+        message =
+          results.length === 0
+            ? call("browser_snapshot", {})
+            : results.length === 1
+              ? call("browser_snapshot", {})
+              : { role: "assistant", content: "Automatic approval verified." };
+      else if (
+        String(
+          input.messages.find((m: any) => m.role === "user")?.content,
         ).includes("Ask user fixture")
       )
         message =
@@ -359,6 +370,43 @@ test("real extension controls DOM, frames, screenshot, approvals and the full mo
       { exact: true },
     ),
   ).toBeVisible();
+  await ui
+    .getByLabel("Task prompt")
+    .fill("Auto approval fixture: inspect the page twice.");
+  await ui.getByRole("button", { name: "Run task", exact: true }).click();
+  const decision = ui.getByRole("region", { name: "Approval required" });
+  await expect(decision).toBeVisible();
+  await expect(ui.locator(".browser-viewport img")).toBeVisible();
+  const decisionBefore = await decision.boundingBox();
+  await ui.locator(".activity-scroll").evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+  });
+  expect((await decision.boundingBox())?.y).toBe(decisionBefore?.y);
+  await ui.screenshot({
+    path: "test-results/relay-approval.png",
+    fullPage: true,
+  });
+  await ui
+    .getByRole("button", { name: "Auto-approve and continue", exact: true })
+    .click();
+  await expect(
+    ui.getByRole("switch", { name: "Auto-approve", exact: true }),
+  ).toBeChecked();
+  await expect(
+    ui.getByText("Automatic approval verified.", { exact: true }),
+  ).toBeVisible();
+  const liveState = await (await request.get("/api/state")).json();
+  expect(liveState.settings.approvalMode).toBe("never");
+  expect(
+    liveState.runs[0].events.filter((e: any) => e.type === "approval_required"),
+  ).toHaveLength(1);
+  await ui.getByRole("button", { name: "Trace", exact: true }).click();
+  await expect(ui.locator(".trace-event").first()).toBeVisible();
+  await ui.getByRole("button", { name: "Activity", exact: true }).click();
+  await ui.reload();
+  await expect(
+    ui.getByRole("switch", { name: "Auto-approve", exact: true }),
+  ).toBeChecked();
   await ui.setViewportSize({ width: 390, height: 844 });
   await ui.screenshot({
     path: "test-results/relay-mobile.png",
@@ -367,6 +415,12 @@ test("real extension controls DOM, frames, screenshot, approvals and the full mo
   expect(
     await ui.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
   ).toBe(true);
+  await ui.getByRole("button", { name: "Browser", exact: true }).click();
+  await expect(ui.getByRole("region", { name: "Browser view" })).toBeVisible();
+  await ui.screenshot({
+    path: "test-results/relay-mobile-browser.png",
+    fullPage: true,
+  });
   // Leave the user's workspace unconfigured rather than pointing at a stopped test provider.
   await request.put("/api/settings", { data: DEFAULT_SETTINGS });
 });

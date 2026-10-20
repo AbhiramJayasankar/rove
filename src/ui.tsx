@@ -1,19 +1,17 @@
 import { useState } from "react";
 import {
-  Braces,
   Check,
-  ChevronDown,
   ChevronRight,
-  CircleHelp,
-  Code2,
-  Eye,
+  CircleAlert,
+  LoaderCircle,
   MousePointer2,
-  ShieldCheck,
 } from "lucide-react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { RunEvent } from "../shared/types";
 export const statusLabels: Record<string, string> = {
   running: "Working",
-  awaiting_approval: "Needs approval",
+  awaiting_approval: "Waiting for you",
   completed: "Completed",
   failed: "Failed",
   stopped: "Stopped",
@@ -43,87 +41,124 @@ export type Pairing = {
   extensionPath: string;
   serverUrl: string;
 };
-export type Shot = { dataUrl: string; url?: string; title?: string };
+export type Shot = {
+  dataUrl: string;
+  url?: string;
+  title?: string;
+  tabId?: number;
+};
 export type Action = (name: string, task: () => Promise<void>) => Promise<void>;
-export function TimelineEvent({ event }: { event: RunEvent }) {
-  const [expanded, setExpanded] = useState(false);
-  const data = event.data;
-  const labels: Record<string, string> = {
-    model_request: "Request sent to model",
-    model_response: "Model response",
-    assistant: "Relay",
-    tool_call: String(data.name || "Tool action"),
-    tool_result: String(data.name || "Tool result"),
-    screenshot: "Browser screenshot captured",
-    approval_required: "Approval requested",
-    user_question: "Question for you",
-    user_reply: "Your answer",
-    status: String(
-      data.message ||
-        statusLabels[data.status] ||
-        data.status ||
-        "Status updated",
-    ),
-    error: "Something needs attention",
+export function toolTitle(
+  name: string,
+  args: Record<string, any> = {},
+): string {
+  if (name === "browser_type")
+    return `Type “${String(args.text || "").slice(0, 80)}”`;
+  if (name === "browser_navigate") {
+    try {
+      return `Open ${new URL(args.url).hostname}`;
+    } catch {
+      return "Open page";
+    }
+  }
+  if (name === "browser_press_key") return `Press ${args.key}`;
+  const titles: Record<string, string> = {
+    browser_snapshot: "Read page",
+    browser_screenshot: "Capture screenshot",
+    browser_click: "Click element",
+    browser_scroll: "Scroll page",
+    browser_tabs: "Read tabs",
+    browser_select: "Select option",
+    browser_history: "Navigate history",
+    browser_close_tab: "Close tab",
+    browser_wait: "Wait",
+    browser_hover: "Hover element",
+    browser_drag: "Drag element",
+    browser_downloads: "Check downloads",
+    browser_dialog: "Handle dialog",
+    browser_upload: "Upload file",
+    browser_evaluate: "Run page script",
+    browser_cdp: "Run browser command",
+    ask_user: "Ask a question",
   };
-  const Icon =
-    event.type === "assistant"
-      ? MousePointer2
-      : event.type === "error" || event.type === "user_question"
-        ? CircleHelp
-        : event.type === "tool_call"
-          ? Code2
-          : event.type === "screenshot"
-            ? Eye
-            : event.type === "approval_required"
-              ? ShieldCheck
-              : event.type.startsWith("model_")
-                ? Braces
-                : Check;
-  const text =
-    event.type === "assistant"
-      ? data.content
-      : event.type === "error" || event.type === "user_reply"
-        ? data.message
-        : event.type === "user_question"
-          ? data.question
-          : undefined;
-  const filtered =
-    event.type === "screenshot"
-      ? { ...data, dataUrl: "[Screenshot shown in browser view]" }
-      : data;
+  return titles[name] || name;
+}
+export function AssistantMessage({ content }: { content: string }) {
   return (
-    <article
-      className={`timeline-event event-${event.type} ${data.error ? "event-error" : ""}`}
-    >
-      <div className="timeline-icon">
-        <Icon size={14} />
-      </div>
-      <div className="event-body">
-        <button
-          className="event-heading"
-          aria-expanded={expanded}
-          onClick={() => setExpanded(!expanded)}
+    <div className="assistant-message">
+      <span className="assistant-mark">
+        <MousePointer2 size={15} />
+      </span>
+      <div className="markdown">
+        <Markdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            a: (props) => (
+              <a {...props} target="_blank" rel="noreferrer noopener" />
+            ),
+          }}
         >
-          <span>{labels[event.type] || event.type.replaceAll("_", " ")}</span>
-          <time>{time(event.time)}</time>
-          {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        </button>
-        {text && <p className="event-text">{String(text)}</p>}
-        {event.type === "tool_call" && !expanded && (
-          <div className="tool-preview">
-            {Object.entries(data.args || {})
-              .slice(0, 2)
-              .map(([key, value]) => (
-                <span key={key}>
-                  {key}:{" "}
-                  {typeof value === "string" ? value : JSON.stringify(value)}
-                </span>
-              ))}
-          </div>
-        )}
-        {expanded && <pre className="event-json">{json(filtered)}</pre>}
+          {content}
+        </Markdown>
       </div>
-    </article>
+    </div>
+  );
+}
+export function ToolActivity({
+  event,
+  result,
+  working,
+}: {
+  event: RunEvent;
+  result?: RunEvent;
+  working: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className={`tool-activity ${result?.data.error ? "has-error" : ""}`}>
+      <button
+        className="tool-activity-summary"
+        aria-expanded={expanded}
+        onClick={() => setExpanded(!expanded)}
+      >
+        {result?.data.error ? (
+          <CircleAlert size={14} />
+        ) : result ? (
+          <Check size={14} />
+        ) : working ? (
+          <LoaderCircle size={14} className="spin" />
+        ) : (
+          <ChevronRight size={14} />
+        )}
+        <span>{toolTitle(event.data.name, event.data.args)}</span>
+        <ChevronRight size={13} className={expanded ? "rotated" : ""} />
+      </button>
+      {expanded && (
+        <pre>
+          {json({
+            tool: event.data.name,
+            args: event.data.args,
+            ...(result
+              ? { result: result.data.result, error: result.data.error }
+              : {}),
+          })}
+        </pre>
+      )}
+    </div>
+  );
+}
+export function TimelineEvent({ event }: { event: RunEvent }) {
+  const data =
+    event.type === "screenshot"
+      ? { ...event.data, dataUrl: "[Image shown in browser view]" }
+      : event.data;
+  return (
+    <details className="trace-event">
+      <summary>
+        <span>{event.type.replaceAll("_", " ")}</span>
+        <time>{time(event.time)}</time>
+      </summary>
+      <pre>{json(data)}</pre>
+    </details>
   );
 }

@@ -172,6 +172,17 @@ app.put("/api/settings", (req, res) => {
   broadcast("settings", result);
   res.json(result);
 });
+app.put("/api/approval-mode", (req, res) => {
+  const { mode } = parse(
+    z.object({ mode: z.enum(["never", "risky", "always"]) }),
+    req.body,
+  );
+  store.saveSettings({ ...store.settings, approvalMode: mode });
+  const result = { settings: store.settings, hasApiKey: Boolean(apiKey) };
+  broadcast("settings", result);
+  engine.setApprovalMode(mode);
+  res.json(result);
+});
 app.post("/api/model/test", async (req, res) => {
   const candidate = parse(settingsSchema, {
     ...store.settings,
@@ -186,12 +197,10 @@ app.post("/api/model/test", async (req, res) => {
     res.json({ ok: true, message });
   } catch (error) {
     const raw = error instanceof Error ? error.message : String(error);
-    res
-      .status(400)
-      .json({
-        ok: false,
-        error: key ? raw.split(key).join("[redacted]") : raw,
-      });
+    res.status(400).json({
+      ok: false,
+      error: key ? raw.split(key).join("[redacted]") : raw,
+    });
   }
 });
 const pairing = () => ({
@@ -202,11 +211,9 @@ const pairing = () => ({
 app.get("/api/pairing", (_req, res) => res.json(pairing()));
 app.post("/api/pairing/rotate", (_req, res) => {
   if (engine.activeRunId) {
-    res
-      .status(409)
-      .json({
-        error: "Stop the active run before rotating its connection token.",
-      });
+    res.status(409).json({
+      error: "Stop the active run before rotating its connection token.",
+    });
     return;
   }
   store.rotateToken();
@@ -217,10 +224,7 @@ app.get("/api/tabs", async (_req, res) => {
   const result = await bridge.execute("browser_tabs", {});
   res.json(Array.isArray(result) ? result : result.tabs || []);
 });
-const observations = new Set([
-  "browser_tabs",
-  "browser_screenshot",
-]);
+const observations = new Set(["browser_tabs", "browser_screenshot"]);
 app.post("/api/browser", async (req, res) => {
   const input = parse(
     z.object({ action: z.string(), args: record.default({}) }),
@@ -237,11 +241,9 @@ app.post("/api/browser", async (req, res) => {
     return;
   }
   if (engine.activeRunId && !observations.has(input.action)) {
-    res
-      .status(409)
-      .json({
-        error: "Stop the active run before manually controlling Chrome.",
-      });
+    res.status(409).json({
+      error: "Stop the active run before manually controlling Chrome.",
+    });
     return;
   }
   const result = await bridge.execute(input.action, input.args);
@@ -256,11 +258,9 @@ app.post("/api/runs", (req, res) => {
     req.body,
   );
   if (engine.activeRunId) {
-    res
-      .status(409)
-      .json({
-        error: "A run is already active. Stop it before starting another.",
-      });
+    res.status(409).json({
+      error: "A run is already active. Stop it before starting another.",
+    });
     return;
   }
   if (!bridge.status().connected) {
@@ -336,13 +336,11 @@ app.use(
     _next: express.NextFunction,
   ) => {
     if (error instanceof z.ZodError) {
-      res
-        .status(400)
-        .json({
-          error: error.issues
-            .map((i) => `${i.path.join(".")}: ${i.message}`)
-            .join("; "),
-        });
+      res.status(400).json({
+        error: error.issues
+          .map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join("; "),
+      });
       return;
     }
     const message = error instanceof Error ? error.message : String(error);
