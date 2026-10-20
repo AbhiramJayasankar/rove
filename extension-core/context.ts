@@ -60,7 +60,7 @@ export function compactContext(
       ? [
           ...messages.slice(
             0,
-            messages[2]?.content?.startsWith?.("[Relay context checkpoint]")
+            messages[2]?.content?.startsWith?.("[Rove context checkpoint]")
               ? 3
               : 2,
           ),
@@ -87,7 +87,7 @@ export function compactContext(
       estimateTokens([messages, tools]) * Math.max(1, policy.tokenRatio || 1),
     );
   let droppedMessages = 0;
-  const marker = "[Relay context checkpoint]";
+  const marker = "[Rove context checkpoint]";
   const memory =
     messages[2]?.role === "user" &&
     typeof messages[2].content === "string" &&
@@ -132,7 +132,7 @@ export function compactContext(
                 .join("\n");
         if (
           text &&
-          !text.startsWith("[Relay screenshot ") &&
+          !text.startsWith("[Rove screenshot ") &&
           !text.startsWith("Screenshot") &&
           !text.startsWith("Automatic screenshot")
         )

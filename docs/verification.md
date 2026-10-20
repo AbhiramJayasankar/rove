@@ -1,6 +1,6 @@
 # Verification
 
-Relay v2 is tested as a self-contained unpacked Chrome extension. Node runs build/test tooling and deterministic fixture servers; production browser control, model requests and persistence run in the extension worker.
+Rove v2 is tested as a self-contained unpacked Chrome extension. Node runs build/test tooling and deterministic fixture servers; production browser control, model requests and persistence run in the extension worker.
 
 ## Commands
 
@@ -34,7 +34,7 @@ The browser-core suite has been run successfully during implementation. The real
 
 ## Manual handoff check
 
-1. Load `extension/` using Chrome's **Load unpacked** control. Open Relay from its toolbar action and open Options for the full workbench.
+1. Load `extension/` using Chrome's **Load unpacked** control. Open Rove from its toolbar action and open Options for the full workbench.
 2. Enter your endpoint/key, choose a tool-capable model, test it and save. Try a small task on an ordinary page.
 3. Inspect the tool arguments/results, model request, response and screenshot. Check Stop and a task requiring a user answer.
 4. Export a run and inspect its settings/history. The model API key must be absent. Check the settings contain only Model, Instructions and Tools.
@@ -47,7 +47,7 @@ Chrome 125 is the minimum declared version; an automated run proves behavior on 
 - Run `npm run typecheck`, `npm test`, `npm run build`, and `npm run test:e2e`.
 - Unit coverage: multipart file/model/JSON response format, separate bearer credential, endpoint validation, no redirects/retries/fallbacks, 25 MB/empty audio/60-second OpenRouter guards, empty transcripts, network/timeout/cancellation and HTTP 401/403/429/413/408/504 errors. Provider error bodies are not echoed into UI or history.
 - `tests/extension/voice.spec.ts` uses a mocked recognizer and microphone in an isolated unpacked extension: click-to-start/stop, live insertion at cursor, no auto-send/history, Escape rollback, denied-permission inline error and narrow-panel width. No live audio leaves the test browser.
-- Manual real-device check: reload extension and reopen panel; choose Web Speech, click the mic, Allow if first-time permission setup appears, then speak inside Relay. Check the live waveform/interim text and stop from the composer; repeat and confirm no new window opens. Repeat with selected text, Escape, switching chats/settings, and a running agent. Check Enter/Shift+Enter after completion, focus, keyboard navigation, light/dark and reduced motion. Deny permission and verify recovery instructions; test a missing/busy mic. Chromium test builds may not include Google’s recognition service, so mocked tests cannot establish real speech accuracy or service availability.
+- Manual real-device check: reload extension and reopen panel; choose Web Speech, click the mic, Allow if first-time permission setup appears, then speak inside Rove. Check the live waveform/interim text and stop from the composer; repeat and confirm no new window opens. Repeat with selected text, Escape, switching chats/settings, and a running agent. Check Enter/Shift+Enter after completion, focus, keyboard navigation, light/dark and reduced motion. Deny permission and verify recovery instructions; test a missing/busy mic. Chromium test builds may not include Google’s recognition service, so mocked tests cannot establish real speech accuracy or service availability.
 - API check with your own key: save independent voice settings, dictate, stop, inspect the one multipart request to your endpoint and review the returned draft without sending. Verify the model key is untouched, keys/audio are absent from run exports, cancellation halts capture/upload, and no request reaches a different backend. Test OpenRouter with a paid transcription model and short clip. Quotas and provider credentials are not exercised by automated tests.
 
 Implementation: recognition, recording and a Web Audio analyser waveform run directly in the composer. A permission-only page (`index.html?voice=<random session>`) is opened when microphone permission is still at prompt; it grants the extension origin access and closes. Its random extension-origin BroadcastChannel carries only the permission result. No recording windows open once permission is granted. Escape, pagehide and chat/view cleanup stop capture and release audio tracks/AudioContext. The dedicated voice settings/key remain outside agent settings and the run journal; manifest/CSP remain unchanged. Browser coverage includes inline capture without new windows, control order, waveform visibility, and first-time-only permission setup.

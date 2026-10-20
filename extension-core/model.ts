@@ -400,7 +400,7 @@ export async function testModel(
 ): Promise<string> {
   const tools: ToolDefinition[] = [
     {
-      name: "relay_connection_check",
+      name: "rove_connection_check",
       description:
         "Harmless local capability test. Call with status ok to verify function calling.",
       parameters: {
@@ -416,7 +416,7 @@ export async function testModel(
     {
       role: "user",
       content:
-        'Verify tool calling by calling relay_connection_check with status "ok". This is a harmless connection test. Do not answer with text.',
+        'Verify tool calling by calling rove_connection_check with status "ok". This is a harmless connection test. Do not answer with text.',
     },
   ];
   const { message } = await complete(
@@ -429,7 +429,7 @@ export async function testModel(
     model,
   );
   const check = message.tool_calls?.find(
-    (t: any) => t.function.name === "relay_connection_check",
+    (t: any) => t.function.name === "rove_connection_check",
   );
   let args: any;
   try {

@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS } from "../../shared/defaults";
 // with no steps until the extension was reloaded.
 let context: BrowserContext, ui: Page, server: http.Server, origin: string;
 async function rpc(route: string, method = "GET", body?: unknown): Promise<any> {
-  const result = await ui.evaluate(({ route, method, body }) => chrome.runtime.sendMessage({ type: "relay-api", path: route, method, body }), { route, method, body });
+  const result = await ui.evaluate(({ route, method, body }) => chrome.runtime.sendMessage({ type: "rove-api", path: route, method, body }), { route, method, body });
   if (!result.ok) throw new Error(result.error);
   return result.data;
 }
@@ -43,7 +43,7 @@ test("a stalled event stream still shows the steps and the final answer", async 
   await ui.addInitScript(() => {
     const connect = chrome.runtime.connect.bind(chrome.runtime);
     chrome.runtime.connect = ((info: any) =>
-      info?.name === "relay-events"
+      info?.name === "rove-events"
         ? ({ onMessage: { addListener() {} }, onDisconnect: { addListener() {} }, postMessage() {}, disconnect() {} } as any)
         : connect(info)) as typeof chrome.runtime.connect;
   });

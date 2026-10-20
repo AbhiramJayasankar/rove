@@ -606,3 +606,42 @@
   font-size: 12.5px;
   line-height: 1.5;
 }
+
+/* Version line and changelog */
+.about-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 26px 4px 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+.changelog-dialog {
+  width: 520px;
+}
+.changelog-body {
+  max-height: calc(100dvh - 180px);
+  overflow-y: auto;
+  padding: 0 22px 22px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.changelog-body h1 {
+  display: none;
+}
+.changelog-body h2 {
+  margin: 22px 0 6px;
+  font-size: 17px;
+}
+.changelog-body h3 {
+  margin: 14px 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.changelog-body ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.changelog-body li {
+  margin: 4px 0;
+}

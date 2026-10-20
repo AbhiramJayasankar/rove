@@ -23,7 +23,7 @@ async function api<T = any>(
   const response = await ui.evaluate(
     async ({ route, method, body }) =>
       chrome.runtime.sendMessage({
-        type: "relay-api",
+        type: "rove-api",
         path: route,
         method,
         body,
@@ -168,7 +168,7 @@ test.beforeAll(async () => {
         const s = JSON.parse(results[0].content);
         message = call("browser_type", {
           ref: s.elements.find((e: any) => e.name === "Your name").ref,
-          text: "Native Relay",
+          text: "Native Rove",
           clear: true,
         });
       } else if (results.length === 2) message = call("browser_snapshot", {});
@@ -181,7 +181,7 @@ test.beforeAll(async () => {
       else
         message = {
           role: "assistant",
-          content: "Verified the greeting for Native Relay.",
+          content: "Verified the greeting for Native Rove.",
         };
       message.reasoning_content = "Read live elements and verify the outcome.";
       res.setHeader("content-type", "application/json");
@@ -247,7 +247,7 @@ test("standalone model loop controls Chrome, saves trace and fits a narrow panel
     tabId: await targetId(),
   });
   const result = await finished(run.id);
-  await expect(target.locator("#result")).toHaveText("Hello, Native Relay");
+  await expect(target.locator("#result")).toHaveText("Hello, Native Rove");
   expect(result.events.some((e: any) => e.type === "screenshot")).toBe(true);
   expect(
     result.events.find((e: any) => e.type === "model_response").data.message
@@ -256,7 +256,7 @@ test("standalone model loop controls Chrome, saves trace and fits a narrow panel
   expect(JSON.stringify(result)).not.toContain("local-test-secret");
   await ui.reload();
   await expect(
-    ui.getByText("Verified the greeting for Native Relay.", { exact: true }),
+    ui.getByText("Verified the greeting for Native Rove.", { exact: true }),
   ).toBeVisible();
   await fs.mkdir("test-results/native", { recursive: true });
   await ui.screenshot({
@@ -329,7 +329,7 @@ test("approvals and questions work inside the extension", async () => {
     fullPage: true,
   });
   await inlineQuestion
-    .getByRole("textbox", { name: "Reply to Relay" })
+    .getByRole("textbox", { name: "Reply to Rove" })
     .fill("Use hello");
   await inlineQuestion.getByRole("button", { name: "Send answer" }).click();
   await finished(run.id);
@@ -382,7 +382,7 @@ test("lost debugger sessions stop the task and a new task reconnects without rep
   const capture = await ui.evaluate(
     (tabId) =>
       chrome.runtime.sendMessage({
-        type: "relay-api",
+        type: "rove-api",
         path: "/api/browser",
         method: "POST",
         body: { action: "browser_screenshot", args: { tabId } },
@@ -390,7 +390,7 @@ test("lost debugger sessions stop the task and a new task reconnects without rep
     id,
   );
   if (!capture.ok) {
-    expect(capture.error).toContain("Chrome disconnected Relay");
+    expect(capture.error).toContain("Chrome disconnected Rove");
     expect(capture.error).not.toContain("Debugger is not attached");
   }
   await expect

@@ -37,7 +37,7 @@ export default function QuestionActivity({
           }}
         >
           <input
-            aria-label="Reply to Relay"
+            aria-label="Reply to Rove"
             placeholder="Your answer…"
             value={reply}
             onChange={(event) => setReply(event.target.value)}

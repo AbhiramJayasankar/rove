@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DEFAULT_SETTINGS } from "../shared/defaults";
+import { DEFAULT_PROMPT, DEFAULT_SETTINGS } from "../shared/defaults";
 import type { Settings } from "../shared/types";
 const record = z.record(z.string(), z.unknown());
 const automaticSettings = {
@@ -61,8 +61,11 @@ export const settingsSchema = z.preprocess(
 
 /** Read/save migration: keep compatible model settings, discard removed options. */
 export function normalizeSettings(value: unknown): Settings {
-  const saved =
-    value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const saved: Record<string, unknown> =
+    value && typeof value === "object" && !Array.isArray(value) ? { ...value } : {};
+  // The app was renamed from Relay to Rove. An untouched saved default prompt follows the rename.
+  if (saved.systemPrompt === DEFAULT_PROMPT.replaceAll("Rove", "Relay"))
+    saved.systemPrompt = DEFAULT_PROMPT;
   return settingsSchema.parse({
     ...structuredClone(DEFAULT_SETTINGS),
     ...saved,

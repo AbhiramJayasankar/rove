@@ -1,6 +1,6 @@
-# Working on Relay
+# Working on Rove
 
-Relay v2 is a self-contained, single-user Chrome extension. Keep browser control transparent and user-configurable. Node.js belongs to build/test tooling; the installed extension has no backend, daemon, pairing protocol or hosted browser service.
+Rove v2 is a self-contained, single-user Chrome extension. Keep browser control transparent and user-configurable. Node.js belongs to build/test tooling; the installed extension has no backend, daemon, pairing protocol or hosted browser service.
 
 ## Source map
 
@@ -17,7 +17,7 @@ Relay v2 is a self-contained, single-user Chrome extension. Keep browser control
 
 ## Invariants
 
-- Accept privileged messages and `relay-events` ports only from this extension's own pages. Do not add external/page message forwarding.
+- Accept privileged messages and `rove-events` ports only from this extension's own pages. Do not add external/page message forwarding.
 - Keep model keys in trusted `chrome.storage.local.modelProviderKeys`, with the selected key mirrored in `modelApiKey`, out of settings, history, API responses and run exports. Persistent per-provider credentials are explicitly requested by the user. Restrict storage access to trusted extension contexts; migrate retained session credentials once, then remove the legacy session entry. An empty saved key clears only the configured provider's credential. Endpoint/profile selection and its active key must commit together; all saved catalogues remain available in the picker.
 - Keep context/reasoning format automatic and streaming/vision enabled. Normalize legacy settings and discard removed custom-tool definitions without rewriting historical traces. Do not restore removed data backup/import or manual agent-setting surfaces.
 - Persist model/tool intent before external dispatch. Await the journal checkpoint; a storage failure stops execution. Do not acknowledge queued writes as durable commits.

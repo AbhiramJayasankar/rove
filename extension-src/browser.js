@@ -85,7 +85,7 @@ async function ensureTab(tabId) {
   if (!tab || !canControlTab(tab)) {
     if (tabId !== undefined && tabId !== null)
       throw new Error(
-        "This tab is restricted. Relay cannot control its own app, Chrome internal pages, or the Chrome Web Store.",
+        "This tab is restricted. Rove cannot control its own app, Chrome internal pages, or the Chrome Web Store.",
       );
     const tabs = await chrome.tabs.query({});
     tab =
@@ -116,7 +116,7 @@ function lostSession(tabId, state, reason) {
   if (forgetSession(tabId, state)) {
     notice('browser_notice', {event:'detached', tabId, reason});
   }
-  return new Error('Chrome disconnected Relay from this tab. Check the page, then start the task again to reconnect. An action already sent may have completed; it was not replayed.');
+  return new Error('Chrome disconnected Rove from this tab. Check the page, then start the task again to reconnect. An action already sent may have completed; it was not replayed.');
 }
 function isMissingSession(error) {
   return /debugger is not attached|no tab with (?:given )?id|no target with (?:given )?id/i.test(errorMessage(error));
@@ -159,7 +159,7 @@ async function cdp(tabId, method, params = {}, sessionId) {
   const state = attached.get(tabId);
   if (!state) {
     const error = new Error(`Browser session ended before dispatch (${method}, tab ${tabId}). Start the task again to reconnect.`);
-    console.error('[Relay browser session]', {method, tabId, knownTabs:[...attached.keys()], stack:error.stack});
+    console.error('[Rove browser session]', {method, tabId, knownTabs:[...attached.keys()], stack:error.stack});
     throw error;
   }
   // Root detach notifications have no client/session generation. A notification
@@ -395,7 +395,7 @@ async function frameContext(tabId, frameId, mainWorld = false) {
   if (!frame) throw new Error("Frame no longer exists. Take a fresh snapshot.");
   if (isOwnPage(frame.url))
     throw new Error(
-      "Relay cannot inspect or control its own app, including an embedded frame.",
+      "Rove cannot inspect or control its own app, including an embedded frame.",
     );
   const state = attached.get(tabId);
   if (mainWorld) {
@@ -410,7 +410,7 @@ async function frameContext(tabId, frameId, mainWorld = false) {
     "Page.createIsolatedWorld",
     {
       frameId: frame.id,
-      worldName: "Relay automation",
+      worldName: "Rove automation",
       grantUniveralAccess: false,
     },
     frame.sessionId,
@@ -442,11 +442,11 @@ async function evaluate(tabId, frame, expression, returnByValue = true) {
 }
 async function elementOperation(tabId, frameId, ref, body, extra = {}) {
   const frame = await frameContext(tabId, frameId);
-  const expression = `(async()=>{const ref=${JSON.stringify(ref)},args=${JSON.stringify(extra)};const el=globalThis.__relayRefs?.get(ref);if(!el||!el.isConnected)throw new Error('Element reference is stale or belongs to another frame. Take a fresh snapshot.');${body}})()`;
+  const expression = `(async()=>{const ref=${JSON.stringify(ref)},args=${JSON.stringify(extra)};const el=globalThis.__roveRefs?.get(ref);if(!el||!el.isConnected)throw new Error('Element reference is stale or belongs to another frame. Take a fresh snapshot.');${body}})()`;
   return { frame, result: await evaluate(tabId, frame, expression) };
 }
 function snapshotInPage(prefix, options) {
-  globalThis.__relayRefs = new Map();
+  globalThis.__roveRefs = new Map();
   const elements = [],
     textChunks = [],
     seen = new Set();
@@ -520,7 +520,7 @@ function snapshotInPage(prefix, options) {
       )
         continue;
       const ref = prefix + ":" + (index + 1);
-      globalThis.__relayRefs.set(ref, el);
+      globalThis.__roveRefs.set(ref, el);
       const role =
         el.getAttribute("role") ||
         {
@@ -825,7 +825,7 @@ export async function perform(action, args = {}) {
   if (action === "browser_navigate") {
     if (!canControl(args.url))
       throw new Error(
-        "Navigation requires an http, https, or file URL outside the Relay app and Chrome Web Store.",
+        "Navigation requires an http, https, or file URL outside the Rove app and Chrome Web Store.",
       );
     let tab;
     if (args.newTab || (args.tabId === undefined && activeTabId === undefined))
@@ -1073,7 +1073,7 @@ export async function perform(action, args = {}) {
     case "browser_cdp": {
       if (typeof args.method !== "string")
         throw new Error("method is required.");
-      // This deliberately powerful tool still cannot navigate into Relay or
+      // This deliberately powerful tool still cannot navigate into Rove or
       // attach to additional targets through a raw protocol bypass.
       if (/^(Target\.|Browser\.)/.test(args.method))
         throw new Error(
@@ -1108,7 +1108,7 @@ export async function perform(action, args = {}) {
       const object = await evaluate(
         tabId,
         frame,
-        `(()=>{const el=globalThis.__relayRefs?.get(${JSON.stringify(args.ref)});if(!el||!el.isConnected)throw new Error('Stale reference');if(el.tagName!=='INPUT'||el.type!=='file')throw new Error('Element is not a file input');return el})()`,
+        `(()=>{const el=globalThis.__roveRefs?.get(${JSON.stringify(args.ref)});if(!el||!el.isConnected)throw new Error('Stale reference');if(el.tagName!=='INPUT'||el.type!=='file')throw new Error('Element is not a file input');return el})()`,
         false,
       );
       try {

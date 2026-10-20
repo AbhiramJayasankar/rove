@@ -1,6 +1,6 @@
 {
-  "name": "relay-browser",
-  "version": "2.0.0",
+  "name": "rove-browser",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
   "description": "A self-contained Chrome browser agent with your own model endpoint",

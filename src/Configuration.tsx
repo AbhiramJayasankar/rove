@@ -1,4 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
+import changelog from "../CHANGELOG.md?raw";
 import {
   Check,
   Cpu,
@@ -11,6 +14,7 @@ import {
   ScrollText,
   Trash2,
   Wrench,
+  X,
 } from "lucide-react";
 import type { AppState, Settings } from "../shared/types";
 import { DEFAULT_PROMPT } from "../shared/defaults";
@@ -57,6 +61,7 @@ export default function Configuration({
   const voice = useVoiceSettings();
   const visibility = useModelVisibility(state.activeProviderId);
   const [toolSearch, setToolSearch] = useState("");
+  const whatsNew = useRef<HTMLDialogElement>(null);
   const tabs: [Page, string, typeof Cpu][] = [
     ["settings", "Model", Cpu],
     ["instructions", "Instructions", ScrollText],
@@ -209,6 +214,30 @@ export default function Configuration({
               </div>
             </div>
             <VoiceSettings voice={voice} />
+            <p className="about-line">
+              Rove {__APP_VERSION__}
+              <button type="button" className="text-button" onClick={() => whatsNew.current?.showModal()}>
+                What&apos;s new
+              </button>
+            </p>
+            <dialog
+              ref={whatsNew}
+              className="history-dialog changelog-dialog"
+              aria-label="What's new"
+              onClick={(event) => {
+                if (event.target === event.currentTarget) whatsNew.current?.close();
+              }}
+            >
+              <div className="dialog-heading">
+                <h2>What&apos;s new</h2>
+                <button className="icon-button" aria-label="Close what's new" onClick={() => whatsNew.current?.close()}>
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="markdown changelog-body">
+                <Markdown remarkPlugins={[remarkGfm]}>{changelog}</Markdown>
+              </div>
+            </dialog>
           </section>
         ) : page === "instructions" ? (
           <section className="instructions-settings">

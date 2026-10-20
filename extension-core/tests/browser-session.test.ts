@@ -25,7 +25,7 @@ beforeEach(async () => {
   });
   const tab = { id: 7, url: "https://example.com", title: "Fixture" };
   vi.stubGlobal("chrome", {
-    runtime: { id: "relay" },
+    runtime: { id: "rove" },
     tabs: {
       update: vi.fn(async () => tab),
       get: vi.fn(async () => tab),
@@ -185,7 +185,7 @@ describe("debugger lifecycle", () => {
     ).toBe(false);
     await expect(browser.prepareRun(7)).resolves.toMatchObject({ tabId: 7 });
   });
-  it("closing a tab through Relay is not reported as an unexpected disconnect", async () => {
+  it("closing a tab through Rove is not reported as an unexpected disconnect", async () => {
     await browser.prepareRun(7);
     await browser.perform("browser_close_tab", { tabId: 7 });
     expect(

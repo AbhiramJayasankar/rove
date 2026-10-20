@@ -1,14 +1,14 @@
 function runtime() {
   if (typeof chrome === "undefined" || !chrome.runtime?.id)
     throw new Error(
-      "Open Relay from its Chrome extension to use the workbench.",
+      "Open Rove from its Chrome extension to use the workbench.",
     );
   return chrome.runtime;
 }
 
 export async function api<T>(path: string, options?: RequestInit): Promise<T> {
   if (options?.body != null && typeof options.body !== "string")
-    throw new Error("Relay requests must use JSON.");
+    throw new Error("Rove requests must use JSON.");
   options?.signal?.throwIfAborted();
   const header = JSON.stringify({ path, method: options?.method || "GET" });
   // Preserve serialized request bodies without another copy.
@@ -16,7 +16,7 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     options?.body == null
       ? header
       : `${header.slice(0, -1)},"body":${options.body}}`;
-  const port = runtime().connect({ name: "relay-rpc" });
+  const port = runtime().connect({ name: "rove-rpc" });
   return new Promise<T>((resolve, reject) => {
     const chunks: string[] = [];
     let settled = false;
@@ -118,7 +118,7 @@ export class RuntimeEventSource {
   private connect() {
     if (this.closed) return;
     try {
-      const port = runtime().connect({ name: "relay-events" });
+      const port = runtime().connect({ name: "rove-events" });
       this.port = port;
       port.onMessage.addListener(
         (message: { type?: string; data?: unknown }) => {

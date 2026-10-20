@@ -109,7 +109,7 @@ describe("saved chat continuation", () => {
               content: [
                 {
                   type: "text",
-                  text: "[Relay screenshot 1] Automatic screenshot after read (reused).",
+                  text: "[Rove screenshot 1] Automatic screenshot after read (reused).",
                 },
                 { type: "image_url", image_url: { url: "[Image omitted]" } },
               ],
@@ -119,7 +119,7 @@ describe("saved chat continuation", () => {
               content: [
                 {
                   type: "text",
-                  text: "[Relay screenshot 2] Automatic screenshot after read (reused).",
+                  text: "[Rove screenshot 2] Automatic screenshot after read (reused).",
                 },
                 { type: "image_url", image_url: { url: "[Image omitted]" } },
               ],

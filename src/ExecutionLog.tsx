@@ -147,7 +147,7 @@ export default function ExecutionLog({
                 </div>
                 {rejected && (
                   <div className="context-adjustment">
-                    The endpoint rejected the context. Relay compacted
+                    The endpoint rejected the context. Rove compacted
                     observations and retried this request.
                   </div>
                 )}

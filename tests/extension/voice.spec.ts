@@ -71,7 +71,7 @@ test("dictation inserts at the selection, stays unsent, and cancels with Escape"
   await ui.getByRole("button", { name: "Stop dictation" }).click();
   await expect(ui.getByRole("button", { name: "Start dictation" })).toBeVisible();
   await expect(prompt).toHaveValue("Find red pandas today");
-  expect(await ui.evaluate(async () => (await chrome.runtime.sendMessage({ type: "relay-api", path: "/api/state", method: "GET" })).data.runs)).toHaveLength(0);
+  expect(await ui.evaluate(async () => (await chrome.runtime.sendMessage({ type: "rove-api", path: "/api/state", method: "GET" })).data.runs)).toHaveLength(0);
   capture = await begin();
   await expect(ui.getByRole("button", { name: "Stop dictation" })).toBeVisible();
   await ui.setViewportSize({ width: 320, height: 850 });
@@ -94,8 +94,8 @@ test("denied permission is reported inline and leaves the draft intact", async (
 });
 test("API dictation uses only the voice key and configured backend; settings persist", async () => {
   await ui.evaluate(async () => {
-    const response = await chrome.runtime.sendMessage({ type: "relay-api", path: "/api/settings", method: "GET" });
-    await chrome.runtime.sendMessage({ type: "relay-api", path: "/api/settings", method: "PUT", body: { ...response.data.settings, apiKey: "model-secret" } });
+    const response = await chrome.runtime.sendMessage({ type: "rove-api", path: "/api/settings", method: "GET" });
+    await chrome.runtime.sendMessage({ type: "rove-api", path: "/api/settings", method: "PUT", body: { ...response.data.settings, apiKey: "model-secret" } });
   });
   await ui.getByRole("button", { name: "Settings", exact: true }).click();
   await ui.getByRole("radio", { name: /Groq \/ compatible API/ }).click();
@@ -124,7 +124,7 @@ test("API dictation uses only the voice key and configured backend; settings per
   await expect(prompt).toHaveValue("dictated task");
   await expect(ui.getByRole("button", { name: "Start dictation" })).toBeVisible();
   expect(uploads).toBe(1);
-  const state = await ui.evaluate(async () => (await chrome.runtime.sendMessage({ type: "relay-api", path: "/api/state", method: "GET" })).data);
+  const state = await ui.evaluate(async () => (await chrome.runtime.sendMessage({ type: "rove-api", path: "/api/state", method: "GET" })).data);
   expect(state.runs).toHaveLength(0);
   expect(JSON.stringify(state)).not.toContain("voice-secret");
   await ui.setViewportSize({ width: 320, height: 850 });

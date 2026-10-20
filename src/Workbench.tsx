@@ -421,7 +421,7 @@ export default function Workbench({
                       const record = await api<RunRecord>(
                         `/api/runs/${run.id}/export`,
                       );
-                      downloadJson(record, `relay-run-${run.id}.json`);
+                      downloadJson(record, `rove-run-${run.id}.json`);
                     });
                   }}
                 />
@@ -504,7 +504,7 @@ export default function Workbench({
           <textarea
             ref={promptRef}
             aria-label="Task prompt"
-            placeholder={run ? "Reply to Relay…" : "Ask Relay…"}
+            placeholder={run ? "Reply to Rove…" : "Ask Rove…"}
             rows={1}
             readOnly={voiceBusy}
             value={prompt}

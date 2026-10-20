@@ -1,6 +1,6 @@
-# Relay companion panel
+# Rove companion panel
 
-The Chrome side panel is the primary product surface. The actual website is already alongside it, so Relay should spend its width on the task rather than duplicate a website dashboard.
+The Chrome side panel is the primary product surface. The actual website is already alongside it, so Rove should spend its width on the task rather than duplicate a website dashboard.
 
 ## Tokens
 
@@ -11,12 +11,12 @@ The Chrome side panel is the primary product surface. The actual website is alre
 - Stone `#73786C`: secondary text.
 - Edge `#DFE4D8`: boundaries where they explain a control.
 
-Syne variable, bold, is the statement face for the Relay wordmark, empty invitation and section titles. Commissioner variable is the readable working face for conversation, forms and controls. Fonts and their OFL licenses ship locally. Code retains the platform monospace face.
+Syne variable, bold, is the statement face for the Rove wordmark, empty invitation and section titles. Commissioner variable is the readable working face for conversation, forms and controls. Fonts and their OFL licenses ship locally. Code retains the platform monospace face.
 
 ## Layout
 
 ```text
-Relay                    History  New  Settings
+Rove                    History  New  Settings
 Current webpage                    Preview
 
 Conversation / compact execution disclosure

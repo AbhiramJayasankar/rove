@@ -7,7 +7,7 @@ let origin: string, crossOrigin: string, tabId: number;
 
 async function rawApi(route: string, method = 'GET', body?: unknown) {
   return ui.evaluate(async ({ route, method, body }) => chrome.runtime.sendMessage({
-    type: 'relay-api', path: route, method, body,
+    type: 'rove-api', path: route, method, body,
   }), { route, method, body });
 }
 async function api(route: string, method = 'GET', body?: unknown): Promise<any> {
@@ -37,7 +37,7 @@ test.beforeAll(async () => {
     } else if (req.url === '/scroll') {
       res.end(documentPage('Scrolled screenshot', '<style>body{padding:0}</style><div style="height:1000px;background:rgb(200,0,0)">Top section</div><div style="height:1400px;background:rgb(0,200,0)"><button id="scrolled-coordinate" style="margin:20px" onclick="this.textContent=\'Scrolled click verified\'">Scrolled target</button></div>'));
     } else if (req.url === '/pointer') {
-      res.end(documentPage('Pointer controls', `<button id="hover" onmouseenter="document.querySelector('#hover-result').textContent='Hover revealed'">Hover target</button><p id="hover-result">Not hovered</p><div id="slider" style="position:relative;width:480px;height:60px;background:#ddd;touch-action:none" onpointerdown="this.setPointerCapture(event.pointerId);this.dataset.dragging='yes'" onpointermove="if(this.dataset.dragging==='yes')document.querySelector('#drag-result').textContent='Dragged '+Math.round(event.offsetX)" onpointerup="this.dataset.dragging='no'"></div><p id="drag-result">Not dragged</p><button onclick="alert('Relay modal fixture');document.querySelector('#dialog-result').textContent='Dialog handled'">Open dialog</button><p id="dialog-result">No dialog</p>`));
+      res.end(documentPage('Pointer controls', `<button id="hover" onmouseenter="document.querySelector('#hover-result').textContent='Hover revealed'">Hover target</button><p id="hover-result">Not hovered</p><div id="slider" style="position:relative;width:480px;height:60px;background:#ddd;touch-action:none" onpointerdown="this.setPointerCapture(event.pointerId);this.dataset.dragging='yes'" onpointermove="if(this.dataset.dragging==='yes')document.querySelector('#drag-result').textContent='Dragged '+Math.round(event.offsetX)" onpointerup="this.dataset.dragging='no'"></div><p id="drag-result">Not dragged</p><button onclick="alert('Rove modal fixture');document.querySelector('#dialog-result').textContent='Dialog handled'">Open dialog</button><p id="dialog-result">No dialog</p>`));
     } else {
       res.end(documentPage(req.url === '/second' ? 'Second page' : 'First page', `<h1>${req.url === '/second' ? 'Second page' : 'First page'}</h1><button id="coordinate" onclick="document.body.dataset.coordinate='clicked'">Coordinate target</button><a href="/second">Next page</a>`));
     }
@@ -115,7 +115,7 @@ test('native hover and pointer drag update the page and JavaScript dialogs recov
   await action('browser_drag', { fromX: box!.x + 10, fromY: box!.y + 30, toX: box!.x + 400, toY: box!.y + 30, steps: 8 });
   await expect(target.locator('#drag-result')).toHaveText(/Dragged (3\d\d|400)/);
   snapshot = await action('browser_snapshot');
-  // Playwright otherwise automatically dismisses dialogs before Relay can
+  // Playwright otherwise automatically dismisses dialogs before Rove can
   // handle them. Observe without accepting/dismissing; the extension owns it.
   target.on('dialog', () => {});
   const opened = await rawApi('/api/browser', 'POST', { action: 'browser_click', args: { tabId, ref: snapshot.elements.find((el: any) => el.name === 'Open dialog').ref } });

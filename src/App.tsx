@@ -414,13 +414,13 @@ export default function App() {
       <header className="extension-header">
         <button
           className={page === "workbench" ? "brand" : "back-to-chat"}
-          aria-label={page === "workbench" ? "Relay workbench" : "Back to chat"}
+          aria-label={page === "workbench" ? "Rove workbench" : "Back to chat"}
           onClick={() => setPage("workbench")}
         >
           {page === "workbench" ? (
             <>
               <Route size={20} />
-              <span>Relay</span>
+              <span>Rove</span>
             </>
           ) : (
             <>

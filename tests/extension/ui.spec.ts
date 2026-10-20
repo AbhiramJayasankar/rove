@@ -151,7 +151,7 @@ async function rpc(route: string, method = "GET", body?: any) {
   const result = await ui.evaluate(
     ({ route, method, body }) =>
       chrome.runtime.sendMessage({
-        type: "relay-api",
+        type: "rove-api",
         path: route,
         method,
         body,
@@ -172,6 +172,11 @@ test("connection settings use unsaved credentials for discovery and retain only 
       .getByRole("navigation", { name: "Settings sections" })
       .getByRole("button"),
   ).toHaveText(["Model", "Instructions", "Tools"]);
+  const version = await ui.evaluate(() => chrome.runtime.getManifest().version);
+  await expect(ui.getByText(`Rove ${version}`)).toBeVisible();
+  await ui.getByRole("button", { name: "What's new", exact: true }).click();
+  await expect(ui.getByRole("dialog", { name: "What's new" })).toContainText(`${version} - `);
+  await ui.keyboard.press("Escape");
   await ui
     .getByRole("textbox", { name: "API base URL", exact: true })
     .fill(origin + "/v1");
@@ -609,12 +614,12 @@ test("persistent API key survives closing the whole browser and stays outside se
     await panel.evaluate(
       async ({ origin, secret }) => {
         const response = await chrome.runtime.sendMessage({
-          type: "relay-api",
+          type: "rove-api",
           path: "/api/settings",
           method: "GET",
         });
         await chrome.runtime.sendMessage({
-          type: "relay-api",
+          type: "rove-api",
           path: "/api/settings",
           method: "PUT",
           body: {
@@ -637,7 +642,7 @@ test("persistent API key survives closing the whole browser and stays outside se
     );
     const state = await panel.evaluate(async () => {
       const response = await chrome.runtime.sendMessage({
-        type: "relay-api",
+        type: "rove-api",
         path: "/api/state",
         method: "GET",
       });
@@ -651,7 +656,7 @@ test("persistent API key survives closing the whole browser and stays outside se
     expect(state.legacy).toEqual({});
     const result = await panel.evaluate(async () =>
       chrome.runtime.sendMessage({
-        type: "relay-api",
+        type: "rove-api",
         path: "/api/models",
         method: "GET",
       }),
@@ -659,12 +664,12 @@ test("persistent API key survives closing the whole browser and stays outside se
     expect(result.ok).toBe(true);
     const clear = await panel.evaluate(async () => {
       const response = await chrome.runtime.sendMessage({
-        type: "relay-api",
+        type: "rove-api",
         path: "/api/settings",
         method: "GET",
       });
       return chrome.runtime.sendMessage({
-        type: "relay-api",
+        type: "rove-api",
         path: "/api/settings",
         method: "PUT",
         body: { ...response.data.settings, apiKey: "" },

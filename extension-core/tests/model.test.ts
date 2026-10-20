@@ -266,7 +266,7 @@ describe("OpenAI-compatible models", () => {
               id: "check",
               type: "function",
               function: {
-                name: "relay_connection_check",
+                name: "rove_connection_check",
                 arguments: '{"status":"ok"}',
               },
             },

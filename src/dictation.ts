@@ -20,7 +20,7 @@ async function microphone(signal: AbortSignal): Promise<MediaStream> {
   if (signal.aborted) throw new DOMException("Cancelled", "AbortError");
   if (permission?.state === "prompt") {
     await new Promise<void>((resolve, reject) => {
-      const channel = new BroadcastChannel(`relay-mic-${crypto.randomUUID()}`);
+      const channel = new BroadcastChannel(`rove-mic-${crypto.randomUUID()}`);
       let windowId: number | undefined, finished = false;
       const complete = (error?: Error) => {
         if (finished) return;
@@ -31,13 +31,13 @@ async function microphone(signal: AbortSignal): Promise<MediaStream> {
       };
       const removed = (id: number) => { if (id === windowId) complete(new Error("Microphone setup closed. Click the mic to try again.")); };
       const cancelled = () => complete(new DOMException("Cancelled", "AbortError"));
-      const timeout = setTimeout(() => complete(new Error("Microphone setup timed out. Allow Relay’s microphone access, then try again.")), 90_000);
+      const timeout = setTimeout(() => complete(new Error("Microphone setup timed out. Allow Rove’s microphone access, then try again.")), 90_000);
       chrome.windows.onRemoved.addListener(removed); signal.addEventListener("abort", cancelled, { once: true });
       channel.onmessage = event => {
         if (event.data?.type === "granted") complete();
         if (event.data?.type === "error") complete(new Error(event.data.error || "Microphone permission denied."));
       };
-      void chrome.windows.create({ url: chrome.runtime.getURL(`index.html?voice=${channel.name.slice("relay-mic-".length)}`), type: "popup", width: 420, height: 260 }).then(window => {
+      void chrome.windows.create({ url: chrome.runtime.getURL(`index.html?voice=${channel.name.slice("rove-mic-".length)}`), type: "popup", width: 420, height: 260 }).then(window => {
         windowId = window?.id;
         if (finished && windowId !== undefined) void chrome.windows.remove(windowId).catch(() => {});
       }).catch(() => complete(new Error("Could not open microphone permission setup.")));

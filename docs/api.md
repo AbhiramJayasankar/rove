@@ -1,10 +1,10 @@
 # Extension messaging API
 
-The `/api/...` names identify structured extension operations. They are not HTTP routes: Relay v2 exposes no localhost server. Only Relay's own extension pages may invoke them. Shared shapes are in `shared/types.ts`; dispatch and validation live in `extension-src/runtime.ts`.
+The `/api/...` names identify structured extension operations. They are not HTTP routes: Rove v2 exposes no localhost server. Only Rove's own extension pages may invoke them. Shared shapes are in `shared/types.ts`; dispatch and validation live in `extension-src/runtime.ts`.
 
 ```ts
 const response = await chrome.runtime.sendMessage({
-  type: "relay-api",
+  type: "rove-api",
   path: "/api/runs",
   method: "POST",
   body: { prompt: "Read the current page title", tabId: 123 },
@@ -15,7 +15,7 @@ const run = response.data;
 
 Success is `{ok:true,data}`; failure is `{ok:false,error}`. `method` defaults to `GET`, and omitted body becomes `{}`. This small-message interface is useful for integration clients. These operations are unavailable to websites, content scripts or other extensions.
 
-The workbench uses a trusted `relay-rpc` runtime port for the same operations. It serializes `{path,method,body?}` into `{type:"chunk",data:string}` messages of at most 1,000,000 characters, followed by `{type:"end"}`. The worker responds with the plain JSON result using the same chunks/end framing, or `{type:"error",error:string}`. This preserves complete large histories across Chrome's per-message size limit. A disconnected request is never automatically retried: its outcome may be unknown. `src/transport.ts` owns framing, cleanup and error propagation.
+The workbench uses a trusted `rove-rpc` runtime port for the same operations. It serializes `{path,method,body?}` into `{type:"chunk",data:string}` messages of at most 1,000,000 characters, followed by `{type:"end"}`. The worker responds with the plain JSON result using the same chunks/end framing, or `{type:"error",error:string}`. This preserves complete large histories across Chrome's per-message size limit. A disconnected request is never automatically retried: its outcome may be unknown. `src/transport.ts` owns framing, cleanup and error propagation.
 
 | Method | Operation                  | Behavior                                                                                         |
 | ------ | -------------------------- | ------------------------------------------------------------------------------------------------ |
@@ -47,7 +47,7 @@ Candidate `POST /api/models` uses the supplied key, including an explicitly empt
 Open a trusted runtime port rather than an EventSource:
 
 ```ts
-const port = chrome.runtime.connect({ name: "relay-events" });
+const port = chrome.runtime.connect({ name: "rove-events" });
 port.onMessage.addListener(({ type, data }) => {
   // Apply state, run, event and status updates by run/event ID.
 });

@@ -35,7 +35,7 @@ export default function UsageRing({
         title={
           connected
             ? `${Math.round(percent)}% context used`
-            : "Reconnecting to Relay"
+            : "Reconnecting to Rove"
         }
         aria-haspopup="dialog"
         aria-expanded={popup.open}

@@ -232,7 +232,7 @@ async function listProviderModels(refresh: boolean, override?: { settings: Setti
   return { models, warnings };
 }
 async function route(path: string, method: string, body: any) {
-  const url = new URL(path, "https://relay.invalid");
+  const url = new URL(path, "https://rove.invalid");
   path = url.pathname;
   if (method === "GET" && path === "/api/state") return state();
   if (method === "GET" && path === "/api/health")
@@ -485,10 +485,10 @@ async function route(path: string, method: string, body: any) {
     await store.flush();
     return { ok: true };
   }
-  throw new Error("Unknown Relay operation.");
+  throw new Error("Unknown Rove operation.");
 }
 chrome.runtime.onMessage.addListener((message, sender, respond) => {
-  if (!ownPage(sender) || message?.type !== "relay-api") return false;
+  if (!ownPage(sender) || message?.type !== "rove-api") return false;
   void ready
     .then(() => {
       if (typeof message.path !== "string" || !message.path.startsWith("/api/"))
@@ -506,7 +506,7 @@ chrome.runtime.onMessage.addListener((message, sender, respond) => {
   return true;
 });
 chrome.runtime.onConnect.addListener((port) => {
-  if (port.name === "relay-rpc" && port.sender && ownPage(port.sender)) {
+  if (port.name === "rove-rpc" && port.sender && ownPage(port.sender)) {
     // Chrome messages have a size ceiling. Chunk transfers so complete journals
     // cross the same API boundary without truncating their trace.
     let parts: string[] = [],
@@ -573,7 +573,7 @@ chrome.runtime.onConnect.addListener((port) => {
     });
     return;
   }
-  if (port.name !== "relay-events" || !port.sender || !ownPage(port.sender)) {
+  if (port.name !== "rove-events" || !port.sender || !ownPage(port.sender)) {
     port.disconnect();
     return;
   }

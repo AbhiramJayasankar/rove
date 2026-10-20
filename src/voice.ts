@@ -46,7 +46,7 @@ export async function transcribe(audio: Blob, settings: VoiceSettings, key: stri
 }
 export function microphoneError(error: unknown) {
   const name = error instanceof Error ? error.name : "";
-  if (["NotAllowedError", "SecurityError"].includes(name)) return "Microphone permission denied or blocked. Allow Relay in Chrome’s microphone site settings and allow Chrome in your system microphone settings, then try again.";
+  if (["NotAllowedError", "SecurityError"].includes(name)) return "Microphone permission denied or blocked. Allow Rove in Chrome’s microphone site settings and allow Chrome in your system microphone settings, then try again.";
   if (["NotFoundError", "DevicesNotFoundError"].includes(name)) return "No microphone found. Connect a microphone and try again.";
   if (["NotReadableError", "TrackStartError"].includes(name)) return "Microphone is unavailable. Check whether another app is using it.";
   return error instanceof Error ? error.message : "Could not start microphone capture.";

@@ -1,6 +1,6 @@
 # Architecture
 
-Relay v2 runs entirely inside Chrome. A Manifest V3 service worker composes the agent, model adapter, durable store and browser controller. The same React application serves the side panel and full options workbench. One run controls the shared browser session at a time.
+Rove v2 runs entirely inside Chrome. A Manifest V3 service worker composes the agent, model adapter, durable store and browser controller. The same React application serves the side panel and full options workbench. One run controls the shared browser session at a time.
 
 ```mermaid
 flowchart LR
@@ -12,7 +12,7 @@ flowchart LR
   Tools --> Browser[Chrome / CDP controller]
   Browser --> Tabs[Existing Chrome tabs]
   Engine --> Journal[IndexedDB event journal]
-  Runtime -->|relay-events port| UI
+  Runtime -->|rove-events port| UI
   Runtime --> Storage[Chrome local / session storage]
 ```
 
@@ -33,11 +33,11 @@ The worker uses browser APIs only. Tool schemas are interpreted by [@cfworker/js
 5. Capture passive screenshots after browser actions. Image events back the UI; supported model image inputs are selected automatically. Preserve valid structured snapshots, frame refs and pagination when bounding results.
 6. Persist terminal state and learned limits, then release debugger sessions. Stop aborts requests/waits and prevents further dispatch; already-dispatched actions may finish.
 
-Active debugger sessions keep extension workers alive in supported Chrome versions. Relay uses this during runs and releases the resource afterward, following Chrome's [worker lifecycle guidance](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle). This does not replace crash recovery: on worker initialization, a previously active run becomes failed with an interruption event. Startup also releases debugger sessions left attached by the previous worker; Chrome scopes detach to the calling extension. Actions are never replayed automatically.
+Active debugger sessions keep extension workers alive in supported Chrome versions. Rove uses this during runs and releases the resource afterward, following Chrome's [worker lifecycle guidance](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle). This does not replace crash recovery: on worker initialization, a previously active run becomes failed with an interruption event. Startup also releases debugger sessions left attached by the previous worker; Chrome scopes detach to the calling extension. Actions are never replayed automatically.
 
 Debugger preflight uses `Target.getTargetInfo`, which does not wait for a renderer blocked by a JavaScript dialog. A new task can reset a stale owned attachment before dispatch. Orphaned clients are verified using an extension-scoped command and reset to rebuild frame subscriptions; clients belonging to DevTools or other extensions are not detached. Closing a tab intentionally first releases its session. Session cancellation clears outstanding command deadlines so old work cannot later detach a new session. Lost iframe sessions invalidate that frame's references, without detaching the root tab. Unexpected root loss during a task still stops the task without replaying the command.
 
-Chrome's root `onDetach` notification has no session generation. Relay confirms ownership with a bounded, read-only probe before clearing the tracked client; dispatch waits for that check. A delayed notification from an old client cannot delete a healthy replacement during initialization. A genuinely disconnected client still stops the active task, without reattaching or replaying the in-flight action.
+Chrome's root `onDetach` notification has no session generation. Rove confirms ownership with a bounded, read-only probe before clearing the tracked client; dispatch waits for that check. A delayed notification from an old client cannot delete a healthy replacement during initialization. A genuinely disconnected client still stops the active task, without reattaching or replaying the in-flight action.
 
 Explicit task admission activates the selected tab before enabling renderer domains. Background/discarded renderers can accept a debugger client while failing to answer `Page.enable` until awakened. Initialization preserves that command's original error and stops immediately; it must not swallow the timeout and issue `Runtime.enable` against the disposed client. The command timeout settles before session cancellation so its precise cause is retained.
 
@@ -62,7 +62,7 @@ The UI renders turns chronologically and keeps the chat mounted while settings i
 | Model API key | Dedicated trusted `chrome.storage.local.modelApiKey` | Persists across worker/browser/extension restarts until explicitly cleared or the extension is uninstalled |
 | Run metadata and events              | IndexedDB                        | Persistent history; event records append by run/event ID                              |
 
-Run metadata and new events commit in one IndexedDB transaction. `save` queues writes; `checkpoint`/`flush` awaits completion before requests or actions. Storage failures stop dispatch. The UI loads run summaries first and retrieves complete history when needed. Chunked `relay-rpc` transfers avoid Chrome's per-message size limit for large histories. Event IDs reconcile live updates; a reconnected `relay-events` port receives fresh state.
+Run metadata and new events commit in one IndexedDB transaction. `save` queues writes; `checkpoint`/`flush` awaits completion before requests or actions. Storage failures stop dispatch. The UI loads run summaries first and retrieves complete history when needed. Chunked `rove-rpc` transfers avoid Chrome's per-message size limit for large histories. Event IDs reconcile live updates; a reconnected `rove-events` port receives fresh state.
 
 Credentials never enter settings, history, run exports or API responses. Startup restricts local/session storage to trusted extension contexts, migrates a retained legacy session credential only if no persistent credential exists, then removes the old session entry. Saving an empty key clears the persistent credential; omitting it retains the existing one. Individual runs remain exportable; whole-history backup/import is removed.
 

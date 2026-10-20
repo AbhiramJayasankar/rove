@@ -4,7 +4,7 @@ The Chrome extension contains both the agent runtime and browser controller. The
 
 ## Controller integration
 
-Build the extension, load the generated `extension/` directory as an unpacked extension in Chrome's extensions page with Developer mode enabled, and configure the model endpoint in Relay. The complete runtime runs inside Chrome without a companion process.
+Build the extension, load the generated `extension/` directory as an unpacked extension in Chrome's extensions page with Developer mode enabled, and configure the model endpoint in Rove. The complete runtime runs inside Chrome without a companion process.
 
 The browser module exports:
 
@@ -36,7 +36,7 @@ Forced service-worker termination can leave Chrome's extension-owned debugger se
 
 ## Tabs, frames, and references
 
-Before using a cached debugger attachment, each browser operation probes the root session. If Chrome has disconnected it, Relay clears the stale cache and stops an active task. It does not replay the rejected command. A new task or manual observation acquires a fresh session. A detach notification stops an active task only when the user cancels Chrome's debugger banner or the tab the task is working in is lost. A different tab it used earlier, or a command timeout, is reported to the model on its next use instead.
+Before using a cached debugger attachment, each browser operation probes the root session. If Chrome has disconnected it, Rove clears the stale cache and stops an active task. It does not replay the rejected command. A new task or manual observation acquires a fresh session. A detach notification stops an active task only when the user cancels Chrome's debugger banner or the tab the task is working in is lost. A different tab it used earlier, or a command timeout, is reported to the model on its next use instead.
 
 Most tools accept an optional numeric `tabId`. An explicit ID is preferable: without one the bridge uses its last controlled tab, or chooses an active controllable tab. `browser_tabs` returns IDs, titles, URLs, active state, and a `controllable` flag. A tab listed by Chrome is not necessarily controllable.
 
@@ -101,19 +101,19 @@ JavaScript is a function **body**, not just an expression; `return` and `await` 
 
 Return JSON-serializable data. Page exceptions become tool errors. These scripts execute in the page world, so page globals are available; snapshot element maps belong to the separate isolated world and are not available to custom scripts. JavaScript and raw CDP are explicit power tools, not a sandbox for untrusted code.
 
-`browser_cdp` accepts protocol method names such as `DOM.getDocument`. Chrome restricts available domains. Relay additionally rejects raw `Target.*`, `Browser.*`, and `Page.navigateToHistoryEntry` commands; use its tab/history tools instead. `Page.navigate` receives URL checks. Child CDP session IDs are advanced transport identifiers, distinct from frame IDs.
+`browser_cdp` accepts protocol method names such as `DOM.getDocument`. Chrome restricts available domains. Rove additionally rejects raw `Target.*`, `Browser.*`, and `Page.navigateToHistoryEntry` commands; use its tab/history tools instead. `Page.navigate` receives URL checks. Child CDP session IDs are advanced transport identifiers, distinct from frame IDs.
 
 ## Limits and failure recovery
 
 - Chrome 125+ is required. Debugger permissions produce Chrome's visible permission/control indicators. Opening DevTools, closing a tab, browser policy, or canceling the debugging banner can detach the session.
-- Relay refuses its own extension pages, Chrome internals, and Chrome Web Store pages. It also rejects snapshots/evaluation of an embedded Relay extension frame. Ordinary localhost sites remain controllable. Advanced JavaScript is deliberately powerful and can initiate navigation; subsequent operations still check the resulting target.
+- Rove refuses its own extension pages, Chrome internals, and Chrome Web Store pages. It also rejects snapshots/evaluation of an embedded Rove extension frame. Ordinary localhost sites remain controllable. Advanced JavaScript is deliberately powerful and can initiate navigation; subsequent operations still check the resulting target.
 - Same-process iframe coordinates are adjusted using the embedding frame. Out-of-process iframes have child sessions; native pointer targets are translated through their embedding frames to the root viewport. Deeply nested/transformed frame geometry requires testing against the target site; use fresh frame snapshots when an interaction fails.
 - Open shadow roots are traversed. Closed shadow roots, canvas-only controls, inaccessible inputs, browser menus, OS dialogs, browser authentication prompts, and CAPTCHA challenges are not universally covered.
 - Screenshots capture the viewport rather than an arbitrarily large full-page image. Vision support depends on the configured model endpoint.
 - Uploads require an actual file-input reference and accessible local files. A hidden upload input may need a custom script or advanced DOM/CDP inspection. This does not operate the OS file picker.
 - Stop prevents the agent from scheduling further actions. An action already dispatched to Chrome may finish; actions are not rolled back. After a protocol timeout or debugger detachment, inspect browser state before retrying.
 - A navigation waits up to roughly 12 seconds for load completion; highly dynamic pages may need another snapshot or a bounded wait. A failed frame/context/ref should be rediscovered, not guessed.
-- If an action opens a JavaScript dialog, Relay reports an actionable tool error and leaves the dialog visible. Use `browser_dialog` next; the pending native input or script may complete after it is handled. This prevents the serial command queue from deadlocking on a modal.
+- If an action opens a JavaScript dialog, Rove reports an actionable tool error and leaves the dialog visible. Use `browser_dialog` next; the pending native input or script may complete after it is handled. This prevents the serial command queue from deadlocking on a modal.
 
 ## Focused snapshots and coordinates
 

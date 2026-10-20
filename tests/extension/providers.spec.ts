@@ -6,7 +6,7 @@ import { DEFAULT_SETTINGS } from "../../shared/defaults";
 let context: BrowserContext, ui: Page, server: http.Server, origin: string;
 const calls: { provider: string; key?: string }[] = [];
 async function rpc(route: string, method = "GET", body?: unknown): Promise<any> {
-  const result = await ui.evaluate(({ route, method, body }) => chrome.runtime.sendMessage({ type: "relay-api", path: route, method, body }), { route, method, body });
+  const result = await ui.evaluate(({ route, method, body }) => chrome.runtime.sendMessage({ type: "rove-api", path: route, method, body }), { route, method, body });
   if (!result.ok) throw new Error(result.error);
   return result.data;
 }

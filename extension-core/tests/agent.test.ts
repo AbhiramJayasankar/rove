@@ -206,7 +206,7 @@ describe("agent execution loop", () => {
     expect(retry.messages[1].content).toContain("Inspect, click, then verify.");
     expect(
       retry.messages.some((m: any) =>
-        m.content?.startsWith?.("[Relay context checkpoint]"),
+        m.content?.startsWith?.("[Rove context checkpoint]"),
       ),
     ).toBe(true);
   });
