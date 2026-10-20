@@ -29,6 +29,29 @@ import {
 const store = new ExtensionStore();
 const providers = new ProviderStore();
 const catalogue = new ModelCatalogue();
+const attachmentFields = {
+  name: z.string().trim().min(1, "Attachment names cannot be empty.").transform(name => name.slice(0, 120)),
+  size: z.number().int().nonnegative(),
+};
+const attachmentsSchema = z.array(z.discriminatedUnion("kind", [
+  z.object({
+    ...attachmentFields,
+    kind: z.literal("image"),
+    mime: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+    dataUrl: z.string().max(6_000_000, "Attachment image data must be at most 6,000,000 characters."),
+  }).strict().refine(({ mime, dataUrl }) => {
+    const prefix = `data:${mime};base64,`;
+    if (!dataUrl.startsWith(prefix)) return false;
+    const base64 = dataUrl.slice(prefix.length);
+    return base64.length > 0 && base64.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(base64);
+  }, "Attachment images must be base64 data URLs matching their MIME type."),
+  z.object({
+    ...attachmentFields,
+    kind: z.literal("text"),
+    mime: z.string(),
+    text: z.string().max(200_000, "Attachment text must be at most 200,000 characters."),
+  }).strict(),
+])).max(5, "At most 5 attachments are allowed per message.").optional();
 const ports = new Set<chrome.runtime.Port>();
 let apiKey = "";
 const API_KEY_STORAGE_KEY = "modelApiKey";
@@ -453,6 +476,7 @@ async function route(path: string, method: string, body: any, settingsLocked = f
       .object({
         prompt: z.string().trim().min(1).max(50000),
         tabId: z.number().int().positive().nullable().optional(),
+        attachments: attachmentsSchema,
       })
       .parse(body);
     const runId = crypto.randomUUID();
@@ -468,7 +492,7 @@ async function route(path: string, method: string, body: any, settingsLocked = f
       // Snapshot settings and key only after any concurrent picker commit finishes.
       const run = await changeSettings(async () => {
         if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
-        const run = engine.start(input.prompt, selected.tabId, runId);
+        const run = engine.start(input.prompt, selected.tabId, runId, input.attachments);
         endAdmission(runId); reserved = false;
         return run;
       });
@@ -493,7 +517,10 @@ async function route(path: string, method: string, body: any, settingsLocked = f
           message: z.string().trim().min(1).max(50000),
           editMessageId: z.number().int().nonnegative().optional(),
           tabId: z.number().int().positive().nullable().optional(),
+          attachments: attachmentsSchema,
         })
+        .refine(input => input.editMessageId === undefined || input.attachments === undefined,
+          "Attachments cannot be supplied when editing a message.")
         .parse(body);
       reserveAdmission(id);
       let reserved = true;
@@ -516,7 +543,7 @@ async function route(path: string, method: string, body: any, settingsLocked = f
           if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
           const run = input.editMessageId === 0
             ? engine.restart(previous, input.message, selected.tabId)
-            : engine.continue(previous, input.message, selected.tabId);
+            : engine.continue(previous, input.message, selected.tabId, input.attachments);
           endAdmission(id); reserved = false;
           return run;
         });

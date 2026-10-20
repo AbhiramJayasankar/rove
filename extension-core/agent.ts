@@ -4,11 +4,12 @@ import type {
   RunRecord,
   Settings,
   ModelInfo,
+  MessageAttachment,
 } from "../shared/types";
 import { complete, generationOptions, ModelEndpointError } from "./model";
 import { compactContext } from "./context";
 import { effectiveSettings } from "./catalogue";
-import { conversationHistory } from "./conversation";
+import { attachmentParts, conversationHistory } from "./conversation";
 import { BUILTIN_TOOLS, executeTool, getTools, isToolRisky } from "./tools";
 import { hostOf, ruleFor } from "../shared/siteRules";
 
@@ -32,6 +33,7 @@ type Active = {
   approvalMode: Settings["approvalMode"];
   message: string;
   history: any[];
+  attachments: RunEvent[];
 };
 type Options = {
   transport: BrowserTransport;
@@ -197,7 +199,7 @@ function boundedSnapshot(source: Record<string, any>): string {
 function traceValue(value: any): any {
   if (typeof value === "string") {
     if (value.startsWith("data:image/"))
-      return `[Image omitted from request trace: ${value.length} characters; see screenshot event.]`;
+      return `[Image omitted from request trace: ${value.length} characters; see screenshot or attachment event.]`;
     return value;
   }
   if (Array.isArray(value)) return value.map(traceValue);
@@ -208,7 +210,7 @@ function traceValue(value: any): any {
   return value;
 }
 function redactValue(value: any, key: string): any {
-  // Binary screenshots may contain these characters by coincidence. Replacing
+  // Binary screenshots/attachments may contain these characters by coincidence. Replacing
   // base64 substrings would corrupt them; readable event fields are redacted.
   if (typeof value === "string")
     return key && !value.startsWith("data:image/")
@@ -272,17 +274,17 @@ export class AgentEngine {
     return this.activeRunId ? this.selectedTabFor(this.activeRunId) : undefined;
   }
 
-  start(prompt: string, tabId?: number, runId?: string): RunRecord {
-    return this.begin(prompt, tabId, undefined, false, runId);
+  start(prompt: string, tabId?: number, runId?: string, attachments: MessageAttachment[] = []): RunRecord {
+    return this.begin(prompt, tabId, undefined, false, runId, attachments);
   }
   restart(run: RunRecord, prompt: string, tabId?: number): RunRecord {
     return this.begin(prompt, tabId, run, true);
   }
 
-  continue(run: RunRecord, message: string, tabId?: number): RunRecord {
+  continue(run: RunRecord, message: string, tabId?: number, attachments: MessageAttachment[] = []): RunRecord {
     if (["running", "awaiting_approval"].includes(run.status))
       throw new Error("Stop the current response before continuing this chat.");
-    return this.begin(message, tabId, run);
+    return this.begin(message, tabId, run, false, undefined, attachments);
   }
 
   private begin(
@@ -291,6 +293,7 @@ export class AgentEngine {
     previous?: RunRecord,
     replaceFirst = false,
     runId?: string,
+    attachments: MessageAttachment[] = [],
   ): RunRecord {
     if (this.runs.has(previous?.id ?? runId ?? ""))
       throw new Error("Stop the current response before continuing this chat.");
@@ -323,11 +326,15 @@ export class AgentEngine {
       approvalMode: settings.approvalMode,
       message: prompt.trim(),
       history: previous && !replaceFirst ? conversationHistory(previous) : [],
+      attachments: [],
     };
     this.runs.set(run.id, active);
     if (previous && !replaceFirst)
       this.event(active, "user_message", { message: prompt.trim() });
     this.setStatus(active, "running");
+    active.attachments = attachments.map((attachment) =>
+      this.event(active, "attachment", attachment),
+    );
     // Defer work so HTTP clients can subscribe to the returned run immediately.
     queueMicrotask(() => {
       void this.process(active);
@@ -501,6 +508,13 @@ export class AgentEngine {
         content: `${active.message}\n\nBrowser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. Use it by default.` : "New Tab mode. No existing tab is selected and no tab has been created. If this task needs a webpage, call browser_navigate with newTab:true and the destination URL. Do not reuse an existing tab by default. For conversational messages, just answer without opening a tab."}${active.history.length ? " This is a follow-up in the same chat. Earlier actions are historical; do not replay them. Refresh the page snapshot before using element refs." : ""}`,
       },
     ];
+    if (active.attachments.length) {
+      const user = messages.at(-1);
+      user.content = [
+        { type: "text", text: user.content },
+        ...active.attachments.flatMap(attachmentParts),
+      ];
+    }
     const runTransport = this.options.transportForRun?.(active.run.id) ?? this.options.transport;
     const transport: BrowserTransport = {
       status: () => runTransport.status(),

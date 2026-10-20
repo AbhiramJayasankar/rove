@@ -26,7 +26,7 @@ export default function SiteRules({ rules, onChange }: { rules: SiteRule[]; onCh
       <div className="panel rules-panel">
         {rules.map((rule) => (
           <div className="rule-row" key={rule.pattern}>
-            <strong>{rule.pattern}</strong>
+            <strong title={rule.pattern}>{rule.pattern}</strong>
             <div className="rule-choice" role="radiogroup" aria-label={t("Rule for {site}", { site: rule.pattern })}>
               {actions.map((choice) => (
                 <button

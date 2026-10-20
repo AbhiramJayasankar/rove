@@ -82,3 +82,19 @@ test("exports the chat as Markdown", async () => {
   expect(text).toContain("The fixture answer.");
   expect(text).not.toContain("model_request");
 });
+
+test("attaches a text file from the paperclip, shows it on the message, and sends it to the model", async () => {
+  await ui.getByRole("button", { name: "New task", exact: true }).click();
+  await ui.locator('input[type="file"]').setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("the secret plan is blue") });
+  const chip = ui.getByRole("group", { name: "Attachments" }).getByText("notes.txt");
+  await expect(chip).toBeVisible();
+  await ui.getByRole("textbox", { name: "Task prompt" }).fill("Read the attachment");
+  await ui.getByRole("button", { name: "Run task", exact: true }).click();
+  await ui.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(ui.locator(".assistant-message").getByText("The fixture answer.")).toBeVisible({ timeout: 15000 });
+  const sent = JSON.stringify(bodies.at(-1).messages.at(-1));
+  expect(sent).toContain("the secret plan is blue");
+  expect(sent).toContain("notes.txt");
+  // The message in the chat keeps a chip for what was attached.
+  await expect(ui.locator(".user-message").getByText("notes.txt")).toBeVisible();
+});

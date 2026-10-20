@@ -27,28 +27,20 @@ export function compactContext(
 ) {
   let images = 0;
   let removedImages = 0;
-  for (let index = messages.length - 1; index >= 2; index--) {
+  for (let index = messages.length - 1; index >= 1; index--) {
     const message = messages[index];
     if (!Array.isArray(message.content)) continue;
-    const hadImage = message.content.some(
-      (part: any) => part.type === "image_url",
-    );
-    message.content = message.content.filter((part: any) => {
-      if (part.type !== "image_url") return true;
-      if (++images <= settings.maxImages) return true;
+    // Count newest parts first, including images attached to the original task.
+    // Replace only the pixels: prompts, file text and captions must survive.
+    for (let part = message.content.length - 1; part >= 0; part--) {
+      if (message.content[part].type !== "image_url") continue;
+      if (++images <= settings.maxImages) continue;
       removedImages++;
-      return false;
-    });
-    if (
-      hadImage &&
-      !message.content.some((part: any) => part.type === "image_url")
-    )
-      message.content = [
-        {
-          type: "text",
-          text: "[Older screenshot omitted; associated tool results remain above.]",
-        },
-      ];
+      message.content[part] = {
+        type: "text",
+        text: "[Older screenshot omitted; associated tool results remain above.]",
+      };
+    }
   }
   // Use the model's maximum output when it fits. For smaller context windows,
   // reserve room for the task and newest complete tool group before admission.

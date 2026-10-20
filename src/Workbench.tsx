@@ -560,7 +560,7 @@ export default function Workbench({
           }}
         >
           {attachments.length > 0 && (
-            <div className="attachment-chips" aria-label={t("Attachments")}>
+            <div className="attachment-chips" role="group" aria-label={t("Attachments")}>
               {attachments.map((item) => (
                 <span className="attachment-chip" key={item.id}>
                   {item.kind === "image" && item.dataUrl ? <img src={item.dataUrl} alt="" /> : <FileText size={13} aria-hidden="true" />}

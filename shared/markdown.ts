@@ -22,6 +22,8 @@ export function runToMarkdown(
       flush();
       lines.push("## You", "", String(event.data.message ?? "").trim(), "");
       answered = false;
+    } else if (event.type === "attachment") {
+      lines.push(`- Attached: ${String(event.data.name ?? "").replace(/\s+/g, " ")}`, "");
     } else if (event.type === "tool_call") {
       actions.push(label(String(event.data.name), event.data.args ?? {}));
     } else if (event.type === "assistant") {

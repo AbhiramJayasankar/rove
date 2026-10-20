@@ -846,3 +846,10 @@
   background: var(--panel);
   font-size: 13.5px;
 }
+
+.rule-row strong {
+  overflow: hidden;
+  overflow-wrap: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

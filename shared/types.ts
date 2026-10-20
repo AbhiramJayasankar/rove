@@ -77,6 +77,14 @@ export type RunStatus =
   | "completed"
   | "failed"
   | "stopped";
+export type MessageAttachment = {
+  name: string;
+  mime: string;
+  size: number;
+} & (
+  | { kind: "image"; dataUrl: string }
+  | { kind: "text"; text: string }
+);
 export interface RunEvent {
   id: number;
   time: string;

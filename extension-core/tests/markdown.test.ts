@@ -28,4 +28,23 @@ describe("Markdown export", () => {
     expect(md).not.toContain("secret trace");
     expect(md).not.toContain("snapshot");
   });
+
+  it("lists attachment names beneath their own messages without contents", () => {
+    const run: RunRecord = {
+      id: "r", prompt: "Read these", status: "completed", createdAt: "", updatedAt: "",
+      events: [
+        event(1, "attachment", { name: "notes.txt", kind: "text", text: "private contents" }),
+        event(2, "attachment", { name: "pixel.png", kind: "image", dataUrl: "data:image/png;base64,YQ==" }),
+        event(3, "assistant", { content: "First answer" }),
+        event(4, "user_message", { message: "And this?" }),
+        event(5, "attachment", { name: "next.txt", kind: "text", text: "more private contents" }),
+        event(6, "assistant", { content: "Second answer" }),
+      ],
+    };
+    const md = runToMarkdown(run, () => "");
+    expect(md).toContain('## You\n\nRead these\n\n- Attached: notes.txt\n\n- Attached: pixel.png\n\n## Assistant\n\nFirst answer');
+    expect(md).toContain('## You\n\nAnd this?\n\n- Attached: next.txt\n\n## Assistant\n\nSecond answer');
+    expect(md).not.toContain("private contents");
+    expect(md).not.toContain("base64");
+  });
 });

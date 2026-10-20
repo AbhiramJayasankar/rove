@@ -30,15 +30,23 @@ The workbench uses a trusted `rove-rpc` runtime port for the same operations. It
 | POST | `/api/models` | Candidate `{baseUrl,apiKey?,refresh?}` catalogue lookup before saving; no settings or key changes and no saved-model broadcasts |
 | POST   | `/api/model/test`          | Candidate settings/key; verify a harmless function call without saving settings                  |
 | POST   | `/api/browser`             | `{action,args}` manual built-in tool; allowed on tabs without an active lease, including while other tasks run |
-| POST   | `/api/runs`                | `{prompt,tabId?:number\|null}`; start a task, up to three concurrent tasks; `null` selects New Tab mode without creating a tab |
+| POST   | `/api/runs`                | `{prompt,tabId?:number\|null,attachments?}`; start a task, up to three concurrent tasks; `null` selects New Tab mode without creating a tab |
 | GET    | `/api/runs/:id`            | Full run and persisted events                                                                    |
 | GET    | `/api/runs/:id/export`     | Full run object; the UI creates the download                                                     |
-| POST   | `/api/runs/:id/messages` | `{message,tabId?,editMessageId?}`; append a follow-up, or replace the specified user-message event and all later history. ID `0` edits the first prompt. `tabId:null` starts in a new tab. Earlier browser effects are not undone. |
+| POST   | `/api/runs/:id/messages` | `{message,tabId?,editMessageId?,attachments?}`; append a follow-up, or replace the specified user-message event and all later history. ID `0` edits the first prompt. `tabId:null` starts in a new tab. Earlier browser effects are not undone. Attachments may only accompany an append. |
 | POST   | `/api/runs/:id/stop`       | Stop scheduling and abort waits/requests; no rollback                                            |
 | POST   | `/api/runs/:id/approval`   | `{approvalId,approved}` resolves a specific pending decision                                     |
 | POST   | `/api/runs/:id/reply`      | `{message}` answers a pending user question                                                      |
 
 Model API keys persist in a dedicated trusted `chrome.storage.local` entry, separate from settings and history. Omit `apiKey` when saving settings to retain the saved key; provide an empty string to clear it. A one-time migration retains an existing session key when no persistent entry exists and removes the legacy session entry. Responses and logs never include the credential.
+
+## Message attachments
+
+Both message operations accept up to five attachments. Each has a nonempty `name` (trimmed and truncated to 120 characters for display), a nonnegative integer byte `size`, `mime`, and `kind`. Image attachments use `kind:"image"`, MIME `image/png`, `image/jpeg`, `image/webp` or `image/gif`, and a matching base64 `dataUrl` of at most 6,000,000 characters. Text attachments use `kind:"text"`, a string MIME, and `text` of at most 200,000 characters. Invalid input returns the ordinary error envelope before admission. Supplying attachments with `editMessageId` is rejected.
+
+The journal records one `attachment` event per file, in input order, with data `{name,kind,mime,size,dataUrl?,text?}`. Image events carry only `dataUrl`; text events carry only `text`. These events and the model request intent pass the durable checkpoint before dispatch. Readable fields use the existing credential redaction; image data URLs remain intact.
+
+The user turn starts with the prompt and browser context, then adds fenced, explicitly untrusted text files and image captions immediately followed by image parts. Captions are `[Rove attachment <eventId>] Image attached by the user: <name>`. Text-only models retain captions without image pixels. Request traces omit base64, and continuation restores each image from its caption's journal ID, alongside the existing screenshot references. Attachments and screenshots share the image budget; omitted images leave their captions and the existing omission note. Editing retains attachments before the cut and drops attachments at or after it. Markdown exports list names beneath the associated message as `- Attached: <name>`, without file contents.
 
 ## Concurrent tasks and panel contract
 

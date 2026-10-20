@@ -24,6 +24,10 @@ npm run test:e2e
 | `extension-core/tests/conversation.test.ts` | Saved chat reconstruction, retained reasoning and images, reused tool IDs, interrupted batches, same-ID follow-ups and monotonic steps |
 | `extension-core/tests/usage.test.ts` | Per-chat totals across models, provider costs, pricing units, caches, unknown/interrupted usage and current context estimates |
 | `extension-core/tests/context.test.ts` | Independent image budgets, intact tool groups, retained reasoning and bounded context                                                                                            |
+| `extension-core/tests/attachments.test.ts` | Ordered durable attachment intent, fenced text and caption/image parts, text-only models, journal reconstruction, edit cuts, redaction and shared image budgets |
+| `extension-core/tests/runtime.test.ts` | Attachment route limits, kinds, image MIME/base64 validation, display-name truncation and concurrent runtime lifecycle |
+| `extension-core/tests/markdown.test.ts` | Readable transcript and attachment names associated with their messages, without file contents |
+| `tests/extension/attachments.spec.ts` | Upload a text file and tiny PNG through the composer, inspect ordered parts at a deterministic model server, and render the answer |
 | `extension-core/tests/browser.test.ts` | CSP-safe interpreted schemas, Unicode byte limits, hashed Chrome-storage profiles and durable pre-dispatch checkpoint failures                                                   |
 | `extension-core/tests/browser-session.test.ts` | Stale attachments/dialogs, owned-client recovery, isolated iframe loss, intentional close, cancelled command deadlines and no mutation replay |
 | `tests/extension/native.spec.ts`       | Actual worker/model/browser loop, streaming Stop, approvals/questions, worker restart recovery, lost debugger detection and fresh-task reconnection without replay |

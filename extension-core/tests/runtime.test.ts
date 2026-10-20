@@ -93,6 +93,48 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+describe("attachment route validation", () => {
+  const text = { name: "notes.txt", kind: "text", mime: "text/plain", size: 5, text: "hello" };
+  const image = { name: "pixel.png", kind: "image", mime: "image/png", size: 1, dataUrl: "data:image/png;base64,YQ==" };
+  it.each([
+    ["too many files", Array(6).fill(text), "At most 5 attachments"],
+    ["oversize text", [{ ...text, text: "x".repeat(200_001) }], "200,000 characters"],
+    ["oversize image", [{ ...image, dataUrl: "data:image/png;base64," + "A".repeat(6_000_000) }], "6,000,000 characters"],
+    ["wrong image MIME", [{ ...image, mime: "image/svg+xml" }], "mime"],
+    ["wrong kind", [{ ...text, kind: "audio" }], "kind"],
+    ["empty name", [{ ...text, name: "   " }], "Attachment names cannot be empty"],
+    ["negative size", [{ ...text, size: -1 }], "size"],
+    ["fractional size", [{ ...text, size: 0.5 }], "size"],
+    ["missing text", [{ name: "empty.txt", kind: "text", mime: "text/plain", size: 1 }], "text"],
+    ["MIME mismatch", [{ ...image, dataUrl: "data:image/gif;base64,YQ==" }], "matching their MIME type"],
+    ["non-base64 URL", [{ ...image, dataUrl: "https://example.com/image.png" }], "base64 data URLs"],
+    ["invalid base64", [{ ...image, dataUrl: "data:image/png;base64,!!!=" }], "base64 data URLs"],
+    ["empty base64", [{ ...image, dataUrl: "data:image/png;base64," }], "base64 data URLs"],
+  ])("rejects %s on both message routes", async (_name, attachments, error) => {
+    for (const [path, message] of [["/api/runs", { prompt: "Read" }], ["/api/runs/missing/messages", { message: "Read" }]] as const) {
+      const result = await raw(path, "POST", { ...message, attachments, tabId: null });
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain(error);
+    }
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("truncates display names and accepts the supported image formats", async () => {
+    const attachments = [text, ...["png", "jpeg", "webp", "gif"].map(format => ({
+      ...image, mime: `image/${format}`, dataUrl: `data:image/${format};base64,YQ==`, name: "n".repeat(130),
+    }))];
+    const run = await rpc("/api/runs", "POST", { prompt: "Read", tabId: null, attachments });
+    const saved = (await rpc(`/api/runs/${run.id}`)).events.filter((event: any) => event.type === "attachment");
+    expect(saved.map((event: any) => event.data.name)).toEqual(["notes.txt", ...Array(4).fill("n".repeat(120))]);
+  });
+
+  it("rejects attachments supplied with an edit target", async () => {
+    const result = await raw("/api/runs/missing/messages", "POST", { message: "Edit", editMessageId: 0, attachments: [text], tabId: null });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("Attachments cannot be supplied when editing");
+  });
+});
+
 describe("concurrent runtime lifecycle", () => {
   it("does not count a model connection probe against the three task slots", async () => {
     await start("first", null);
