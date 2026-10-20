@@ -1,4 +1,4 @@
-import type { Settings, ToolDefinition } from "../shared/types";
+import type { ModelInfo, Settings, ToolDefinition } from "../shared/types";
 import { readBounded } from "./tools";
 
 export function completionUrl(baseUrl: string): string {
@@ -24,20 +24,67 @@ function redact(value: string, key: string): string {
   return key ? value.split(key).join("[REDACTED]") : value;
 }
 
-export function generationOptions(settings: Settings): Record<string, unknown> {
+export class ModelEndpointError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly details?: any,
+    readonly requestId?: string,
+  ) {
+    super(message);
+    this.name = "ModelEndpointError";
+  }
+  get contextExceeded() {
+    return this.status === 400 || this.status === 413
+      ? /context[_ -]length|context[_ -]window|too[_ -]many[_ -]tokens|max(?:imum)?[_ -]context|prompt[_ -]too[_ -]long/i.test(
+          `${this.code || ""} ${this.message}`,
+        )
+      : false;
+  }
+  get contextLimit(): number | undefined {
+    const fields = [
+      this.details?.max_context_length,
+      this.details?.context_window,
+      this.details?.context_length,
+      this.details?.error?.max_context_length,
+      this.details?.error?.context_window,
+      this.details?.error?.context_length,
+    ];
+    const explicit = fields
+      .map(Number)
+      .find((n) => Number.isFinite(n) && n > 0);
+    const match = this.message.match(
+      /(?:maximum context length (?:is|of)|context (?:window|limit)(?: is|:| of)?)\s*([\d,]+)\s*tokens/i,
+    );
+    return (
+      explicit || (match ? Number(match[1].replaceAll(",", "")) : undefined)
+    );
+  }
+}
+
+export function generationOptions(
+  settings: Settings,
+  model?: ModelInfo | null,
+): Record<string, unknown> {
   const result: Record<string, unknown> = {
-    max_tokens: settings.maxOutputTokens,
+    [model?.outputTokenParameter || "max_tokens"]: settings.maxOutputTokens,
   };
   const effort = settings.reasoningEffort;
   if (effort !== "default") {
     const format =
       settings.reasoningFormat === "auto"
-        ? /mimo/i.test(settings.model)
-          ? "thinking"
-          : "reasoning_effort"
+        ? model?.reasoningFormat
         : settings.reasoningFormat;
+    if (!format)
+      throw new Error(
+        "The endpoint does not advertise a reasoning control for this model. Use Provider default, or select an explicit API format in Model settings.",
+      );
     if (format === "thinking")
       result.thinking = { type: effort === "none" ? "disabled" : "enabled" };
+    else if (format === "enable_thinking")
+      result.enable_thinking = effort !== "none";
+    else if (format === "reasoning") result.reasoning = { effort };
     else result.reasoning_effort = effort;
   }
   return result;
@@ -76,7 +123,12 @@ async function streamedCompletion(
       throw new Error("The model returned malformed streaming JSON.");
     }
     if (chunk.error)
-      throw new Error(chunk.error.message || "Model stream failed.");
+      throw new ModelEndpointError(
+        chunk.error.message || "Model stream failed.",
+        Number(chunk.error.status) || 400,
+        chunk.error.code || chunk.error.type,
+        chunk,
+      );
     id = chunk.id || id;
     usage = chunk.usage || usage;
     const choice =
@@ -157,6 +209,7 @@ export async function complete(
   tools: ToolDefinition[],
   signal: AbortSignal,
   onDelta?: (delta: ModelDelta) => void,
+  model?: ModelInfo | null,
 ): Promise<{ message: any; usage?: any; requestId?: string }> {
   if (!settings.model.trim())
     throw new Error("Choose a model in Settings before starting a run.");
@@ -173,7 +226,12 @@ export async function complete(
         model: settings.model,
         messages,
         stream: settings.stream,
-        ...generationOptions(settings),
+        ...generationOptions(settings, model),
+        ...(settings.stream &&
+        (!model?.supportedParameters ||
+          model.supportedParameters.includes("stream_options"))
+          ? { stream_options: { include_usage: true } }
+          : {}),
         ...(tools.length
           ? {
               tools: tools.map(({ name, description, parameters }) => ({
@@ -192,6 +250,14 @@ export async function complete(
     });
   } catch (error) {
     if (signal.aborted) throw signal.reason;
+    if (error instanceof ModelEndpointError)
+      throw new ModelEndpointError(
+        redact(error.message, apiKey),
+        error.status,
+        error.code,
+        JSON.parse(redact(JSON.stringify(error.details || {}), apiKey)),
+        error.requestId,
+      );
     throw new Error(
       redact(
         `Model request failed: ${error instanceof Error ? error.message : String(error)}. Check the endpoint and local model server.`,
@@ -201,11 +267,21 @@ export async function complete(
   }
   if (!response.ok) {
     const raw = await readBounded(response);
-    throw new Error(
+    let details: any;
+    try {
+      details = JSON.parse(redact(raw, apiKey));
+    } catch {
+      /* Keep the bounded text error. */
+    }
+    throw new ModelEndpointError(
       redact(
         `Model endpoint returned HTTP ${response.status}: ${raw.slice(0, 3000)}`,
         apiKey,
       ),
+      response.status,
+      details?.error?.code || details?.error?.type || details?.code,
+      details,
+      response.headers.get("x-request-id") || undefined,
     );
   }
   let data: any;
@@ -215,6 +291,14 @@ export async function complete(
       : JSON.parse(await readBounded(response, 16_000_000));
   } catch (error) {
     if (signal.aborted) throw signal.reason;
+    if (error instanceof ModelEndpointError)
+      throw new ModelEndpointError(
+        redact(error.message, apiKey),
+        error.status,
+        error.code,
+        JSON.parse(redact(JSON.stringify(error.details || {}), apiKey)),
+        error.requestId,
+      );
     if (!(error instanceof SyntaxError))
       throw new Error(
         redact(error instanceof Error ? error.message : String(error), apiKey),
@@ -273,6 +357,7 @@ export async function complete(
 export async function testModel(
   settings: Settings,
   apiKey: string,
+  model?: ModelInfo | null,
 ): Promise<string> {
   const tools: ToolDefinition[] = [
     {
@@ -301,6 +386,8 @@ export async function testModel(
     messages,
     tools,
     AbortSignal.timeout(30000),
+    undefined,
+    model,
   );
   const check = message.tool_calls?.find(
     (t: any) => t.function.name === "relay_connection_check",

@@ -3,7 +3,7 @@
 Verified locally on Windows on **2026-10-20**, with Node.js 24 and Playwright Chromium 156. Chrome 125+ is the implementation's minimum; the integration test covers the installed test browser version.
 
 - `npm run build`: TypeScript checking and production Vite build pass.
-- `npm test`: **31 tests pass**, covering the agent/model loop, approval denial and cancellation, live auto-approval changes, questions/replies, selected-tab routing, vision sequencing, schema validation, provider compatibility/errors, key redaction, long snapshot compaction, array tool results, historical configuration, and persistence/restart recovery including transient Windows file locks.
+- `npm test`: **37 tests pass**, covering the agent/model loop, approval denial and cancellation, live auto-approval changes, questions/replies, selected-tab routing, vision sequencing, schema validation, provider compatibility/errors, key redaction, long snapshot compaction, array tool results, historical configuration, and persistence/restart recovery including transient Windows file locks.
 - `npm run test:e2e`: **2 integration tests pass**, exercising the actual MV3 extension, real browser page state, loopback backend, deterministic OpenAI-compatible model endpoint, and React interface.
 - `npm audit`: no known vulnerabilities reported in the installed dependency tree at verification time.
 - Production `npm start` smoke check: built interface loads successfully in Chromium, with no page errors, an empty task history, and no configured endpoint key or model. The local app is left running at port 4789 for handoff.
@@ -23,3 +23,9 @@ The user's Token Harbor catalogue was fetched successfully (69 entries, four fre
 A live read-only snapshot of a background Amazon tab timed out after extension reload. This prompted a per-CDP-command deadline and debugger detach, preventing a suspended renderer from holding the serial extension queue indefinitely; no timed-out action is replayed. The automated browser suite covers active pages and isolated frames, not every suspended-tab state.
 
 The final command-deadline source passed the browser suite, but its last reload in the user's regular Chrome was blocked when Computer Use could not establish the current browser URL. Reload the existing Relay extension once to activate that final deadline change. The preceding viewport/filtering update was already reloaded successfully.
+
+The metadata/admission fix replaces model-name guesses with endpoint metadata and adds bounded context-error recovery. Regression coverage includes unknown capability handling, pricing-derived free models, nested provider limits, dynamic output-token fields, cache/learned-limit isolation and persistence, structured context errors, retries without duplicate browser actions, and retaining text history while reducing older screenshots first.
+
+A real failed DeepSeek request advertised 1,048,576 context tokens in `/v1/models` but rejected a request whose previous successful usage was 45,516 input tokens. Replaying its text history with only the latest screenshot returned HTTP 200 and stream data; no returned tool was executed. This is evidence for image-first recovery, not proof of the provider's hidden internal limit. The endpoint's per-model retrieval returned 404 despite listing the model, so missing capabilities remain explicitly unadvertised rather than fabricated.
+
+The updated local backend was restarted with automatic metadata enabled. Its authenticated model catalogue resolved the selected DeepSeek label, context and tool support, and a real connection/tool-calling test returned HTTP 200.

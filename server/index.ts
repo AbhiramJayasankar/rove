@@ -8,7 +8,8 @@ import { Store } from "./store";
 import { ChromeBridge } from "./bridge";
 import { AgentEngine } from "./agent";
 import { BUILTIN_TOOLS, validateCustomTools } from "./tools";
-import { testModel, completionUrl } from "./model";
+import { testModel } from "./model";
+import { ModelCatalogue, effectiveSettings } from "./catalogue";
 import { readBounded } from "./tools";
 import { DEFAULT_SETTINGS } from "../shared/defaults";
 import type { AppState, RunRecord, Settings } from "../shared/types";
@@ -36,10 +37,17 @@ function broadcast(type: string, data: unknown) {
 function redact(message: string) {
   return apiKey ? message.split(apiKey).join("[redacted]") : message;
 }
+const catalogue = new ModelCatalogue(store.dir);
 const engine = new AgentEngine({
   transport: bridge,
   getSettings: () => structuredClone(store.settings),
   getApiKey: () => apiKey,
+  resolveModel: (settings, key, signal) =>
+    catalogue.resolve(settings, key, signal),
+  learnContextBudget: (settings, key, budget, maxImages) => {
+    catalogue.learn(settings, key, budget, maxImages);
+    broadcast("model_info", catalogue.peek(store.settings, apiKey));
+  },
   emit: (runId, event) => {
     broadcast("event", { runId, event });
     if (event.type === "status")
@@ -61,6 +69,7 @@ bridge.on("notice", (notice) => broadcast("browser_notice", notice));
 function state(): AppState {
   return {
     settings: store.settings,
+    modelInfo: catalogue.peek(store.settings, apiKey),
     hasApiKey: Boolean(apiKey),
     bridge: bridge.status(),
     runs: store.listRuns(),
@@ -137,6 +146,7 @@ const settingsSchema = z
     model: z.string().max(200),
     systemPrompt: z.string().min(1).max(100000),
     maxSteps: z.number().int().min(1).max(200),
+    contextMode: z.enum(["auto", "manual"]).default("auto"),
     contextWindow: z
       .number()
       .int()
@@ -156,7 +166,8 @@ const settingsSchema = z
       .max(20)
       .default(DEFAULT_SETTINGS.maxImages),
     reasoningEffort: z
-      .enum(["default", "none", "low", "medium", "high"])
+      .string()
+      .regex(/^[a-z][a-z0-9_-]{0,39}$/)
       .default("default"),
     reasoningFormat: z
       .enum(["auto", "reasoning_effort", "thinking"])
@@ -169,7 +180,8 @@ const settingsSchema = z
     customTools: z.array(customToolSchema).max(50),
   })
   .refine(
-    (s) => s.maxOutputTokens + 2048 < s.contextWindow,
+    (s) =>
+      s.contextMode === "auto" || s.maxOutputTokens + 2048 < s.contextWindow,
     "Context window must exceed output tokens plus 2,048 reserved tokens.",
   );
 function parse<T>(schema: z.ZodType<T>, input: unknown): T {
@@ -201,7 +213,11 @@ app.put("/api/settings", (req, res) => {
   if (req.body.apiKey !== undefined)
     apiKey = parse(z.string().max(10000), req.body.apiKey);
   store.saveSettings(settings);
-  const result = { settings, hasApiKey: Boolean(apiKey) };
+  const result = {
+    settings,
+    hasApiKey: Boolean(apiKey),
+    modelInfo: catalogue.peek(settings, apiKey),
+  };
   broadcast("settings", result);
   res.json(result);
 });
@@ -222,7 +238,8 @@ app.put("/api/run-options", (req, res) => {
       .object({
         model: z.string().min(1).max(200).optional(),
         reasoningEffort: z
-          .enum(["default", "none", "low", "medium", "high"])
+          .string()
+          .regex(/^[a-z][a-z0-9_-]{0,39}$/)
           .optional(),
         contextWindow: z.number().int().min(4096).max(4000000).optional(),
       })
@@ -232,65 +249,40 @@ app.put("/api/run-options", (req, res) => {
   const settings = parse(settingsSchema, {
     ...store.settings,
     ...options,
+    ...(options.model && options.model !== store.settings.model
+      ? { reasoningEffort: "default" }
+      : {}),
   }) as Settings;
   store.saveSettings(settings);
-  const result = { settings, hasApiKey: Boolean(apiKey) };
+  const result = {
+    settings,
+    hasApiKey: Boolean(apiKey),
+    modelInfo: catalogue.peek(settings, apiKey),
+  };
   broadcast("settings", result);
   res.json(result);
 });
-let modelCache: { key: string; at: number; models: unknown[] } | undefined;
 app.get("/api/models", async (req, res) => {
-  const cacheKey = `${store.settings.baseUrl}:${apiKey}`;
-  if (
-    !req.query.refresh &&
-    modelCache?.key === cacheKey &&
-    Date.now() - modelCache.at < 60000
-  ) {
-    res.json({ models: modelCache.models });
-    return;
-  }
   try {
-    const url = completionUrl(store.settings.baseUrl).replace(
-      /\/chat\/completions$/,
-      "/models",
+    const models = await catalogue.list(
+      store.settings,
+      apiKey,
+      !!req.query.refresh,
     );
-    const response = await fetch(url, {
-      headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : {},
-      signal: AbortSignal.timeout(20000),
-      redirect: "error",
-    });
-    if (!response.ok)
-      throw new Error(
-        `Model catalogue returned HTTP ${response.status}. You can still enter a model ID.`,
-      );
-    const data = JSON.parse(await readBounded(response, 8_000_000));
-    const entries = Array.isArray(data) ? data : data.data || data.models;
-    if (!Array.isArray(entries))
-      throw new Error(
-        "The endpoint did not return a model list. Enter a model ID manually.",
-      );
-    const models = entries
-      .filter((m) => typeof m.id === "string")
-      .map((m) => ({
-        id: m.id,
-        name: m.name || m.id,
-        contextWindow:
-          Number(
-            m.context_length ||
-              m.context_window ||
-              m.max_model_len ||
-              m.top_provider?.context_length,
-          ) || undefined,
-        free: /(?:^|[:/ -])free(?:$|[:/ -])/i.test(m.id),
-        owner: m.owned_by || m.architecture?.instruct_type,
-      }));
-    modelCache = { key: cacheKey, at: Date.now(), models };
-    res.json({ models });
+    const modelInfo = catalogue.peek(store.settings, apiKey);
+    broadcast("model_info", modelInfo);
+    res.json({ models, modelInfo });
   } catch (error) {
     res.status(502).json({
       error: redact(error instanceof Error ? error.message : String(error)),
     });
   }
+});
+app.post("/api/model-profile/reset", (_req, res) => {
+  catalogue.reset(store.settings, apiKey);
+  const modelInfo = catalogue.peek(store.settings, apiKey);
+  broadcast("model_info", modelInfo);
+  res.json({ modelInfo });
 });
 app.post("/api/model/test", async (req, res) => {
   const candidate = parse(settingsSchema, {
@@ -302,7 +294,12 @@ app.post("/api/model/test", async (req, res) => {
       ? apiKey
       : parse(z.string().max(10000), req.body.apiKey);
   try {
-    const message = await testModel(candidate, key);
+    const info = await catalogue.resolve(candidate, key).catch(() => null);
+    const message = await testModel(
+      effectiveSettings(candidate, info),
+      key,
+      info,
+    );
     res.json({ ok: true, message });
   } catch (error) {
     const raw = error instanceof Error ? error.message : String(error);

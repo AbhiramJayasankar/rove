@@ -20,6 +20,14 @@ test.beforeAll(async () => {
             {
               id: "deterministic-integration-fixture:free",
               name: "Fixture Free",
+              supported_parameters: [
+                "tools",
+                "reasoning_effort",
+                "max_tokens",
+                "stream_options",
+              ],
+              top_provider: { max_completion_tokens: 8192 },
+              architecture: { input_modalities: ["text", "image"] },
               context_length: 1048576,
             },
             {
@@ -97,6 +105,24 @@ test.beforeAll(async () => {
       }
 
       const results = input.messages.filter((m: any) => m.role === "tool");
+      const contextFixture = String(
+        input.messages.find((m: any) => m.role === "user")?.content,
+      ).includes("Context recovery fixture");
+      const imageCount = input.messages
+        .flatMap((m: any) => (Array.isArray(m.content) ? m.content : []))
+        .filter((p: any) => p.type === "image_url").length;
+      if (contextFixture && imageCount > 1) {
+        res.writeHead(400, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify({
+            error: {
+              code: "context_length_exceeded",
+              message: "Context window exceeded by image observations",
+            },
+          }),
+        );
+        return;
+      }
       const call = (name: string, args: any) => ({
         role: "assistant",
         content: null,
@@ -139,6 +165,11 @@ test.beforeAll(async () => {
                 content:
                   "Your answer was received and the question flow is verified.",
               };
+      else if (contextFixture)
+        message =
+          results.length < 2
+            ? call("browser_snapshot", {})
+            : { role: "assistant", content: "Context recovery verified." };
       else if (results.length === 0) message = call("browser_snapshot", {});
       else if (results.length === 1) {
         const snapshot = JSON.parse(results[0].content);
@@ -543,6 +574,43 @@ test("real extension controls DOM, frames, screenshot, approvals and the full mo
   await expect(
     ui.getByRole("switch", { name: "Auto-approve", exact: true }),
   ).toBeChecked();
+  const contextSettings = (await (await request.get("/api/state")).json())
+    .settings;
+  await request.put("/api/settings", {
+    data: {
+      ...contextSettings,
+      vision: true,
+      contextMode: "auto",
+      contextWindow: 32768,
+    },
+  });
+  await ui
+    .getByLabel("Task prompt")
+    .fill("Context recovery fixture: inspect twice and verify.");
+  await ui.getByRole("button", { name: "Run task", exact: true }).click();
+  await expect(
+    ui.getByText("Context recovery verified.", { exact: true }),
+  ).toBeVisible();
+  const recoveredState = await (await request.get("/api/state")).json();
+  const recovered = recoveredState.runs[0];
+  expect(recovered.status).toBe("completed");
+  expect(
+    recovered.events.filter((e: any) => e.type === "tool_call"),
+  ).toHaveLength(2);
+  expect(
+    recovered.events.filter((e: any) => e.type === "context_recovery"),
+  ).toHaveLength(1);
+  expect(
+    recovered.events.find((e: any) => e.type === "run_configuration").data
+      .settings,
+  ).toMatchObject({ contextWindow: 1048576, maxOutputTokens: 8192 });
+  expect(recoveredState.modelInfo.workingMaxImages).toBe(1);
+  await ui.getByRole("button", { name: "Execution", exact: false }).click();
+  await expect(ui.getByText("Context adjusted", { exact: true })).toBeVisible();
+  await ui.screenshot({
+    path: "test-results/relay-context-recovery.png",
+    fullPage: true,
+  });
   await ui.setViewportSize({ width: 390, height: 844 });
   await ui.screenshot({
     path: "test-results/relay-mobile.png",

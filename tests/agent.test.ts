@@ -37,10 +37,15 @@ async function until(predicate: () => boolean) {
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
 }
-function setup(overrides: Partial<Settings> = {}, apiKey = "") {
+function setup(
+  overrides: Partial<Settings> = {},
+  apiKey = "",
+  extra: Partial<ConstructorParameters<typeof AgentEngine>[0]> = {},
+) {
   const settings: Settings = {
     ...structuredClone(DEFAULT_SETTINGS),
     model: "test",
+    contextWindow: 1048576,
     approvalMode: "never",
     ...overrides,
   };
@@ -57,11 +62,121 @@ function setup(overrides: Partial<Settings> = {}, apiKey = "") {
     getApiKey: () => apiKey,
     emit: (_, event) => events.push(event),
     save: (run) => saves.push(run),
+    ...extra,
   });
   return { engine, events, execute, settings, transport, saves };
 }
 
 describe("agent execution loop", () => {
+  it("recovers from an endpoint context rejection without replaying browser tools", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response(null, [call("first", "browser_snapshot", {})]),
+      )
+      .mockResolvedValueOnce(
+        response(null, [call("click", "browser_click", { ref: "r1" })]),
+      )
+      .mockResolvedValueOnce(
+        response(null, [call("last", "browser_snapshot", {})]),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "context_length_exceeded",
+              message: "This request is longer than the model context window.",
+            },
+          }),
+          { status: 400 },
+        ),
+      )
+      .mockResolvedValueOnce(response("Recovered and verified."));
+    vi.stubGlobal("fetch", fetchMock);
+    const learn = vi.fn();
+    const ctx = setup({}, "", { learnContextBudget: learn });
+    ctx.execute.mockResolvedValue({
+      text: "Page data. ".repeat(1800),
+      elements: [{ ref: "r1", name: "Button" }],
+      url: "https://example.test",
+      title: "Example",
+    });
+    const run = ctx.engine.start("Inspect, click, then verify.", 7);
+    await until(() => !ctx.engine.activeRunId);
+    expect(run.status).toBe("completed");
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(
+      ctx.execute.mock.calls
+        .filter((c) => c[0] !== "browser_screenshot")
+        .map((c) => c[0]),
+    ).toEqual(["browser_snapshot", "browser_click", "browser_snapshot"]);
+    expect(
+      ctx.events.filter((e) => e.type === "context_recovery"),
+    ).toHaveLength(1);
+    expect(
+      ctx.events.some(
+        (e) => e.type === "context_usage" && e.data.droppedMessages > 0,
+      ),
+    ).toBe(true);
+    expect(learn).toHaveBeenCalled();
+    const retry = JSON.parse(fetchMock.mock.calls[4][1].body);
+    expect(retry.messages[1].content).toContain("Inspect, click, then verify.");
+    expect(
+      retry.messages.some((m: any) =>
+        m.content?.startsWith?.("[Relay context checkpoint]"),
+      ),
+    ).toBe(true);
+  });
+  it("reduces old screenshots first without discarding text or lowering advertised context", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        response(null, [call("one", "browser_snapshot", {})]),
+      )
+      .mockResolvedValueOnce(
+        response(null, [call("two", "browser_snapshot", {})]),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: "context_length_exceeded",
+              message: "Context length exceeded",
+            },
+          }),
+          { status: 400 },
+        ),
+      )
+      .mockResolvedValueOnce(response("Recovered."));
+    vi.stubGlobal("fetch", fetchMock);
+    const learn = vi.fn(),
+      ctx = setup({ vision: true }, "", { learnContextBudget: learn });
+    ctx.execute.mockImplementation(async (name) =>
+      name === "browser_screenshot"
+        ? { tabId: 7, dataUrl: "data:image/png;base64," + "A".repeat(100000) }
+        : { text: "Page data", elements: [{ ref: "button", name: "Button" }] },
+    );
+    const run = ctx.engine.start("Inspect two pages.");
+    await until(() => !ctx.engine.activeRunId);
+    expect(run.status).toBe("completed");
+    const retry = JSON.parse(fetchMock.mock.calls[3][1].body);
+    expect(retry.messages.filter((m: any) => m.role === "tool")).toHaveLength(
+      2,
+    );
+    expect(
+      retry.messages
+        .flatMap((m: any) => (Array.isArray(m.content) ? m.content : []))
+        .filter((p: any) => p.type === "image_url"),
+    ).toHaveLength(1);
+    expect(
+      ctx.events.find((e) => e.type === "context_recovery")?.data.strategy,
+    ).toBe("retain_latest_image");
+    expect(
+      ctx.events.filter((e) => e.type === "context_usage").at(-1)?.data
+        .contextWindow,
+    ).toBe(1048576);
+    expect(learn).toHaveBeenCalledWith(expect.anything(), "", undefined, 1);
+  });
   it("preserves long provider reasoning in the trace and subsequent requests", async () => {
     const reasoning = "Reasoning detail. ".repeat(3000);
     const fetchMock = vi

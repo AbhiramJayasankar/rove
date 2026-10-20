@@ -33,7 +33,7 @@ export default function ExecutionLog({ run }: { run: RunRecord }) {
   const responses = new Map(
     run.events
       .filter((e) => e.type === "model_response")
-      .map((e) => [e.data.step, e]),
+      .map((e) => [`${e.data.step}:${e.data.attempt || 1}`, e]),
   );
   const running = ["running", "awaiting_approval"].includes(run.status);
   return (
@@ -63,14 +63,24 @@ export default function ExecutionLog({ run }: { run: RunRecord }) {
       {expanded && (
         <div className="execution-steps">
           {requests.map((request, index) => {
-            const response = responses.get(request.data.step);
+            const response = responses.get(
+              `${request.data.step}:${request.data.attempt || 1}`,
+            );
+            const rejected = run.events.find(
+              (e) =>
+                e.type === "model_error" &&
+                e.data.step === request.data.step &&
+                e.data.attempt === request.data.attempt,
+            );
             const next = requests[index + 1]?.id || Infinity;
             const stepCalls = calls.filter(
               (call) => call.id > request.id && call.id < next,
             );
             const deltas = run.events.filter(
               (e) =>
-                e.type === "model_delta" && e.data.step === request.data.step,
+                e.type === "model_delta" &&
+                e.data.step === request.data.step &&
+                (e.data.attempt || 1) === (request.data.attempt || 1),
             );
             const reason = response
               ? reasoningText(response.data.message)
@@ -89,9 +99,11 @@ export default function ExecutionLog({ run }: { run: RunRecord }) {
                       ? stepCalls.length
                         ? "Tools selected"
                         : "Response"
-                      : running
-                        ? "Generating"
-                        : "Interrupted"}
+                      : rejected
+                        ? "Context adjusted"
+                        : running
+                          ? "Generating"
+                          : "Interrupted"}
                   </strong>
                   <span>
                     {response?.data.durationMs
@@ -104,6 +116,12 @@ export default function ExecutionLog({ run }: { run: RunRecord }) {
                     </span>
                   )}
                 </div>
+                {rejected && (
+                  <div className="context-adjustment">
+                    The endpoint rejected the context. Relay compacted
+                    observations and retried this request.
+                  </div>
+                )}
                 {reason && (
                   <details className="reasoning-block" open={!response}>
                     <summary>
@@ -132,7 +150,11 @@ export default function ExecutionLog({ run }: { run: RunRecord }) {
                 <details className="request-details">
                   <summary>Request & response</summary>
                   <pre>
-                    {json({ request: request.data, response: response?.data })}
+                    {json({
+                      request: request.data,
+                      response: response?.data,
+                      error: rejected?.data,
+                    })}
                   </pre>
                 </details>
               </div>

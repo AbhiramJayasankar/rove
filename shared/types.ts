@@ -1,4 +1,28 @@
 export type JsonSchema = Record<string, unknown>;
+export interface ModelInfo {
+  id: string;
+  name: string;
+  owner?: string;
+  contextWindow?: number;
+  maxInputTokens?: number;
+  maxOutputTokens?: number;
+  supportsTools?: boolean;
+  supportsVision?: boolean;
+  inputModalities?: string[];
+  outputModalities?: string[];
+  supportedParameters?: string[];
+  reasoningFormat?:
+    "reasoning_effort" | "thinking" | "enable_thinking" | "reasoning";
+  reasoningEfforts?: string[];
+  outputTokenParameter?: "max_tokens" | "max_completion_tokens";
+  free: boolean;
+  pricing?: Record<string, unknown>;
+  metadata: Record<string, any>;
+  source: string;
+  fetchedAt: string;
+  workingInputBudget?: number;
+  workingMaxImages?: number;
+}
 export interface CustomTool {
   name: string;
   description: string;
@@ -20,9 +44,10 @@ export interface Settings {
   systemPrompt: string;
   maxSteps: number;
   contextWindow: number;
+  contextMode: "auto" | "manual";
   maxOutputTokens: number;
   maxImages: number;
-  reasoningEffort: "default" | "none" | "low" | "medium" | "high";
+  reasoningEffort: string;
   reasoningFormat: "auto" | "reasoning_effort" | "thinking";
   stream: boolean;
   modelTimeoutSeconds: number;
@@ -70,6 +95,7 @@ export interface Approval {
   args: Record<string, unknown>;
 }
 export interface AppState {
+  modelInfo?: ModelInfo | null;
   settings: Settings;
   hasApiKey: boolean;
   bridge: BridgeStatus;

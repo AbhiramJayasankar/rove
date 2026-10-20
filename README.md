@@ -75,11 +75,13 @@ JavaScript handlers run as async function bodies **in the selected page**, with 
 
 Choose a model from the prompt dock; Relay fetches the configured endpoint's model catalogue, supports search, defaults to free-tagged IDs, and shows context sizes supplied by the provider. Model and reasoning choices apply to the next task. Manual IDs are a fallback rather than a setup requirement.
 
-The default context window is 1,048,576 tokens, with 16,384 reserved output tokens and four retained screenshots. All are editable in Model settings. Image transport size no longer evicts text history. Context estimates and provider-reported input usage are visible; the estimate is not an exact tokenizer for every provider.
+Context is resolved from the endpoint's selected-model metadata before each run, including manually entered IDs. Limits are capped by advertised input/output constraints; explicit manual overrides remain available. Missing fields are shown as **Not advertised**, with a conservative configured fallback for an unknown context window. Provider-reported token usage calibrates estimates. Screenshots have a separate retention budget.
 
 Expand **Execution** to inspect each step's full provider-returned reasoning, tool arguments/results, timing, and request/response. **Trace** supports search, expand/collapse, copying, screenshot inspection, and complete JSON download. Provider reasoning is displayed as returned; Relay does not manufacture reasoning when an endpoint does not expose it. Responses stream by default. Stop from the prompt dock or press Escape; interrupted text/reasoning remains inspectable and partial tool calls never execute.
 
-MiMo's documented thinking switch is on/off. Auto format uses that switch for MiMo; other endpoints can use standard `reasoning_effort` levels. See [interface decisions](docs/interface-plan.md) and [architecture](docs/architecture.md).
+Reasoning controls and output-token parameter names come from advertised supported parameters, rather than model-name rules. Unknown reasoning capabilities use the provider default; advanced API-format overrides remain available. The model picker uses endpoint labels, prices, tool/vision capabilities, and limits. Inspect the raw metadata under **Endpoint capabilities** in Settings.
+
+Structured context rejections trigger bounded recovery of the same model request: remove old screenshots first, then compact complete older tool groups if necessary while preserving the task, recent state and an explicit checkpoint. Browser actions are never replayed. Successful working input/image budgets are learned separately for each endpoint, credential and model and survive restart. They are displayed separately from advertised limits and can be reset in Settings.
 
 ## Development
 

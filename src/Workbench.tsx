@@ -21,7 +21,8 @@ import {
   Square,
   X,
 } from "lucide-react";
-import ModelPicker, { isThinkingModel, tokenCount } from "./ModelPicker";
+import ModelPicker, { tokenCount } from "./ModelPicker";
+import { reasoningOptions } from "../shared/capabilities";
 import ExecutionLog, { TraceView } from "./ExecutionLog";
 import type { AppState, RunRecord, Settings } from "../shared/types";
 import {
@@ -135,7 +136,10 @@ export default function Workbench({
   const inputTokens =
     latestUsage?.prompt_tokens ?? latestContext?.estimatedTokens;
   const contextWindow =
-    latestContext?.contextWindow || state.settings.contextWindow;
+    latestContext?.contextWindow ||
+    state.modelInfo?.contextWindow ||
+    state.settings.contextWindow;
+  const reasoningChoices = reasoningOptions(state.settings, state.modelInfo);
   async function runOptions(options: Partial<Settings>) {
     await action("run-options", async () => {
       const result = await api<{ settings: Settings; hasApiKey: boolean }>(
@@ -476,14 +480,7 @@ export default function Workbench({
             <ModelPicker
               model={state.settings.model}
               disabled={pending === "run-options"}
-              onSelect={(model, context) =>
-                runOptions({
-                  model,
-                  ...(context && context > state.settings.maxOutputTokens + 2048
-                    ? { contextWindow: context }
-                    : {}),
-                })
-              }
+              onSelect={(model) => runOptions({ model })}
             />
             <select
               aria-label="Reasoning level"
@@ -497,20 +494,11 @@ export default function Workbench({
               title={busy ? "For the next task" : "Reasoning level"}
               disabled={pending === "run-options"}
             >
-              <option value="default">Thinking: default</option>
-              <option value="none">Thinking: off</option>
-              {isThinkingModel(
-                state.settings.model,
-                state.settings.reasoningFormat,
-              ) ? (
-                <option value="high">Thinking: on</option>
-              ) : (
-                <>
-                  <option value="low">Think: low</option>
-                  <option value="medium">Think: medium</option>
-                  <option value="high">Think: high</option>
-                </>
-              )}
+              {reasoningChoices.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
             </select>
           </div>
           <textarea
@@ -530,7 +518,12 @@ export default function Workbench({
             <span
               className={`connection-state ${streamConnected ? "" : "disconnected"}`}
               title={
-                streamConnected ? "Server connected" : "Reconnecting to server"
+                latestContext?.inputBudget &&
+                latestContext.inputBudget < contextWindow * 0.9
+                  ? `Endpoint advertises ${contextWindow.toLocaleString()} tokens; working input budget ${Math.floor(latestContext.inputBudget).toLocaleString()} after a context rejection. ${streamConnected ? "Server connected" : "Reconnecting"}`
+                  : streamConnected
+                    ? "Server connected"
+                    : "Reconnecting to server"
               }
             >
               <i
@@ -539,6 +532,12 @@ export default function Workbench({
               {inputTokens != null
                 ? `${latestUsage?.prompt_tokens == null ? "~" : ""}${tokenCount(inputTokens)} / ${tokenCount(contextWindow)}`
                 : `${tokenCount(contextWindow)} context`}
+              {latestContext?.inputBudget &&
+                latestContext.inputBudget < contextWindow * 0.9 && (
+                  <span className="budget-adjusted">
+                    {tokenCount(latestContext.inputBudget)} input budget
+                  </span>
+                )}
               {busy && (
                 <span className="next-task-label">Changes apply next task</span>
               )}

@@ -87,23 +87,29 @@ describe("OpenAI-compatible models", () => {
     expect(result.usage.total_tokens).toBe(12);
   });
 
-  it("maps MiMo thinking honestly and supports generic reasoning effort", () => {
+  it("honors explicit reasoning formats without guessing from a model ID", () => {
     expect(
       generationOptions({
         ...settings,
-        model: "mimo-v2.6-flash:free",
+        model: "model-with-binary-thinking",
+        reasoningFormat: "thinking",
         reasoningEffort: "high",
       }),
     ).toMatchObject({ thinking: { type: "enabled" } });
     expect(
       generationOptions({
         ...settings,
-        model: "mimo-v2.6-flash:free",
+        model: "model-with-binary-thinking",
+        reasoningFormat: "thinking",
         reasoningEffort: "none",
       }),
     ).toMatchObject({ thinking: { type: "disabled" } });
     expect(
-      generationOptions({ ...settings, reasoningEffort: "high" }),
+      generationOptions({
+        ...settings,
+        reasoningEffort: "high",
+        reasoningFormat: "reasoning_effort",
+      }),
     ).toMatchObject({ reasoning_effort: "high" });
   });
   it("assembles fragmented streamed reasoning and tool calls before execution", async () => {

@@ -2,21 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { Check, ChevronDown, LoaderCircle, Search, X } from "lucide-react";
 import { api } from "./ui";
 
-type Model = {
-  id: string;
-  name: string;
-  contextWindow?: number;
-  free: boolean;
-  owner?: string;
-};
+import type { ModelInfo } from "../shared/types";
+type Model = ModelInfo;
 export const tokenCount = (count: number) =>
   count >= 1_000_000
     ? `${(count / 1_000_000).toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}M`
     : count >= 1000
       ? `${(count / 1000).toFixed(1).replace(/\.0$/, "")}k`
       : String(count);
-export const isThinkingModel = (model: string, format = "auto") =>
-  format === "thinking" || (format === "auto" && /mimo/i.test(model));
 
 export default function ModelPicker({
   model,
@@ -36,11 +29,17 @@ export default function ModelPicker({
   const [freeOnly, setFreeOnly] = useState(
     localStorage.getItem("relay.freeModels") !== "false",
   );
-  async function load() {
+  async function load(refresh = false) {
     setLoading(true);
     setError("");
     try {
-      setModels((await api<{ models: Model[] }>("/api/models")).models);
+      setModels(
+        (
+          await api<{ models: Model[] }>(
+            `/api/models${refresh ? "?refresh=1" : ""}`,
+          )
+        ).models,
+      );
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -127,7 +126,7 @@ export default function ModelPicker({
           <button
             type="button"
             className="text-button"
-            onClick={load}
+            onClick={() => load(true)}
             disabled={loading}
           >
             {loading ? <LoaderCircle size={14} className="spin" /> : "Refresh"}

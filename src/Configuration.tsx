@@ -8,7 +8,8 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type { AppState, CustomTool, Settings } from "../shared/types";
-import ModelPicker, { isThinkingModel } from "./ModelPicker";
+import ModelPicker from "./ModelPicker";
+import { reasoningOptions } from "../shared/capabilities";
 import { DEFAULT_PROMPT } from "../shared/defaults";
 import { api, json, type Action, type Page, type Pairing } from "./ui";
 type Props = {
@@ -49,6 +50,8 @@ export default function Configuration({
   copy,
   notice,
 }: Props) {
+  const info = state.modelInfo?.id === draft.model ? state.modelInfo : null;
+  const reasoningChoices = reasoningOptions(draft, info);
   const [showKey, setShowKey] = useState(false);
   const [toolSearch, setToolSearch] = useState("");
   const tabs: [Page, string][] = [
@@ -153,10 +156,9 @@ export default function Configuration({
                   <span>Model</span>
                   <ModelPicker
                     model={draft.model}
-                    onSelect={(model, context) => {
+                    onSelect={(model) => {
                       update("model", model);
-                      if (context && context > draft.maxOutputTokens + 2048)
-                        update("contextWindow", context);
+                      update("reasoningEffort", "default");
                     }}
                   />
                 </div>
@@ -202,6 +204,73 @@ export default function Configuration({
                   </div>
                 </div>
               </div>
+              {info && (
+                <details className="model-metadata">
+                  <summary>Endpoint capabilities</summary>
+                  <dl>
+                    <dt>Context</dt>
+                    <dd>
+                      {info.contextWindow?.toLocaleString() || "Not advertised"}
+                    </dd>
+                    <dt>Maximum output</dt>
+                    <dd>
+                      {info.maxOutputTokens?.toLocaleString() ||
+                        "Not advertised"}
+                    </dd>
+                    <dt>Tool calling</dt>
+                    <dd>
+                      {info.supportsTools == null
+                        ? "Not advertised"
+                        : info.supportsTools
+                          ? "Supported"
+                          : "Unsupported"}
+                    </dd>
+                    <dt>Vision</dt>
+                    <dd>
+                      {info.supportsVision == null
+                        ? "Not advertised"
+                        : info.supportsVision
+                          ? "Supported"
+                          : "Unsupported"}
+                    </dd>
+                    <dt>Reasoning API</dt>
+                    <dd>
+                      {info.reasoningFormat ||
+                        "Not advertised (use default or explicit override)"}
+                    </dd>
+                    {info.workingInputBudget && (
+                      <>
+                        <dt>Learned input budget</dt>
+                        <dd>{info.workingInputBudget.toLocaleString()}</dd>
+                      </>
+                    )}
+                    {info.workingMaxImages != null && (
+                      <>
+                        <dt>Learned screenshot budget</dt>
+                        <dd>{info.workingMaxImages}</dd>
+                      </>
+                    )}
+                  </dl>
+                  {(info.workingInputBudget ||
+                    info.workingMaxImages != null) && (
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() =>
+                        action("reset-model-profile", async () => {
+                          await api("/api/model-profile/reset", {
+                            method: "POST",
+                          });
+                          notice("Learned limits reset");
+                        })
+                      }
+                    >
+                      Reset learned limits
+                    </button>
+                  )}
+                  <pre>{json(info.metadata)}</pre>
+                </details>
+              )}
               <button
                 className="button secondary"
                 disabled={!!pending || !draft.model || !draft.baseUrl}
@@ -235,11 +304,29 @@ export default function Configuration({
               <div className="form-grid">
                 <label className="field">
                   <span>Context window (tokens)</span>
+                  <select
+                    aria-label="Context source"
+                    value={draft.contextMode}
+                    onChange={(e) =>
+                      update(
+                        "contextMode",
+                        e.target.value as Settings["contextMode"],
+                      )
+                    }
+                  >
+                    <option value="auto">From endpoint metadata</option>
+                    <option value="manual">Manual override</option>
+                  </select>
                   <input
                     type="number"
+                    disabled={draft.contextMode === "auto"}
                     min="4096"
                     max="4000000"
-                    value={draft.contextWindow}
+                    value={
+                      draft.contextMode === "auto"
+                        ? info?.contextWindow || draft.contextWindow
+                        : draft.contextWindow
+                    }
                     onChange={(e) =>
                       update("contextWindow", Number(e.target.value))
                     }
@@ -268,17 +355,11 @@ export default function Configuration({
                       )
                     }
                   >
-                    <option value="default">Provider default</option>
-                    <option value="none">Off</option>
-                    {isThinkingModel(draft.model, draft.reasoningFormat) ? (
-                      <option value="high">On</option>
-                    ) : (
-                      <>
-                        <option value="low">Low</option>
-                        <option value="medium">Medium</option>
-                        <option value="high">High</option>
-                      </>
-                    )}
+                    {reasoningChoices.map((option) => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label className="field">
@@ -292,7 +373,7 @@ export default function Configuration({
                       )
                     }
                   >
-                    <option value="auto">Auto (MiMo: on/off)</option>
+                    <option value="auto">From endpoint metadata</option>
                     <option value="reasoning_effort">reasoning_effort</option>
                     <option value="thinking">thinking.type (on/off)</option>
                   </select>

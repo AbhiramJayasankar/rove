@@ -112,6 +112,13 @@ export default function App() {
             contextWindow: settings.settings.contextWindow,
           }));
         });
+        source.addEventListener("model_info", (event) =>
+          setState((old) =>
+            old
+              ? { ...old, modelInfo: JSON.parse((event as MessageEvent).data) }
+              : old,
+          ),
+        );
         source.addEventListener("run_status", (event) => {
           const update = JSON.parse((event as MessageEvent).data);
           setState((old) =>
@@ -173,6 +180,21 @@ export default function App() {
       source?.close();
     };
   }, []);
+  useEffect(() => {
+    if (!state?.settings.baseUrl || !state.settings.model) return;
+    let cancelled = false;
+    api<{ modelInfo: AppState["modelInfo"] }>("/api/models")
+      .then((result) => {
+        if (!cancelled)
+          setState((old) =>
+            old ? { ...old, modelInfo: result.modelInfo } : old,
+          );
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [state?.settings.baseUrl, state?.settings.model]);
   useEffect(() => {
     if (page === "connection")
       api<Pairing>("/api/pairing")
