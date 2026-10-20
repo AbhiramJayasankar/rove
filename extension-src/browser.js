@@ -1,7 +1,6 @@
 /* Browser-only privileged controller. No endpoint keys, transport, or UI state. */
 const attached = new Map();
 const starterTabs = new Set();
-let activeTabId;
 let notifier = () => {};
 function errorMessage(error) { return error instanceof Error ? error.message : String(error); }
 function notice(event, data) {
@@ -77,11 +76,6 @@ async function ensureTab(tabId) {
   let tab;
   if (tabId !== undefined && tabId !== null)
     tab = await chrome.tabs.get(Number(tabId));
-  else if (activeTabId !== undefined) {
-    try {
-      tab = await chrome.tabs.get(activeTabId);
-    } catch {}
-  }
   if (!tab || !canControlTab(tab)) {
     if (tabId !== undefined && tabId !== null)
       throw new Error(
@@ -96,7 +90,6 @@ async function ensureTab(tabId) {
     throw new Error(
       "No controllable tab. Open an ordinary website or use browser_navigate with newTab:true.",
     );
-  activeTabId = tab.id;
   return tab;
 }
 function target(tabId, sessionId) {
@@ -788,7 +781,7 @@ async function pressKey(tabId, key, sessionId) {
     sessionId,
   );
 }
-export async function perform(action, args = {}) {
+export async function perform(action, args = {}, claimTab = (_tabId) => {}, requireTab = false) {
   if (action === "browser_tabs") return listTabs();
   if (action === "browser_downloads") {
     if (args.action === "cancel") {
@@ -844,10 +837,12 @@ export async function perform(action, args = {}) {
         "Navigation requires an http, https, or file URL outside the Rove app and Chrome Web Store.",
       );
     let tab;
-    if (args.newTab || (args.tabId === undefined && activeTabId === undefined))
+    if (requireTab && !args.newTab && args.tabId == null)
+      throw new Error('Agent browser actions require an explicit tabId or newTab:true.');
+    if (args.newTab)
       tab = await chrome.tabs.create({ url: "about:blank" });
     else tab = await ensureTab(args.tabId);
-    activeTabId = tab.id;
+    claimTab(tab.id);
     // Attach before navigating so on-load dialogs are observable, including
     // when the destination is the first page in a newly created tab.
     await attach(tab.id, true);
@@ -857,8 +852,11 @@ export async function perform(action, args = {}) {
     await waitForLoad(tab.id);
     return snapshot(tab.id);
   }
+  if (requireTab && args.tabId == null)
+    throw new Error('Agent browser actions require an explicit tabId.');
   const tab = await ensureTab(args.tabId),
     tabId = tab.id;
+  claimTab(tabId);
   await attach(tabId, true);
   switch (action) {
     case "browser_snapshot":
@@ -1167,16 +1165,23 @@ export async function detachAll() {
   for (const [tabId, state] of [...attached]) await detachSession(tabId, state);
 }
 
+/** A terminal task must leave a visible modal available for manual dismissal. */
+export async function releaseTab(tabId) {
+  if (attached.get(tabId)?.dialog) return false;
+  await detachSession(tabId);
+  return true;
+}
+
 /** Attach before model I/O, keeping the MV3 service worker alive for the run.
  * An omitted target may create a blank starter tab if no ordinary tab exists.
- * The caller owns serial execution and must call detachAll when the run ends.
+ * The caller owns serial execution, tab leases and release after terminal persistence.
  */
-export async function prepareRun(tabId) {
+export async function prepareRun(tabId, claimTab = (_tabId) => {}) {
   let tab;
   if (tabId === null) {
     tab = await chrome.tabs.create({url:'about:blank'});
     starterTabs.add(tab.id);
-    activeTabId=tab.id;
+    claimTab(tab.id);
     await attach(tab.id, true, true);
     return {tabId:tab.id,url:tab.url||'',title:tab.title||''};
   }
@@ -1185,8 +1190,8 @@ export async function prepareRun(tabId) {
     if(tabId !== undefined && tabId !== null)throw error;
     tab = await chrome.tabs.create({url:'about:blank'});
     starterTabs.add(tab.id);
-    activeTabId=tab.id;
   }
+  claimTab(tab.id);
   // Background/frozen renderers can accept debugger.attach but never answer
   // Page.enable. Activate only at explicit task admission, before any action.
   await chrome.tabs.update(tab.id, {active:true});
@@ -1199,6 +1204,6 @@ function broadcastTabs() {
   tabsTimer=setTimeout(()=>listTabs().then(tabs=>notice('tabs',tabs)).catch(error=>notice('browser_notice',{event:'error',message:errorMessage(error)})),150);
 }
 chrome.tabs.onCreated.addListener(broadcastTabs);
-chrome.tabs.onRemoved.addListener(tabId=>{starterTabs.delete(tabId);if(activeTabId===tabId)activeTabId=undefined;broadcastTabs();});
+chrome.tabs.onRemoved.addListener(tabId=>{starterTabs.delete(tabId);broadcastTabs();});
 chrome.tabs.onActivated.addListener(broadcastTabs);
 chrome.tabs.onUpdated.addListener((id,info)=>{if(info.url || info.status==='complete' || info.title)broadcastTabs();});

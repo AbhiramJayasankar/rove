@@ -65,6 +65,34 @@ afterEach(() => {
 });
 
 describe("debugger lifecycle", () => {
+  it("checks a tab lease before debugger attachment or browser dispatch", async () => {
+    const claim = vi.fn(() => { throw new Error("Tab 7 is owned by another task."); });
+    await expect(browser.prepareRun(7, claim)).rejects.toThrow("owned by another task");
+    await expect(browser.perform("browser_click", { tabId: 7, x: 1, y: 1 }, claim, true)).rejects.toThrow("owned by another task");
+    expect(attach).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(chrome.tabs.update).not.toHaveBeenCalled();
+  });
+  it("requires a tab on the agent path even after another task prepared one", async () => {
+    await browser.prepareRun(7);
+    send.mockClear();
+    await expect(browser.perform("browser_snapshot", {}, () => {}, true)).rejects.toThrow("explicit tabId");
+    await expect(browser.perform("browser_navigate", { url: "https://example.com" }, () => {}, true)).rejects.toThrow("explicit tabId");
+    expect(send).not.toHaveBeenCalled();
+  });
+  it("releases one tab while preserving another tab and an open dialog", async () => {
+    vi.mocked(chrome.tabs.get).mockImplementation(async id => ({ id, url: "https://example.com" }) as chrome.tabs.Tab);
+    await browser.prepareRun(7);
+    await browser.prepareRun(8);
+    events({ tabId: 8 }, "Page.javascriptDialogOpening", { type: "alert", message: "Keep visible" });
+    await expect(browser.releaseTab(7)).resolves.toBe(true);
+    expect(detach).toHaveBeenCalledExactlyOnceWith({ tabId: 7 });
+    await expect(browser.releaseTab(8)).resolves.toBe(false);
+    expect(detach).toHaveBeenCalledTimes(1);
+    events({ tabId: 8 }, "Page.javascriptDialogClosed", {});
+    await expect(browser.releaseTab(8)).resolves.toBe(true);
+    expect(detach).toHaveBeenLastCalledWith({ tabId: 8 });
+  });
   it("wakes the selected tab before renderer initialization", async () => {
     let awake = false;
     vi.mocked(chrome.tabs.update).mockImplementation(async () => {

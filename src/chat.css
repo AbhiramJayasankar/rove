@@ -674,3 +674,46 @@
   flex-shrink: 0;
   color: var(--accent);
 }
+
+/* Running tasks strip */
+.app-shell .active-tasks {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+  padding: 0 16px 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.app-shell .active-task {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 12px;
+  font-weight: 500;
+  transition: background 140ms;
+}
+.app-shell .active-task:hover,
+.app-shell .active-task.selected {
+  background: var(--accent-soft);
+}
+.app-shell .active-task-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.app-shell .active-task em {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--warning);
+  color: var(--canvas);
+  font-size: 10.5px;
+  font-style: normal;
+}
+.app-shell .active-task .status-dot.running {
+  animation: voice-pulse 1.4s ease-in-out infinite;
+}

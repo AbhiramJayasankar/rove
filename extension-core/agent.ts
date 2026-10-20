@@ -26,6 +26,8 @@ type Active = {
   controller: AbortController;
   pending?: Pending;
   selectedTab?: number;
+  ownedTabs: Set<number>;
+  settings: Settings;
   apiKey: string;
   approvalMode: Settings["approvalMode"];
   message: string;
@@ -33,6 +35,7 @@ type Active = {
 };
 type Options = {
   transport: BrowserTransport;
+  transportForRun?: (runId: string) => BrowserTransport;
   getSettings: () => Settings;
   getApiKey: () => string;
   emit: (runId: string, event: RunEvent) => void;
@@ -235,8 +238,11 @@ function withoutImage(result: any): any {
   );
 }
 
+export const MAX_CONCURRENT_RUNS = 3;
+
 export class AgentEngine {
-  private active?: Active;
+  private runs = new Map<string, Active>();
+  private defaultApprovalMode?: Settings["approvalMode"];
   constructor(private readonly options: Options) {}
   private async checkpoint(active: Active): Promise<void> {
     active.controller.signal.throwIfAborted();
@@ -250,15 +256,24 @@ export class AgentEngine {
     active.controller.signal.throwIfAborted();
   }
   get activeRunId(): string | null {
-    return this.active?.run.id ?? null;
+    return this.activeRunIds.at(-1) ?? null;
+  }
+  get activeRunIds(): string[] {
+    return [...this.runs.keys()];
+  }
+  isActive(id: string): boolean {
+    return this.runs.has(id);
+  }
+  selectedTabFor(id: string): number | undefined {
+    return this.runs.get(id)?.selectedTab;
   }
   /** The tab the running task is currently working in, if any. */
   get selectedTabId(): number | undefined {
-    return this.active?.selectedTab;
+    return this.activeRunId ? this.selectedTabFor(this.activeRunId) : undefined;
   }
 
-  start(prompt: string, tabId?: number): RunRecord {
-    return this.begin(prompt, tabId);
+  start(prompt: string, tabId?: number, runId?: string): RunRecord {
+    return this.begin(prompt, tabId, undefined, false, runId);
   }
   restart(run: RunRecord, prompt: string, tabId?: number): RunRecord {
     return this.begin(prompt, tabId, run, true);
@@ -275,11 +290,12 @@ export class AgentEngine {
     tabId?: number,
     previous?: RunRecord,
     replaceFirst = false,
+    runId?: string,
   ): RunRecord {
-    if (this.active)
-      throw new Error(
-        "A run is already active. Stop it before starting another.",
-      );
+    if (this.runs.has(previous?.id ?? runId ?? ""))
+      throw new Error("Stop the current response before continuing this chat.");
+    if (this.runs.size >= MAX_CONCURRENT_RUNS)
+      throw new Error("Up to 3 tasks can run at once.");
     if (!prompt.trim() || prompt.length > 50000)
       throw new Error("Enter a task of at most 50,000 characters.");
     if (tabId !== undefined && (!Number.isInteger(tabId) || tabId < 1))
@@ -288,23 +304,27 @@ export class AgentEngine {
     const run: RunRecord = previous
       ? structuredClone(previous)
       : {
-          id: crypto.randomUUID(),
+          id: runId ?? crypto.randomUUID(),
           prompt: prompt.trim(),
           status: "running",
           createdAt: now,
           updatedAt: now,
           events: [],
         };
+    const settings = structuredClone(this.options.getSettings());
+    settings.approvalMode = this.defaultApprovalMode ?? settings.approvalMode;
     const active: Active = {
       run,
       controller: new AbortController(),
       selectedTab: tabId,
+      ownedTabs: new Set(tabId === undefined ? [] : [tabId]),
+      settings,
       apiKey: this.options.getApiKey(),
-      approvalMode: this.options.getSettings().approvalMode,
+      approvalMode: settings.approvalMode,
       message: prompt.trim(),
       history: previous && !replaceFirst ? conversationHistory(previous) : [],
     };
-    this.active = active;
+    this.runs.set(run.id, active);
     if (previous && !replaceFirst)
       this.event(active, "user_message", { message: prompt.trim() });
     this.setStatus(active, "running");
@@ -321,9 +341,12 @@ export class AgentEngine {
     this.finish(active, "stopped", message);
   }
 
-  setApprovalMode(mode: Settings["approvalMode"]): void {
-    const active = this.active;
-    if (!active) return;
+  setApprovalMode(mode: Settings["approvalMode"], runId?: string): void {
+    if (runId === undefined) {
+      this.defaultApprovalMode = mode;
+      return;
+    }
+    const active = this.requireActive(runId);
     active.approvalMode = mode;
     this.event(active, "approval_mode_changed", { mode });
     if (mode === "never" && active.pending?.kind === "approval" && !active.pending.locked) {
@@ -373,10 +396,22 @@ export class AgentEngine {
     return tab ? hostOf(tab.url) : undefined;
   }
 
+  /** Resolve defaults before recording intent or showing an approval. */
+  private toolArguments(active: Active, name: string, args: Record<string, any>) {
+    const actual = { ...args };
+    if (["browser_tabs", "browser_wait", "browser_downloads", "browser_save_file", "ask_user"].includes(name))
+      return actual;
+    if (name === "browser_navigate" && !active.selectedTab && actual.tabId == null)
+      actual.newTab = true;
+    if (!(name === "browser_navigate" && actual.newTab) && actual.tabId == null && active.selectedTab)
+      actual.tabId = active.selectedTab;
+    return actual;
+  }
+
   private requireActive(id: string): Active {
-    if (!this.active || this.active.run.id !== id)
-      throw new Error("Run is not active.");
-    return this.active;
+    const active = this.runs.get(id);
+    if (!active) throw new Error("Run is not active.");
+    return active;
   }
   private event(
     active: Active,
@@ -410,9 +445,9 @@ export class AgentEngine {
     status: RunRecord["status"],
     message?: string,
   ): void {
-    if (this.active !== active) return;
+    if (this.runs.get(active.run.id) !== active) return;
+    this.runs.delete(active.run.id);
     this.setStatus(active, status, message);
-    this.active = undefined;
   }
   private waitForInput(
     active: Active,
@@ -449,7 +484,7 @@ export class AgentEngine {
 
   private async process(active: Active): Promise<void> {
     const signal = active.controller.signal;
-    let settings = structuredClone(this.options.getSettings());
+    let settings = structuredClone(active.settings);
     const configuredSettings = structuredClone(settings);
     let modelInfo: ModelInfo | null = null;
     const key = active.apiKey;
@@ -466,22 +501,17 @@ export class AgentEngine {
         content: `${active.message}\n\nBrowser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. Use it by default.` : "New Tab mode. No existing tab is selected and no tab has been created. If this task needs a webpage, call browser_navigate with newTab:true and the destination URL. Do not reuse an existing tab by default. For conversational messages, just answer without opening a tab."}${active.history.length ? " This is a follow-up in the same chat. Earlier actions are historical; do not replay them. Refresh the page snapshot before using element refs." : ""}`,
       },
     ];
+    const runTransport = this.options.transportForRun?.(active.run.id) ?? this.options.transport;
     const transport: BrowserTransport = {
-      status: () => this.options.transport.status(),
+      status: () => runTransport.status(),
       execute: async (action, args, actionSignal) => {
         actionSignal?.throwIfAborted();
-        const actual = { ...args };
-        if (action === "browser_navigate" && !active.selectedTab && actual.tabId == null)
-          actual.newTab = true;
-        if (
-          action !== "browser_tabs" &&
-          action !== "browser_wait" &&
-          actual.tabId == null &&
-          active.selectedTab
-        )
-          actual.tabId = active.selectedTab;
+        const actual = this.toolArguments(active, action, args);
+        if (!["browser_tabs", "browser_wait", "browser_downloads", "browser_save_file"].includes(action) &&
+            !(action === "browser_navigate" && actual.newTab) && actual.tabId == null)
+          throw new Error("No tab selected for this task. Navigate with newTab:true or specify tabId.");
         await this.checkpoint(active);
-        const result = await this.options.transport.execute(
+        const result = await runTransport.execute(
           action,
           actual,
           actionSignal,
@@ -490,10 +520,12 @@ export class AgentEngine {
         if (Number.isInteger(result?.tabId)) active.selectedTab = result.tabId;
         else if (action === "browser_navigate" && Number.isInteger(result?.id))
           active.selectedTab = result.id;
+        if (active.selectedTab !== undefined) active.ownedTabs.add(active.selectedTab);
         return result;
       },
     };
     try {
+      signal.throwIfAborted();
       if (this.options.resolveModel) {
         try {
           modelInfo = await this.options.resolveModel(settings, key, signal);
@@ -504,6 +536,7 @@ export class AgentEngine {
           });
         }
       }
+      signal.throwIfAborted();
       settings = effectiveSettings(settings, modelInfo);
       if (!settings.vision)
         for (const message of messages)
@@ -777,6 +810,7 @@ export class AgentEngine {
             const definition = tools.find((t) => t.name === name);
             if (!definition)
               throw new Error(`Tool unavailable or disabled: ${name}`);
+            args = this.toolArguments(active, name, args);
             this.event(active, "tool_call", {
               callId: call.id,
               name,
@@ -969,7 +1003,7 @@ export class AgentEngine {
       });
       this.finish(active, "failed", "Step limit reached.");
     } catch (error) {
-      if (signal.aborted || this.active !== active) return;
+      if (signal.aborted || this.runs.get(active.run.id) !== active) return;
       const message = scrub(
         error instanceof Error ? error.message : String(error),
       );

@@ -125,7 +125,7 @@ describe("agent execution loop", () => {
       const ctx = setup({ approvalMode: "never", siteRules: [{ pattern: "example.org", action: "ask" }] });
       const run = ctx.engine.start("Open the news.");
       await until(() => run.status === "awaiting_approval");
-      ctx.engine.setApprovalMode("never");
+      ctx.engine.setApprovalMode("never", run.id);
       expect(run.status).toBe("awaiting_approval");
       const required = run.events.findLast((event) => event.type === "approval_required")!;
       expect(required.data).toMatchObject({ site: "news.example.org", reason: "site rule" });
@@ -285,7 +285,7 @@ describe("agent execution loop", () => {
         ? { tabId: 7, dataUrl: "data:image/png;base64," + "A".repeat(100000) }
         : { text: "Page data", elements: [{ ref: "button", name: "Button" }] },
     );
-    const run = ctx.engine.start("Inspect two pages.");
+    const run = ctx.engine.start("Inspect two pages.", 7);
     await until(() => !ctx.engine.activeRunId);
     expect(run.status).toBe("completed");
     const retry = JSON.parse(fetchMock.mock.calls[3][1].body);
@@ -358,7 +358,7 @@ describe("agent execution loop", () => {
     const run = ctx.engine.start("Fill the form.", 7);
     await until(() => ctx.events.some((e) => e.type === "approval_required"));
     expect(ctx.execute).not.toHaveBeenCalled();
-    ctx.engine.setApprovalMode("never");
+    ctx.engine.setApprovalMode("never", run.id);
     await until(() => !ctx.engine.activeRunId);
     expect(run.status).toBe("completed");
     expect(ctx.execute.mock.calls.map((c) => c[0])).toEqual([
@@ -389,7 +389,7 @@ describe("agent execution loop", () => {
     const ctx = setup({ approvalMode: "always" });
     const run = ctx.engine.start("Choose an option.");
     await until(() => ctx.events.some((e) => e.type === "user_question"));
-    ctx.engine.setApprovalMode("never");
+    ctx.engine.setApprovalMode("never", run.id);
     expect(run.status).toBe("awaiting_approval");
     expect(
       ctx.events.filter((e) => e.type === "approval_decision"),
@@ -737,7 +737,6 @@ describe("agent execution loop", () => {
     );
     const ctx = setup({ maxSteps: 2 });
     const run = ctx.engine.start("Navigate.");
-    expect(() => ctx.engine.start("Another task")).toThrow("already active");
     await until(() => !ctx.engine.activeRunId);
     expect(ctx.execute).not.toHaveBeenCalled();
     expect(
@@ -745,6 +744,175 @@ describe("agent execution loop", () => {
     ).toContain("HTTP(S)");
     expect(run.status).toBe("failed");
     expect(ctx.events.at(-1)?.data.message).toBe("Step limit reached.");
+  });
+});
+
+describe("concurrent chats", () => {
+  it("reports a tab lease collision as a tool error and lets both runs continue", async () => {
+    const leases = new Map([[7, "owner"]]);
+    const dispatch = vi.fn();
+    const fetchMock = vi.fn((_url, init) => {
+      const sent = JSON.parse(init.body);
+      const isOwner = sent.messages[1].content.startsWith("owner");
+      return Promise.resolve(isOwner
+        ? response(null, [call("question", "ask_user", { question: "Wait here?" })])
+        : sent.messages.some((message: any) => message.role === "tool")
+          ? response("I will use another tab.")
+          : response(null, [call("snapshot", "browser_snapshot", { tabId: 7 })]));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const ctx = setup({}, "", {
+      transportForRun: runId => ({
+        status: () => ({ connected: true, tabs: [] }),
+        execute: async (action, args) => {
+          if (leases.has(args.tabId) && leases.get(args.tabId) !== runId)
+            throw new Error(`Tab ${args.tabId} is owned by another task. Choose an unleased tab or navigate with newTab:true.`);
+          dispatch(action, args);
+          return {};
+        },
+      }),
+    });
+    const owner = ctx.engine.start("owner", 7, "owner");
+    const other = ctx.engine.start("other", 8);
+    await until(() => !ctx.engine.isActive(other.id));
+    expect(other.status).toBe("completed");
+    expect(other.events.find(event => event.type === "tool_result")?.data.error).toContain("owned by another task");
+    expect(dispatch).not.toHaveBeenCalled();
+    const retry = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body))
+      .find(body => body.messages.some((message: any) => message.role === "tool"));
+    expect(JSON.parse(retry.messages.find((message: any) => message.role === "tool").content).error).toContain("owned by another task");
+    expect(ctx.engine.isActive(owner.id)).toBe(true);
+    ctx.engine.stop(owner.id);
+  });
+
+  it("does not emit old configuration after a stopped run's metadata resolves", async () => {
+    let resolve!: (value: null) => void;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const ctx = setup({}, "", { resolveModel: () => new Promise(done => { resolve = done; }) });
+    const run = ctx.engine.start("first", 7);
+    await until(() => !!resolve);
+    ctx.engine.stop(run.id);
+    const count = run.events.length;
+    resolve(null);
+    await new Promise(done => setTimeout(done, 0));
+    expect(run.events).toHaveLength(count);
+    expect(run.events.at(-1)?.data.status).toBe("stopped");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("finishes runs independently and exposes the newest active run", async () => {
+    const replies = new Map<string, (value: Response) => void>();
+    vi.stubGlobal("fetch", vi.fn((_url, init) => new Promise<Response>((resolve) => {
+      const prompt = JSON.parse(init.body).messages.at(-1).content.split("\n")[0];
+      replies.set(prompt, resolve);
+    })));
+    const ctx = setup();
+    const first = ctx.engine.start("first", 7);
+    const second = ctx.engine.start("second", 8);
+    expect(ctx.engine.activeRunIds).toEqual([first.id, second.id]);
+    expect(ctx.engine.activeRunId).toBe(second.id);
+    expect(ctx.engine.selectedTabId).toBe(8);
+    expect(ctx.engine.selectedTabFor(first.id)).toBe(7);
+    await until(() => replies.size === 2);
+    replies.get("second")!(response("Second done"));
+    await until(() => !ctx.engine.isActive(second.id));
+    expect(second.status).toBe("completed");
+    expect(first.status).toBe("running");
+    expect(ctx.engine.activeRunIds).toEqual([first.id]);
+    expect(ctx.engine.activeRunId).toBe(first.id);
+    expect(ctx.engine.selectedTabId).toBe(7);
+    replies.get("first")!(response("First done"));
+    await until(() => !ctx.engine.activeRunIds.length);
+    expect(first.status).toBe("completed");
+    expect(ctx.engine.activeRunId).toBeNull();
+  });
+
+  it("rejects a fourth run and rejects the same chat without disturbing other runs", async () => {
+    const ctx = setup();
+    const first = ctx.engine.start("first");
+    const second = ctx.engine.start("second");
+    expect(() => ctx.engine.continue(first, "again")).toThrow("current response");
+    // Even a stale terminal record must not bypass the identity check in begin().
+    expect(() => ctx.engine.restart({ ...first, status: "completed" }, "edit")).toThrow("current response");
+    const third = ctx.engine.start("third");
+    expect(() => ctx.engine.start("fourth")).toThrow("Up to 3 tasks can run at once.");
+    for (const run of [first, second, third]) ctx.engine.stop(run.id);
+    expect(ctx.engine.activeRunIds).toEqual([]);
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+
+  it("changes one run's approval mode and changes defaults only for new runs", async () => {
+    vi.stubGlobal("fetch", vi.fn((_url, init) => {
+      const sent = JSON.parse(init.body);
+      return Promise.resolve(sent.messages.some((m: any) => m.role === "tool")
+        ? response("Done") : response(null, [call("click", "browser_click", { x: 10, y: 10 })]));
+    }));
+    const ctx = setup({ approvalMode: "always" });
+    const first = ctx.engine.start("first", 7);
+    const second = ctx.engine.start("second", 8);
+    await until(() => [first, second].every(run => run.status === "awaiting_approval"));
+    expect(first.events.find(event => event.type === "approval_required")?.data.args).toEqual({ tabId: 7, x: 10, y: 10 });
+    expect(second.events.find(event => event.type === "approval_required")?.data.args).toEqual({ tabId: 8, x: 10, y: 10 });
+    ctx.engine.setApprovalMode("never");
+    expect(first.status).toBe("awaiting_approval");
+    expect(second.status).toBe("awaiting_approval");
+    const third = ctx.engine.start("third", 9);
+    await until(() => !ctx.engine.isActive(third.id));
+    expect(third.events.some(event => event.type === "approval_required")).toBe(false);
+    ctx.engine.setApprovalMode("never", first.id);
+    await until(() => !ctx.engine.isActive(first.id));
+    expect(second.status).toBe("awaiting_approval");
+    expect(second.events.some(event => event.type === "approval_decision")).toBe(false);
+    const pending = second.events.findLast(event => event.type === "approval_required")!;
+    expect(() => ctx.engine.approve(second.id, first.events.find(event => event.type === "approval_required")!.data.id, true)).toThrow();
+    ctx.engine.approve(second.id, pending.data.id, false);
+    await until(() => !ctx.engine.activeRunIds.length);
+  });
+
+  it("rejects stale approval IDs after stopping and continuing the same chat", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => response(null, [call("click", "browser_click", { x: 10, y: 10 })])));
+    const ctx = setup({ approvalMode: "always" });
+    const first = ctx.engine.start("first", 7);
+    await until(() => first.status === "awaiting_approval");
+    const stale = first.events.findLast(event => event.type === "approval_required")!.data.id;
+    ctx.engine.stop(first.id);
+    expect(() => ctx.engine.approve(first.id, stale, true)).toThrow("not active");
+    const next = ctx.engine.continue(first, "continue", 7);
+    await until(() => next.status === "awaiting_approval");
+    expect(() => ctx.engine.approve(next.id, stale, true)).toThrow();
+    expect(next.status).toBe("awaiting_approval");
+    expect(ctx.execute).not.toHaveBeenCalled();
+    ctx.engine.stop(next.id);
+  });
+
+  it("snapshots settings synchronously in begin, separately for each run", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => response("Done"));
+    vi.stubGlobal("fetch", fetchMock);
+    const metadata: Settings[] = [];
+    let key = "first-secret";
+    const ctx = setup({ memory: "original note", reasoningEffort: "low" }, "", {
+      getApiKey: () => key,
+      resolveModel: async settings => { metadata.push(structuredClone(settings)); return null; },
+    });
+    const first = ctx.engine.start("first");
+    Object.assign(ctx.settings, { model: "second-model", memory: "new note", reasoningEffort: "high", baseUrl: "https://second.example/v1" });
+    key = "second-secret";
+    const second = ctx.engine.start("second");
+    key = "later-secret";
+    ctx.settings.memory = "later edit";
+    await until(() => !ctx.engine.activeRunIds.length);
+    expect(metadata.map(settings => [settings.model, settings.memory, settings.reasoningEffort])).toEqual([
+      ["test", "original note", "low"], ["second-model", "new note", "high"],
+    ]);
+    expect(first.events.find(event => event.type === "run_configuration")!.data.settings.memory).toBe("original note");
+    expect(second.events.find(event => event.type === "run_configuration")!.data.settings.memory).toBe("new note");
+    const requests = fetchMock.mock.calls.map(([, init]) => JSON.parse(init.body));
+    expect(requests.map(request => request.model)).toEqual(["test", "second-model"]);
+    expect(requests[0].messages[0].content).toContain("original note");
+    expect(requests[1].messages[0].content).toContain("new note");
+    expect(fetchMock.mock.calls.map(([, init]) => init.headers.Authorization)).toEqual(["Bearer first-secret", "Bearer second-secret"]);
+    for (const run of [first, second]) expect(JSON.stringify(run.events)).not.toMatch(/first-secret|second-secret|later-secret/);
   });
 });
 

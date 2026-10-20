@@ -305,7 +305,7 @@ test("approvals and questions work inside the extension", async () => {
   await expect
     .poll(async () => (await api("/api/runs/" + run.id)).status)
     .toBe("awaiting_approval");
-  await api("/api/approval-mode", "PUT", { mode: "never" });
+  await api("/api/approval-mode", "PUT", { mode: "never", runId: run.id });
   await finished(run.id);
   run = await api("/api/runs", "POST", {
     prompt: "Ask fixture",
@@ -390,9 +390,12 @@ test("lost debugger sessions stop the task and a new task reconnects without rep
     id,
   );
   if (!capture.ok) {
-    expect(capture.error).toContain("Chrome disconnected Rove");
-    expect(capture.error).not.toContain("Debugger is not attached");
+    expect(capture.error).toContain("owned by another task");
   }
+  // Manual access cannot probe an active lease. Let its owning run discover the
+  // stale client at the approved dispatch instead; no action may be replayed.
+  if ((await api("/api/runs/" + run.id)).status === "awaiting_approval")
+    await api("/api/approval-mode", "PUT", { mode: "never", runId: run.id });
   await expect
     .poll(async () => (await api("/api/runs/" + run.id)).status)
     .toBe("stopped");

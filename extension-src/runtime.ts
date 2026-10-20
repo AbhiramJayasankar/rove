@@ -1,5 +1,5 @@
 import { Validator } from "@cfworker/json-schema";
-import { AgentEngine } from "../extension-core/agent";
+import { AgentEngine, MAX_CONCURRENT_RUNS } from "../extension-core/agent";
 import { historyBeforeEdit } from "../extension-core/conversation";
 import { ModelCatalogue, effectiveSettings } from "../extension-core/catalogue";
 import { BUILTIN_TOOLS } from "../extension-core/tools";
@@ -19,6 +19,7 @@ import {
   perform,
   listTabs,
   detachAll,
+  releaseTab,
   prepareRun,
   setNotifier,
   hasPendingDialogs,
@@ -31,7 +32,16 @@ const catalogue = new ModelCatalogue();
 const ports = new Set<chrome.runtime.Port>();
 let apiKey = "";
 const API_KEY_STORAGE_KEY = "modelApiKey";
-let starting = false;
+let admissions = 0;
+const admitting = new Set<string>();
+// Leases are deliberately not persisted: restart fails every interrupted run.
+const tabLeases = new Map<number, string>();
+let settingsQueue = Promise.resolve();
+function changeSettings<T>(job: () => Promise<T>): Promise<T> {
+  const result = settingsQueue.then(job);
+  settingsQueue = result.then(() => {}, () => {});
+  return result;
+}
 let tabs: BridgeStatus["tabs"] = [];
 let browserQueue = Promise.resolve();
 let runKeepAlive: ReturnType<typeof setInterval> | undefined;
@@ -53,7 +63,30 @@ function releaseIdleBrowser() {
   return enqueue(async () => {
     await store.flush();
     await catalogue.flush();
-    if (!engine.activeRunId && !starting && !hasPendingDialogs()) await detachAll();
+    await cleanupIdleBrowser();
+  });
+}
+function claimTab(tabId: number, runId?: string) {
+  const owner = tabLeases.get(tabId);
+  if (owner && owner !== runId && (engine.isActive(owner) || admitting.has(owner)))
+    throw new Error(`Tab ${tabId} is owned by another task. Choose an unleased tab or navigate with newTab:true.`);
+  if (runId) tabLeases.set(tabId, runId);
+}
+async function releaseRun(runId: string) {
+  for (const [tabId, owner] of tabLeases) {
+    if (owner === runId && await releaseTab(tabId)) tabLeases.delete(tabId);
+  }
+}
+async function cleanupIdleBrowser() {
+  if (!engine.activeRunIds.length && admissions === 0 && !hasPendingDialogs()) {
+    await detachAll();
+    tabLeases.clear();
+  }
+}
+function tabsFor(runId?: string) {
+  return tabs.map(tab => {
+    const owner = tabLeases.get(tab.id);
+    return { ...tab, busyWithAnotherTask: !!owner && owner !== runId && (engine.isActive(owner) || admitting.has(owner)) };
   });
 }
 function broadcast(type: string, data: unknown) {
@@ -68,20 +101,34 @@ function broadcast(type: string, data: unknown) {
 function redact(message: string) {
   return apiKey ? message.split(apiKey).join("[redacted]") : message;
 }
-const transport: BrowserTransport = {
-  status: () => ({ connected: true, browser: "Chrome", tabs }),
-  execute: (action, args, signal) =>
-    enqueue(async () => {
-      signal?.throwIfAborted();
-      await store.flush();
-      signal?.throwIfAborted();
-      const result = await perform(action, args);
-      signal?.throwIfAborted();
-      return result;
-    }),
-};
+function transportForRun(runId?: string): BrowserTransport {
+  return {
+    status: () => ({ connected: true, browser: "Chrome", tabs: tabsFor(runId) }),
+    execute: (action, args, signal) => {
+      const job = async () => {
+        signal?.throwIfAborted();
+        await store.flush();
+        signal?.throwIfAborted();
+        if (runId && !engine.isActive(runId)) throw new Error("Run is not active.");
+        const result = await perform(action, args, (tabId: number) => {
+          signal?.throwIfAborted();
+          claimTab(tabId, runId);
+        }, !!runId);
+        signal?.throwIfAborted();
+        if (action === "browser_tabs") {
+          tabs = result;
+          return tabsFor(runId);
+        }
+        return result;
+      };
+      return action === "browser_wait" ? job() : enqueue(job);
+    },
+  };
+}
+const transport = transportForRun();
 const engine = new AgentEngine({
   transport,
+  transportForRun,
   getSettings: () => structuredClone(store.settings),
   getApiKey: () => apiKey,
   checkpoint: () => store.flush(),
@@ -94,7 +141,7 @@ const engine = new AgentEngine({
   emit: (runId, event) => {
     broadcast("event", { runId, event });
     if (event.type === "status") {
-      if (["running", "awaiting_approval"].includes(event.data.status)) {
+      if (engine.activeRunIds.length) {
         // New Tab mode has no debugger until the model opens a destination.
         // Keep pending model I/O alive without manufacturing a browser tab.
         runKeepAlive ??= setInterval(() => {
@@ -108,6 +155,8 @@ const engine = new AgentEngine({
         id: runId,
         status: event.data.status,
         updatedAt: event.time,
+        activeRunIds: engine.activeRunIds,
+        activeRunId: engine.activeRunId,
       });
       if (["completed", "failed", "stopped"].includes(event.data.status)) {
         queueMicrotask(() => {
@@ -115,13 +164,14 @@ const engine = new AgentEngine({
             try {
               await store.flush();
               await catalogue.flush();
+              // A follow-up may have begun before this queued cleanup executes.
+              if (!engine.isActive(runId) && !admitting.has(runId)) await releaseRun(runId);
+              await cleanupIdleBrowser();
             } catch (error) {
               broadcast("browser_notice", {
                 event: "error",
                 message: redact(String(error)),
               });
-            } finally {
-              if (!engine.activeRunId && !starting) await detachAll();
             }
           });
         });
@@ -140,25 +190,21 @@ setNotifier((type: string, data: any) => {
     broadcast("bridge", transport.status());
   } else {
     broadcast(type, data);
-    // Stop the task when the user cancels Chrome's debugging banner, or when the tab it is working
-    // in is lost. A different tab it used earlier, or a command timeout, already reports a precise
-    // error to the model on next use; stopping the whole task for those killed long research runs.
-    if (
-      type === "browser_notice" &&
-      data.event === "detached" &&
-      engine.activeRunId &&
-      (data.reason === "canceled_by_user" ||
-        (data.tabId === engine.selectedTabId && data.reason !== "command_timeout"))
-    ) {
-      engine.stop(
-        engine.activeRunId,
+    if (type === "browser_notice" && data.event === "detached") {
+      const owner = tabLeases.get(data.tabId);
+      const stopped = data.reason === "canceled_by_user" ? engine.activeRunIds
+        : ["target_closed", "connection_lost"].includes(data.reason) && owner && engine.isActive(owner) ? [owner] : [];
+      for (const runId of stopped) engine.stop(
+        runId,
         "Chrome disconnected the browser debugger. Check the page, then start a new task to reconnect. No browser action was replayed.",
       );
     }
     if (type === "browser_notice" && data.event === "dialog_closed")
       void enqueue(async () => {
-        if (!engine.activeRunId && !starting && !hasPendingDialogs())
-          await detachAll();
+        await store.flush();
+        for (const owner of new Set(tabLeases.values()))
+          if (!engine.isActive(owner) && !admitting.has(owner)) await releaseRun(owner);
+        await cleanupIdleBrowser();
       });
   }
 });
@@ -182,6 +228,7 @@ const ready = (async () => {
   await providers.init(store.settings, apiKey);
   await catalogue.init();
   await recoverSessions();
+  tabLeases.clear();
   await refreshTabs();
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 })();
@@ -194,6 +241,7 @@ function state(): AppState {
     bridge: transport.status(),
     runs: store.summaries(),
     activeRunId: engine.activeRunId,
+    activeRunIds: engine.activeRunIds,
     tools: BUILTIN_TOOLS,
   };
 }
@@ -210,7 +258,22 @@ function settingsResult() {
     settings: normalizeSettings(store.settings),
     hasApiKey: !!apiKey,
     modelInfo: catalogue.peek(store.settings, apiKey),
+    activeRunIds: engine.activeRunIds,
+    activeRunId: engine.activeRunId,
   };
+}
+function reserveAdmission(runId: string) {
+  if (engine.isActive(runId) || admitting.has(runId))
+    throw new Error("Stop the current response before continuing this chat.");
+  // Connection probes also hold idle cleanup, but do not consume a task slot.
+  if (engine.activeRunIds.length + admitting.size >= MAX_CONCURRENT_RUNS)
+    throw new Error("Up to 3 tasks can run at once.");
+  admitting.add(runId);
+  admissions++;
+}
+function endAdmission(runId: string) {
+  admitting.delete(runId);
+  admissions--;
 }
 async function listProviderModels(refresh: boolean, override?: { settings: Settings; key: string }) {
   const snapshot = [...providers.profiles];
@@ -231,20 +294,24 @@ async function listProviderModels(refresh: boolean, override?: { settings: Setti
   if (results.every(result => result.status === "rejected")) throw new Error(warnings.join(" "));
   return { models, warnings };
 }
-async function route(path: string, method: string, body: any) {
+async function route(path: string, method: string, body: any, settingsLocked = false): Promise<any> {
   const url = new URL(path, "https://rove.invalid");
   path = url.pathname;
+  if (!settingsLocked && ((method === "PUT" && ["/api/settings", "/api/approval-mode", "/api/run-options"].includes(path)) ||
+      (path === "/api/providers" && ["POST", "PUT", "DELETE"].includes(method))))
+    return changeSettings(() => route(path, method, body, true));
   if (method === "GET" && path === "/api/state") return state();
   if (method === "GET" && path === "/api/health")
     return { ok: true, version: "2.0.0", runtime: "chrome-extension" };
-  if (method === "GET" && path === "/api/tabs") return refreshTabs();
+  if (method === "GET" && path === "/api/tabs") {
+    await refreshTabs();
+    return tabsFor();
+  }
   if (method === "GET" && path === "/api/settings") return settingsResult();
   if (method === "PUT" && path === "/api/settings") {
-    if (engine.activeRunId || starting)
-      throw new Error("Stop the active task before changing its settings.");
+    if (engine.activeRunIds.length || admissions)
+      throw new Error("Stop the active tasks before changing settings.");
     if (body.providerId !== undefined && body.providerId !== providers.activeId) throw new Error("Provider changed in another window. Reload settings before saving.");
-    starting = true;
-    try {
     const settings = settingsSchema.parse(body) as Settings;
     const nextKey =
       body.apiKey === undefined
@@ -253,29 +320,30 @@ async function route(path: string, method: string, body: any) {
     await providers.saveCurrent(settings, nextKey, body.providerName === undefined ? undefined : z.string().trim().min(1).max(80).parse(body.providerName));
     store.settings = settings;
     apiKey = nextKey;
+    engine.setApprovalMode(settings.approvalMode);
     const result = settingsResult();
     broadcast("settings", result);
     return result;
-    } finally { starting = false; }
   }
   if (method === "PUT" && path === "/api/approval-mode") {
     const mode = z.enum(["always", "risky", "never"]).parse(body.mode);
-    await store.saveSettings({ ...store.settings, approvalMode: mode });
-    engine.setApprovalMode(mode);
-    const result = settingsResult();
+    const runId = z.string().min(1).optional().parse(body.runId);
+    if (runId !== undefined) engine.setApprovalMode(mode, runId);
+    else {
+      await store.saveSettings({ ...store.settings, approvalMode: mode });
+      engine.setApprovalMode(mode);
+    }
+    const result = { ...settingsResult(), ...(runId ? { runId, approvalMode: mode } : {}) };
     broadcast("settings", result);
     return result;
   }
   if (path === "/api/providers" && ["POST", "PUT", "DELETE"].includes(method)) {
-    if (engine.activeRunId || starting) throw new Error("Stop the active task before changing providers.");
-    starting = true;
-    try {
+    if (engine.activeRunIds.length || admissions) throw new Error("Stop the active tasks before changing settings.");
       const result = method === "POST" ? await providers.add(body, store.settings)
         : method === "DELETE" ? await providers.remove(z.string().parse(body.id), store.settings)
         : await providers.select(z.string().parse(body.id), store.settings, body.model === undefined ? undefined : z.string().max(200).parse(body.model));
       store.settings = result.settings; apiKey = result.key;
       const updated = settingsResult(); broadcast("settings", updated); return updated;
-    } finally { starting = false; }
   }
   if (method === "PUT" && path === "/api/run-options") {
     const options = z
@@ -289,10 +357,6 @@ async function route(path: string, method: string, body: any) {
       })
       .strict()
       .parse(body);
-    if (starting) throw new Error("Wait for the current change to finish before selecting a model.");
-    if (engine.activeRunId) throw new Error("Stop the current task before switching models.");
-    starting = true;
-    try {
     if (options.providerId && options.providerId !== providers.activeId) {
         const selected = await providers.select(options.providerId, store.settings, options.model);
         store.settings = selected.settings; apiKey = selected.key;
@@ -310,7 +374,6 @@ async function route(path: string, method: string, body: any) {
     const result = settingsResult();
     broadcast("settings", result);
     return result;
-    } finally { starting = false; }
   }
   if (method === "GET" && path === "/api/models") {
     const { models, warnings } = await listProviderModels(url.searchParams.has("refresh"));
@@ -341,8 +404,6 @@ async function route(path: string, method: string, body: any) {
     }
   }
   if (method === "POST" && path === "/api/model/test") {
-    if (engine.activeRunId || starting)
-      throw new Error("Stop the active task before testing another model.");
     const candidate = settingsSchema.parse({
       ...store.settings,
       ...body,
@@ -351,9 +412,11 @@ async function route(path: string, method: string, body: any) {
       body.apiKey === undefined
         ? apiKey
         : z.string().max(10000).parse(body.apiKey);
-    starting = true;
+    admissions++;
     try {
-      await enqueue(() => prepareRun());
+      await enqueue(async () => {
+        if (!engine.activeRunIds.length) await prepareRun(undefined, (tabId: number) => claimTab(tabId));
+      });
       const info = await catalogue.resolve(candidate, key).catch(() => null);
       return {
         ok: true,
@@ -364,8 +427,8 @@ async function route(path: string, method: string, body: any) {
         key ? String(error).split(key).join("[redacted]") : String(error),
       );
     } finally {
-      starting = false;
-      await enqueue(() => detachAll());
+      admissions--;
+      await releaseIdleBrowser();
     }
   }
   if (method === "POST" && path === "/api/browser") {
@@ -379,21 +442,10 @@ async function route(path: string, method: string, body: any) {
       input.args,
     );
     if (!validation.valid) throw new Error(JSON.stringify(validation.errors));
-    if (
-      (engine.activeRunId || starting) &&
-      !["browser_tabs", "browser_screenshot"].includes(input.action)
-    )
-      throw new Error(
-        "Stop the active task before manually controlling Chrome.",
-      );
     try {
       return await transport.execute(input.action, input.args);
     } finally {
-      if (!engine.activeRunId && !starting)
-        await enqueue(async () => {
-          if (!engine.activeRunId && !starting && !hasPendingDialogs())
-            await detachAll();
-        });
+      await releaseIdleBrowser();
     }
   }
   if (method === "POST" && path === "/api/runs") {
@@ -403,24 +455,30 @@ async function route(path: string, method: string, body: any) {
         tabId: z.number().int().positive().nullable().optional(),
       })
       .parse(body);
-    if (engine.activeRunId || starting)
-      throw new Error("A task is already active.");
-    if (!store.settings.model.trim())
-      throw new Error("Choose a model in settings first.");
-    starting = true;
+    const runId = crypto.randomUUID();
+    reserveAdmission(runId);
+    let reserved = true;
     try {
+      await settingsQueue;
+      if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
       const selected = input.tabId === null
         ? {tabId:undefined}
-        : await enqueue(() => prepareRun(input.tabId));
+        : await enqueue(() => prepareRun(input.tabId, (tabId: number) => claimTab(tabId, runId)));
       await refreshTabs();
-      const run = engine.start(input.prompt, selected.tabId);
+      // Snapshot settings and key only after any concurrent picker commit finishes.
+      const run = await changeSettings(async () => {
+        if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
+        const run = engine.start(input.prompt, selected.tabId, runId);
+        endAdmission(runId); reserved = false;
+        return run;
+      });
       await store.flush();
       return run;
     } catch (error) {
-      if (!engine.activeRunId) await enqueue(() => detachAll());
+      if (!engine.isActive(runId)) await enqueue(() => releaseRun(runId));
       throw error;
     } finally {
-      starting = false;
+      if (reserved) endAdmission(runId);
       await releaseIdleBrowser();
     }
   }
@@ -437,34 +495,38 @@ async function route(path: string, method: string, body: any) {
           tabId: z.number().int().positive().nullable().optional(),
         })
         .parse(body);
-      if (engine.activeRunId || starting)
-        throw new Error("A task is already active.");
-      if (!store.settings.model.trim())
-        throw new Error("Choose a model in settings first.");
-      starting = true;
+      reserveAdmission(id);
+      let reserved = true;
       try {
+        await settingsQueue;
+        if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
         let previous = await store.getRun(id);
         if (!previous) throw new Error("Chat not found.");
         if (input.editMessageId !== undefined)
           previous = historyBeforeEdit(previous, input.editMessageId, input.message);
         const selected = input.tabId === null
           ? {tabId:undefined}
-          : await enqueue(() => prepareRun(input.tabId));
+          : await enqueue(() => prepareRun(input.tabId, (tabId: number) => claimTab(tabId, id)));
         await refreshTabs();
         if (input.editMessageId !== undefined) {
           await store.replaceRun(previous);
           broadcast("run", previous);
         }
-        const run = input.editMessageId === 0
-          ? engine.restart(previous, input.message, selected.tabId)
-          : engine.continue(previous, input.message, selected.tabId);
+        const run = await changeSettings(async () => {
+          if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
+          const run = input.editMessageId === 0
+            ? engine.restart(previous, input.message, selected.tabId)
+            : engine.continue(previous, input.message, selected.tabId);
+          endAdmission(id); reserved = false;
+          return run;
+        });
         await store.flush();
         return run;
       } catch (error) {
-        if (!engine.activeRunId) await enqueue(() => detachAll());
+        if (!engine.isActive(id)) await enqueue(() => releaseRun(id));
         throw error;
       } finally {
-        starting = false;
+        if (reserved) endAdmission(id);
         await releaseIdleBrowser();
       }
     }

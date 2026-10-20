@@ -165,6 +165,8 @@ const zhCN: Record<string, string> = {
   "Reset instructions": "恢复默认指令",
   "Response": "回复",
   "Review browser changes before they run.": "在浏览器更改生效前由你确认。",
+  "Needs you": "需要你操作",
+  "Running tasks": "正在运行的任务",
   "Rove workbench": "Rove 工作台",
   "Rule for {site}": "{site} 的规则",
   "Rules override Auto-approve and Ask first for one site and its subdomains. Blocked sites are never opened.": "规则会覆盖某个网站及其子域名的自动批准和先询问设置。被屏蔽的网站绝不会被打开。",

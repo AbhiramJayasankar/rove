@@ -2,6 +2,25 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## 2.2.0 - 2026-10-21
+
+Closes the main gaps against other bring-your-own-model browser agents.
+
+### Added
+- Standing instructions in Settings, added to every task.
+- Saved prompts: type `/` in the message box to search and insert one, with an optional start page.
+- Site rules in Settings: Allow, Ask or Block per site (and its subdomains), overriding the approval mode. A blocked site is never opened.
+- Attachments: add images, text files or a screenshot of the selected tab to a message.
+- Several tasks at once (up to 3), each in its own tabs, with a strip showing what is running and which task needs you.
+- Export a chat as a readable Markdown transcript, next to the JSON export.
+- The agent can save text reports to Downloads/Rove.
+- English, Simplified Chinese and Traditional Chinese, following Chrome by default and switchable in Settings.
+- Alt+Shift+N shortcut for the toolbar action, and an MIT license.
+
+### Changed
+- Model and reasoning changes are allowed while other tasks run, and apply to the next task. Provider and endpoint changes still wait until no task is running.
+- Auto-approve now applies per task, so switching it never approves another task's pending action.
+
 ## 2.1.0 - 2026-10-21
 
 Rove is the new name for the app formerly called Relay. Your saved history, providers, keys and settings carry over.

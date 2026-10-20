@@ -165,6 +165,8 @@ const zhTW: Record<string, string> = {
   "Reset instructions": "還原預設指令",
   "Response": "回覆",
   "Review browser changes before they run.": "在瀏覽器變更生效前由你確認。",
+  "Needs you": "需要你操作",
+  "Running tasks": "執行中的任務",
   "Rove workbench": "Rove 工作台",
   "Rule for {site}": "{site} 的規則",
   "Rules override Auto-approve and Ask first for one site and its subdomains. Blocked sites are never opened.": "規則會覆蓋某個網站及其子網域的自動核准和先詢問設定。被封鎖的網站絕不會被開啟。",

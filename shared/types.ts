@@ -57,6 +57,8 @@ export interface TabInfo {
   title: string;
   url: string;
   active?: boolean;
+  /** Relative to the requesting task; manual callers see any active lease as busy. */
+  busyWithAnotherTask?: boolean;
 }
 export interface BridgeStatus {
   connected: boolean;
@@ -106,6 +108,7 @@ export interface AppState {
   bridge: BridgeStatus;
   runs: RunRecord[];
   activeRunId: string | null;
+  activeRunIds: string[];
   tools: ToolDefinition[];
 }
 export interface BrowserTransport {

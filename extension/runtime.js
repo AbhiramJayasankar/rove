@@ -2452,12 +2452,14 @@ function withoutImage(result) {
     Object.entries(result).map(([k, v]) => [k, withoutImage(v)])
   );
 }
+var MAX_CONCURRENT_RUNS = 3;
 var AgentEngine = class {
   constructor(options) {
     this.options = options;
   }
   options;
-  active;
+  runs = /* @__PURE__ */ new Map();
+  defaultApprovalMode;
   async checkpoint(active) {
     active.controller.signal.throwIfAborted();
     try {
@@ -2470,14 +2472,23 @@ var AgentEngine = class {
     active.controller.signal.throwIfAborted();
   }
   get activeRunId() {
-    return this.active?.run.id ?? null;
+    return this.activeRunIds.at(-1) ?? null;
+  }
+  get activeRunIds() {
+    return [...this.runs.keys()];
+  }
+  isActive(id) {
+    return this.runs.has(id);
+  }
+  selectedTabFor(id) {
+    return this.runs.get(id)?.selectedTab;
   }
   /** The tab the running task is currently working in, if any. */
   get selectedTabId() {
-    return this.active?.selectedTab;
+    return this.activeRunId ? this.selectedTabFor(this.activeRunId) : void 0;
   }
-  start(prompt, tabId) {
-    return this.begin(prompt, tabId);
+  start(prompt, tabId, runId) {
+    return this.begin(prompt, tabId, void 0, false, runId);
   }
   restart(run, prompt, tabId) {
     return this.begin(prompt, tabId, run, true);
@@ -2487,34 +2498,38 @@ var AgentEngine = class {
       throw new Error("Stop the current response before continuing this chat.");
     return this.begin(message, tabId, run);
   }
-  begin(prompt, tabId, previous, replaceFirst = false) {
-    if (this.active)
-      throw new Error(
-        "A run is already active. Stop it before starting another."
-      );
+  begin(prompt, tabId, previous, replaceFirst = false, runId) {
+    if (this.runs.has(previous?.id ?? runId ?? ""))
+      throw new Error("Stop the current response before continuing this chat.");
+    if (this.runs.size >= MAX_CONCURRENT_RUNS)
+      throw new Error("Up to 3 tasks can run at once.");
     if (!prompt.trim() || prompt.length > 5e4)
       throw new Error("Enter a task of at most 50,000 characters.");
     if (tabId !== void 0 && (!Number.isInteger(tabId) || tabId < 1))
       throw new Error("Invalid selected tab.");
     const now = (/* @__PURE__ */ new Date()).toISOString();
     const run = previous ? structuredClone(previous) : {
-      id: crypto.randomUUID(),
+      id: runId ?? crypto.randomUUID(),
       prompt: prompt.trim(),
       status: "running",
       createdAt: now,
       updatedAt: now,
       events: []
     };
+    const settings = structuredClone(this.options.getSettings());
+    settings.approvalMode = this.defaultApprovalMode ?? settings.approvalMode;
     const active = {
       run,
       controller: new AbortController(),
       selectedTab: tabId,
+      ownedTabs: new Set(tabId === void 0 ? [] : [tabId]),
+      settings,
       apiKey: this.options.getApiKey(),
-      approvalMode: this.options.getSettings().approvalMode,
+      approvalMode: settings.approvalMode,
       message: prompt.trim(),
       history: previous && !replaceFirst ? conversationHistory(previous) : []
     };
-    this.active = active;
+    this.runs.set(run.id, active);
     if (previous && !replaceFirst)
       this.event(active, "user_message", { message: prompt.trim() });
     this.setStatus(active, "running");
@@ -2528,9 +2543,12 @@ var AgentEngine = class {
     active.controller.abort(new Error("Run stopped by the user."));
     this.finish(active, "stopped", message);
   }
-  setApprovalMode(mode) {
-    const active = this.active;
-    if (!active) return;
+  setApprovalMode(mode, runId) {
+    if (runId === void 0) {
+      this.defaultApprovalMode = mode;
+      return;
+    }
+    const active = this.requireActive(runId);
     active.approvalMode = mode;
     this.event(active, "approval_mode_changed", { mode });
     if (mode === "never" && active.pending?.kind === "approval" && !active.pending.locked) {
@@ -2571,10 +2589,21 @@ var AgentEngine = class {
     const tab2 = this.options.transport.status().tabs.find((item) => item.id === tabId);
     return tab2 ? hostOf(tab2.url) : void 0;
   }
+  /** Resolve defaults before recording intent or showing an approval. */
+  toolArguments(active, name, args) {
+    const actual = { ...args };
+    if (["browser_tabs", "browser_wait", "browser_downloads", "browser_save_file", "ask_user"].includes(name))
+      return actual;
+    if (name === "browser_navigate" && !active.selectedTab && actual.tabId == null)
+      actual.newTab = true;
+    if (!(name === "browser_navigate" && actual.newTab) && actual.tabId == null && active.selectedTab)
+      actual.tabId = active.selectedTab;
+    return actual;
+  }
   requireActive(id) {
-    if (!this.active || this.active.run.id !== id)
-      throw new Error("Run is not active.");
-    return this.active;
+    const active = this.runs.get(id);
+    if (!active) throw new Error("Run is not active.");
+    return active;
   }
   event(active, type, data) {
     const event = {
@@ -2594,9 +2623,9 @@ var AgentEngine = class {
     this.event(active, "status", { status, ...message ? { message } : {} });
   }
   finish(active, status, message) {
-    if (this.active !== active) return;
+    if (this.runs.get(active.run.id) !== active) return;
+    this.runs.delete(active.run.id);
     this.setStatus(active, status, message);
-    this.active = void 0;
   }
   waitForInput(active, kind, data, locked = false) {
     const signal = active.controller.signal;
@@ -2627,7 +2656,7 @@ var AgentEngine = class {
   }
   async process(active) {
     const signal = active.controller.signal;
-    let settings = structuredClone(this.options.getSettings());
+    let settings = structuredClone(active.settings);
     const configuredSettings = structuredClone(settings);
     let modelInfo = null;
     const key = active.apiKey;
@@ -2651,17 +2680,16 @@ ${settings.memory.trim()}` : ""}`
 Browser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. Use it by default.` : "New Tab mode. No existing tab is selected and no tab has been created. If this task needs a webpage, call browser_navigate with newTab:true and the destination URL. Do not reuse an existing tab by default. For conversational messages, just answer without opening a tab."}${active.history.length ? " This is a follow-up in the same chat. Earlier actions are historical; do not replay them. Refresh the page snapshot before using element refs." : ""}`
       }
     ];
+    const runTransport = this.options.transportForRun?.(active.run.id) ?? this.options.transport;
     const transport2 = {
-      status: () => this.options.transport.status(),
+      status: () => runTransport.status(),
       execute: async (action, args, actionSignal) => {
         actionSignal?.throwIfAborted();
-        const actual = { ...args };
-        if (action === "browser_navigate" && !active.selectedTab && actual.tabId == null)
-          actual.newTab = true;
-        if (action !== "browser_tabs" && action !== "browser_wait" && actual.tabId == null && active.selectedTab)
-          actual.tabId = active.selectedTab;
+        const actual = this.toolArguments(active, action, args);
+        if (!["browser_tabs", "browser_wait", "browser_downloads", "browser_save_file"].includes(action) && !(action === "browser_navigate" && actual.newTab) && actual.tabId == null)
+          throw new Error("No tab selected for this task. Navigate with newTab:true or specify tabId.");
         await this.checkpoint(active);
-        const result = await this.options.transport.execute(
+        const result = await runTransport.execute(
           action,
           actual,
           actionSignal
@@ -2670,10 +2698,12 @@ Browser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. 
         if (Number.isInteger(result?.tabId)) active.selectedTab = result.tabId;
         else if (action === "browser_navigate" && Number.isInteger(result?.id))
           active.selectedTab = result.id;
+        if (active.selectedTab !== void 0) active.ownedTabs.add(active.selectedTab);
         return result;
       }
     };
     try {
+      signal.throwIfAborted();
       if (this.options.resolveModel) {
         try {
           modelInfo = await this.options.resolveModel(settings, key, signal);
@@ -2684,6 +2714,7 @@ Browser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. 
           });
         }
       }
+      signal.throwIfAborted();
       settings = effectiveSettings(settings, modelInfo);
       if (!settings.vision) {
         for (const message of messages)
@@ -2923,6 +2954,7 @@ Browser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. 
             const definition = tools.find((t) => t.name === name);
             if (!definition)
               throw new Error(`Tool unavailable or disabled: ${name}`);
+            args = this.toolArguments(active, name, args);
             this.event(active, "tool_call", {
               callId: call.id,
               name,
@@ -3099,7 +3131,7 @@ Browser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. 
       });
       this.finish(active, "failed", "Step limit reached.");
     } catch (error62) {
-      if (signal.aborted || this.active !== active) return;
+      if (signal.aborted || this.runs.get(active.run.id) !== active) return;
       const message = scrub(
         error62 instanceof Error ? error62.message : String(error62)
       );
@@ -23088,7 +23120,6 @@ var ProviderStore = class {
 // extension-src/browser.js
 var attached = /* @__PURE__ */ new Map();
 var starterTabs = /* @__PURE__ */ new Set();
-var activeTabId;
 var notifier = () => {
 };
 function errorMessage(error62) {
@@ -23162,12 +23193,6 @@ async function ensureTab(tabId) {
   let tab2;
   if (tabId !== void 0 && tabId !== null)
     tab2 = await chrome.tabs.get(Number(tabId));
-  else if (activeTabId !== void 0) {
-    try {
-      tab2 = await chrome.tabs.get(activeTabId);
-    } catch {
-    }
-  }
   if (!tab2 || !canControlTab(tab2)) {
     if (tabId !== void 0 && tabId !== null)
       throw new Error(
@@ -23180,7 +23205,6 @@ async function ensureTab(tabId) {
     throw new Error(
       "No controllable tab. Open an ordinary website or use browser_navigate with newTab:true."
     );
-  activeTabId = tab2.id;
   return tab2;
 }
 function target2(tabId, sessionId) {
@@ -23766,7 +23790,8 @@ async function pressKey(tabId, key, sessionId) {
     sessionId
   );
 }
-async function perform(action, args = {}) {
+async function perform(action, args = {}, claimTab2 = (_tabId) => {
+}, requireTab = false) {
   if (action === "browser_tabs") return listTabs();
   if (action === "browser_downloads") {
     if (args.action === "cancel") {
@@ -23815,10 +23840,12 @@ async function perform(action, args = {}) {
         "Navigation requires an http, https, or file URL outside the Rove app and Chrome Web Store."
       );
     let tab3;
-    if (args.newTab || args.tabId === void 0 && activeTabId === void 0)
+    if (requireTab && !args.newTab && args.tabId == null)
+      throw new Error("Agent browser actions require an explicit tabId or newTab:true.");
+    if (args.newTab)
       tab3 = await chrome.tabs.create({ url: "about:blank" });
     else tab3 = await ensureTab(args.tabId);
-    activeTabId = tab3.id;
+    claimTab2(tab3.id);
     await attach(tab3.id, true);
     const navigation = await cdp(tab3.id, "Page.navigate", { url: args.url });
     if (navigation?.errorText)
@@ -23826,7 +23853,10 @@ async function perform(action, args = {}) {
     await waitForLoad(tab3.id);
     return snapshot(tab3.id);
   }
+  if (requireTab && args.tabId == null)
+    throw new Error("Agent browser actions require an explicit tabId.");
   const tab2 = await ensureTab(args.tabId), tabId = tab2.id;
+  claimTab2(tabId);
   await attach(tabId, true);
   switch (action) {
     case "browser_snapshot":
@@ -24119,12 +24149,18 @@ async function waitForLoad(tabId) {
 async function detachAll() {
   for (const [tabId, state2] of [...attached]) await detachSession(tabId, state2);
 }
-async function prepareRun(tabId) {
+async function releaseTab(tabId) {
+  if (attached.get(tabId)?.dialog) return false;
+  await detachSession(tabId);
+  return true;
+}
+async function prepareRun(tabId, claimTab2 = (_tabId) => {
+}) {
   let tab2;
   if (tabId === null) {
     tab2 = await chrome.tabs.create({ url: "about:blank" });
     starterTabs.add(tab2.id);
-    activeTabId = tab2.id;
+    claimTab2(tab2.id);
     await attach(tab2.id, true, true);
     return { tabId: tab2.id, url: tab2.url || "", title: tab2.title || "" };
   }
@@ -24134,8 +24170,8 @@ async function prepareRun(tabId) {
     if (tabId !== void 0 && tabId !== null) throw error62;
     tab2 = await chrome.tabs.create({ url: "about:blank" });
     starterTabs.add(tab2.id);
-    activeTabId = tab2.id;
   }
+  claimTab2(tab2.id);
   await chrome.tabs.update(tab2.id, { active: true });
   await attach(tab2.id, true, true);
   return { tabId: tab2.id, url: tab2.url || "", title: tab2.title || "" };
@@ -24148,7 +24184,6 @@ function broadcastTabs() {
 chrome.tabs.onCreated.addListener(broadcastTabs);
 chrome.tabs.onRemoved.addListener((tabId) => {
   starterTabs.delete(tabId);
-  if (activeTabId === tabId) activeTabId = void 0;
   broadcastTabs();
 });
 chrome.tabs.onActivated.addListener(broadcastTabs);
@@ -24163,7 +24198,17 @@ var catalogue = new ModelCatalogue();
 var ports = /* @__PURE__ */ new Set();
 var apiKey = "";
 var API_KEY_STORAGE_KEY = "modelApiKey";
-var starting = false;
+var admissions = 0;
+var admitting = /* @__PURE__ */ new Set();
+var tabLeases = /* @__PURE__ */ new Map();
+var settingsQueue = Promise.resolve();
+function changeSettings(job) {
+  const result = settingsQueue.then(job);
+  settingsQueue = result.then(() => {
+  }, () => {
+  });
+  return result;
+}
 var tabs = [];
 var browserQueue = Promise.resolve();
 var runKeepAlive;
@@ -24187,7 +24232,30 @@ function releaseIdleBrowser() {
   return enqueue(async () => {
     await store.flush();
     await catalogue.flush();
-    if (!engine.activeRunId && !starting && !hasPendingDialogs()) await detachAll();
+    await cleanupIdleBrowser();
+  });
+}
+function claimTab(tabId, runId) {
+  const owner = tabLeases.get(tabId);
+  if (owner && owner !== runId && (engine.isActive(owner) || admitting.has(owner)))
+    throw new Error(`Tab ${tabId} is owned by another task. Choose an unleased tab or navigate with newTab:true.`);
+  if (runId) tabLeases.set(tabId, runId);
+}
+async function releaseRun(runId) {
+  for (const [tabId, owner] of tabLeases) {
+    if (owner === runId && await releaseTab(tabId)) tabLeases.delete(tabId);
+  }
+}
+async function cleanupIdleBrowser() {
+  if (!engine.activeRunIds.length && admissions === 0 && !hasPendingDialogs()) {
+    await detachAll();
+    tabLeases.clear();
+  }
+}
+function tabsFor(runId) {
+  return tabs.map((tab2) => {
+    const owner = tabLeases.get(tab2.id);
+    return { ...tab2, busyWithAnotherTask: !!owner && owner !== runId && (engine.isActive(owner) || admitting.has(owner)) };
   });
 }
 function broadcast(type, data) {
@@ -24202,19 +24270,34 @@ function broadcast(type, data) {
 function redact2(message) {
   return apiKey ? message.split(apiKey).join("[redacted]") : message;
 }
-var transport = {
-  status: () => ({ connected: true, browser: "Chrome", tabs }),
-  execute: (action, args, signal) => enqueue(async () => {
-    signal?.throwIfAborted();
-    await store.flush();
-    signal?.throwIfAborted();
-    const result = await perform(action, args);
-    signal?.throwIfAborted();
-    return result;
-  })
-};
+function transportForRun(runId) {
+  return {
+    status: () => ({ connected: true, browser: "Chrome", tabs: tabsFor(runId) }),
+    execute: (action, args, signal) => {
+      const job = async () => {
+        signal?.throwIfAborted();
+        await store.flush();
+        signal?.throwIfAborted();
+        if (runId && !engine.isActive(runId)) throw new Error("Run is not active.");
+        const result = await perform(action, args, (tabId) => {
+          signal?.throwIfAborted();
+          claimTab(tabId, runId);
+        }, !!runId);
+        signal?.throwIfAborted();
+        if (action === "browser_tabs") {
+          tabs = result;
+          return tabsFor(runId);
+        }
+        return result;
+      };
+      return action === "browser_wait" ? job() : enqueue(job);
+    }
+  };
+}
+var transport = transportForRun();
 var engine = new AgentEngine({
   transport,
+  transportForRun,
   getSettings: () => structuredClone(store.settings),
   getApiKey: () => apiKey,
   checkpoint: () => store.flush(),
@@ -24226,7 +24309,7 @@ var engine = new AgentEngine({
   emit: (runId, event) => {
     broadcast("event", { runId, event });
     if (event.type === "status") {
-      if (["running", "awaiting_approval"].includes(event.data.status)) {
+      if (engine.activeRunIds.length) {
         runKeepAlive ??= setInterval(() => {
           void chrome.runtime.getPlatformInfo().catch(() => {
           });
@@ -24238,7 +24321,9 @@ var engine = new AgentEngine({
       broadcast("run_status", {
         id: runId,
         status: event.data.status,
-        updatedAt: event.time
+        updatedAt: event.time,
+        activeRunIds: engine.activeRunIds,
+        activeRunId: engine.activeRunId
       });
       if (["completed", "failed", "stopped"].includes(event.data.status)) {
         queueMicrotask(() => {
@@ -24246,13 +24331,13 @@ var engine = new AgentEngine({
             try {
               await store.flush();
               await catalogue.flush();
+              if (!engine.isActive(runId) && !admitting.has(runId)) await releaseRun(runId);
+              await cleanupIdleBrowser();
             } catch (error62) {
               broadcast("browser_notice", {
                 event: "error",
                 message: redact2(String(error62))
               });
-            } finally {
-              if (!engine.activeRunId && !starting) await detachAll();
             }
           });
         });
@@ -24271,16 +24356,20 @@ setNotifier((type, data) => {
     broadcast("bridge", transport.status());
   } else {
     broadcast(type, data);
-    if (type === "browser_notice" && data.event === "detached" && engine.activeRunId && (data.reason === "canceled_by_user" || data.tabId === engine.selectedTabId && data.reason !== "command_timeout")) {
-      engine.stop(
-        engine.activeRunId,
+    if (type === "browser_notice" && data.event === "detached") {
+      const owner = tabLeases.get(data.tabId);
+      const stopped = data.reason === "canceled_by_user" ? engine.activeRunIds : ["target_closed", "connection_lost"].includes(data.reason) && owner && engine.isActive(owner) ? [owner] : [];
+      for (const runId of stopped) engine.stop(
+        runId,
         "Chrome disconnected the browser debugger. Check the page, then start a new task to reconnect. No browser action was replayed."
       );
     }
     if (type === "browser_notice" && data.event === "dialog_closed")
       void enqueue(async () => {
-        if (!engine.activeRunId && !starting && !hasPendingDialogs())
-          await detachAll();
+        await store.flush();
+        for (const owner of new Set(tabLeases.values()))
+          if (!engine.isActive(owner) && !admitting.has(owner)) await releaseRun(owner);
+        await cleanupIdleBrowser();
       });
   }
 });
@@ -24304,6 +24393,7 @@ var ready = (async () => {
   await providers.init(store.settings, apiKey);
   await catalogue.init();
   await recoverSessions();
+  tabLeases.clear();
   await refreshTabs();
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 })();
@@ -24317,6 +24407,7 @@ function state() {
     bridge: transport.status(),
     runs: store.summaries(),
     activeRunId: engine.activeRunId,
+    activeRunIds: engine.activeRunIds,
     tools: BUILTIN_TOOLS
   };
 }
@@ -24329,8 +24420,22 @@ function settingsResult() {
     activeProviderId: providers.activeId,
     settings: normalizeSettings(store.settings),
     hasApiKey: !!apiKey,
-    modelInfo: catalogue.peek(store.settings, apiKey)
+    modelInfo: catalogue.peek(store.settings, apiKey),
+    activeRunIds: engine.activeRunIds,
+    activeRunId: engine.activeRunId
   };
+}
+function reserveAdmission(runId) {
+  if (engine.isActive(runId) || admitting.has(runId))
+    throw new Error("Stop the current response before continuing this chat.");
+  if (engine.activeRunIds.length + admitting.size >= MAX_CONCURRENT_RUNS)
+    throw new Error("Up to 3 tasks can run at once.");
+  admitting.add(runId);
+  admissions++;
+}
+function endAdmission(runId) {
+  admitting.delete(runId);
+  admissions--;
 }
 async function listProviderModels(refresh, override) {
   const snapshot2 = [...providers.profiles];
@@ -24353,53 +24458,53 @@ async function listProviderModels(refresh, override) {
   if (results.every((result) => result.status === "rejected")) throw new Error(warnings.join(" "));
   return { models, warnings };
 }
-async function route(path, method, body) {
+async function route(path, method, body, settingsLocked = false) {
   const url2 = new URL(path, "https://rove.invalid");
   path = url2.pathname;
+  if (!settingsLocked && (method === "PUT" && ["/api/settings", "/api/approval-mode", "/api/run-options"].includes(path) || path === "/api/providers" && ["POST", "PUT", "DELETE"].includes(method)))
+    return changeSettings(() => route(path, method, body, true));
   if (method === "GET" && path === "/api/state") return state();
   if (method === "GET" && path === "/api/health")
     return { ok: true, version: "2.0.0", runtime: "chrome-extension" };
-  if (method === "GET" && path === "/api/tabs") return refreshTabs();
+  if (method === "GET" && path === "/api/tabs") {
+    await refreshTabs();
+    return tabsFor();
+  }
   if (method === "GET" && path === "/api/settings") return settingsResult();
   if (method === "PUT" && path === "/api/settings") {
-    if (engine.activeRunId || starting)
-      throw new Error("Stop the active task before changing its settings.");
+    if (engine.activeRunIds.length || admissions)
+      throw new Error("Stop the active tasks before changing settings.");
     if (body.providerId !== void 0 && body.providerId !== providers.activeId) throw new Error("Provider changed in another window. Reload settings before saving.");
-    starting = true;
-    try {
-      const settings = settingsSchema.parse(body);
-      const nextKey = body.apiKey === void 0 ? apiKey : external_exports.string().max(1e4).parse(body.apiKey);
-      await providers.saveCurrent(settings, nextKey, body.providerName === void 0 ? void 0 : external_exports.string().trim().min(1).max(80).parse(body.providerName));
-      store.settings = settings;
-      apiKey = nextKey;
-      const result = settingsResult();
-      broadcast("settings", result);
-      return result;
-    } finally {
-      starting = false;
-    }
-  }
-  if (method === "PUT" && path === "/api/approval-mode") {
-    const mode = external_exports.enum(["always", "risky", "never"]).parse(body.mode);
-    await store.saveSettings({ ...store.settings, approvalMode: mode });
-    engine.setApprovalMode(mode);
+    const settings = settingsSchema.parse(body);
+    const nextKey = body.apiKey === void 0 ? apiKey : external_exports.string().max(1e4).parse(body.apiKey);
+    await providers.saveCurrent(settings, nextKey, body.providerName === void 0 ? void 0 : external_exports.string().trim().min(1).max(80).parse(body.providerName));
+    store.settings = settings;
+    apiKey = nextKey;
+    engine.setApprovalMode(settings.approvalMode);
     const result = settingsResult();
     broadcast("settings", result);
     return result;
   }
-  if (path === "/api/providers" && ["POST", "PUT", "DELETE"].includes(method)) {
-    if (engine.activeRunId || starting) throw new Error("Stop the active task before changing providers.");
-    starting = true;
-    try {
-      const result = method === "POST" ? await providers.add(body, store.settings) : method === "DELETE" ? await providers.remove(external_exports.string().parse(body.id), store.settings) : await providers.select(external_exports.string().parse(body.id), store.settings, body.model === void 0 ? void 0 : external_exports.string().max(200).parse(body.model));
-      store.settings = result.settings;
-      apiKey = result.key;
-      const updated = settingsResult();
-      broadcast("settings", updated);
-      return updated;
-    } finally {
-      starting = false;
+  if (method === "PUT" && path === "/api/approval-mode") {
+    const mode = external_exports.enum(["always", "risky", "never"]).parse(body.mode);
+    const runId = external_exports.string().min(1).optional().parse(body.runId);
+    if (runId !== void 0) engine.setApprovalMode(mode, runId);
+    else {
+      await store.saveSettings({ ...store.settings, approvalMode: mode });
+      engine.setApprovalMode(mode);
     }
+    const result = { ...settingsResult(), ...runId ? { runId, approvalMode: mode } : {} };
+    broadcast("settings", result);
+    return result;
+  }
+  if (path === "/api/providers" && ["POST", "PUT", "DELETE"].includes(method)) {
+    if (engine.activeRunIds.length || admissions) throw new Error("Stop the active tasks before changing settings.");
+    const result = method === "POST" ? await providers.add(body, store.settings) : method === "DELETE" ? await providers.remove(external_exports.string().parse(body.id), store.settings) : await providers.select(external_exports.string().parse(body.id), store.settings, body.model === void 0 ? void 0 : external_exports.string().max(200).parse(body.model));
+    store.settings = result.settings;
+    apiKey = result.key;
+    const updated = settingsResult();
+    broadcast("settings", updated);
+    return updated;
   }
   if (method === "PUT" && path === "/api/run-options") {
     const options = external_exports.object({
@@ -24407,31 +24512,24 @@ async function route(path, method, body) {
       model: external_exports.string().min(1).max(200).optional(),
       reasoningEffort: external_exports.string().regex(/^[a-z][a-z0-9_-]{0,39}$/).optional()
     }).strict().parse(body);
-    if (starting) throw new Error("Wait for the current change to finish before selecting a model.");
-    if (engine.activeRunId) throw new Error("Stop the current task before switching models.");
-    starting = true;
-    try {
-      if (options.providerId && options.providerId !== providers.activeId) {
-        const selected = await providers.select(options.providerId, store.settings, options.model);
-        store.settings = selected.settings;
-        apiKey = selected.key;
-        const result2 = settingsResult();
-        broadcast("settings", result2);
-        return result2;
-      }
-      const settings = settingsSchema.parse({
-        ...store.settings,
-        ...options,
-        ...options.model && options.model !== store.settings.model ? { reasoningEffort: "default" } : {}
-      });
-      await providers.saveCurrent(settings, apiKey);
-      store.settings = settings;
-      const result = settingsResult();
-      broadcast("settings", result);
-      return result;
-    } finally {
-      starting = false;
+    if (options.providerId && options.providerId !== providers.activeId) {
+      const selected = await providers.select(options.providerId, store.settings, options.model);
+      store.settings = selected.settings;
+      apiKey = selected.key;
+      const result2 = settingsResult();
+      broadcast("settings", result2);
+      return result2;
     }
+    const settings = settingsSchema.parse({
+      ...store.settings,
+      ...options,
+      ...options.model && options.model !== store.settings.model ? { reasoningEffort: "default" } : {}
+    });
+    await providers.saveCurrent(settings, apiKey);
+    store.settings = settings;
+    const result = settingsResult();
+    broadcast("settings", result);
+    return result;
   }
   if (method === "GET" && path === "/api/models") {
     const { models, warnings } = await listProviderModels(url2.searchParams.has("refresh"));
@@ -24460,16 +24558,16 @@ async function route(path, method, body) {
     }
   }
   if (method === "POST" && path === "/api/model/test") {
-    if (engine.activeRunId || starting)
-      throw new Error("Stop the active task before testing another model.");
     const candidate = settingsSchema.parse({
       ...store.settings,
       ...body
     });
     const key = body.apiKey === void 0 ? apiKey : external_exports.string().max(1e4).parse(body.apiKey);
-    starting = true;
+    admissions++;
     try {
-      await enqueue(() => prepareRun());
+      await enqueue(async () => {
+        if (!engine.activeRunIds.length) await prepareRun(void 0, (tabId) => claimTab(tabId));
+      });
       const info = await catalogue.resolve(candidate, key).catch(() => null);
       return {
         ok: true,
@@ -24480,8 +24578,8 @@ async function route(path, method, body) {
         key ? String(error62).split(key).join("[redacted]") : String(error62)
       );
     } finally {
-      starting = false;
-      await enqueue(() => detachAll());
+      admissions--;
+      await releaseIdleBrowser();
     }
   }
   if (method === "POST" && path === "/api/browser") {
@@ -24493,18 +24591,10 @@ async function route(path, method, body) {
       input2.args
     );
     if (!validation.valid) throw new Error(JSON.stringify(validation.errors));
-    if ((engine.activeRunId || starting) && !["browser_tabs", "browser_screenshot"].includes(input2.action))
-      throw new Error(
-        "Stop the active task before manually controlling Chrome."
-      );
     try {
       return await transport.execute(input2.action, input2.args);
     } finally {
-      if (!engine.activeRunId && !starting)
-        await enqueue(async () => {
-          if (!engine.activeRunId && !starting && !hasPendingDialogs())
-            await detachAll();
-        });
+      await releaseIdleBrowser();
     }
   }
   if (method === "POST" && path === "/api/runs") {
@@ -24512,22 +24602,28 @@ async function route(path, method, body) {
       prompt: external_exports.string().trim().min(1).max(5e4),
       tabId: external_exports.number().int().positive().nullable().optional()
     }).parse(body);
-    if (engine.activeRunId || starting)
-      throw new Error("A task is already active.");
-    if (!store.settings.model.trim())
-      throw new Error("Choose a model in settings first.");
-    starting = true;
+    const runId = crypto.randomUUID();
+    reserveAdmission(runId);
+    let reserved = true;
     try {
-      const selected = input2.tabId === null ? { tabId: void 0 } : await enqueue(() => prepareRun(input2.tabId));
+      await settingsQueue;
+      if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
+      const selected = input2.tabId === null ? { tabId: void 0 } : await enqueue(() => prepareRun(input2.tabId, (tabId) => claimTab(tabId, runId)));
       await refreshTabs();
-      const run = engine.start(input2.prompt, selected.tabId);
+      const run = await changeSettings(async () => {
+        if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
+        const run2 = engine.start(input2.prompt, selected.tabId, runId);
+        endAdmission(runId);
+        reserved = false;
+        return run2;
+      });
       await store.flush();
       return run;
     } catch (error62) {
-      if (!engine.activeRunId) await enqueue(() => detachAll());
+      if (!engine.isActive(runId)) await enqueue(() => releaseRun(runId));
       throw error62;
     } finally {
-      starting = false;
+      if (reserved) endAdmission(runId);
       await releaseIdleBrowser();
     }
   }
@@ -24542,30 +24638,35 @@ async function route(path, method, body) {
         editMessageId: external_exports.number().int().nonnegative().optional(),
         tabId: external_exports.number().int().positive().nullable().optional()
       }).parse(body);
-      if (engine.activeRunId || starting)
-        throw new Error("A task is already active.");
-      if (!store.settings.model.trim())
-        throw new Error("Choose a model in settings first.");
-      starting = true;
+      reserveAdmission(id);
+      let reserved = true;
       try {
+        await settingsQueue;
+        if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
         let previous = await store.getRun(id);
         if (!previous) throw new Error("Chat not found.");
         if (input2.editMessageId !== void 0)
           previous = historyBeforeEdit(previous, input2.editMessageId, input2.message);
-        const selected = input2.tabId === null ? { tabId: void 0 } : await enqueue(() => prepareRun(input2.tabId));
+        const selected = input2.tabId === null ? { tabId: void 0 } : await enqueue(() => prepareRun(input2.tabId, (tabId) => claimTab(tabId, id)));
         await refreshTabs();
         if (input2.editMessageId !== void 0) {
           await store.replaceRun(previous);
           broadcast("run", previous);
         }
-        const run = input2.editMessageId === 0 ? engine.restart(previous, input2.message, selected.tabId) : engine.continue(previous, input2.message, selected.tabId);
+        const run = await changeSettings(async () => {
+          if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
+          const run2 = input2.editMessageId === 0 ? engine.restart(previous, input2.message, selected.tabId) : engine.continue(previous, input2.message, selected.tabId);
+          endAdmission(id);
+          reserved = false;
+          return run2;
+        });
         await store.flush();
         return run;
       } catch (error62) {
-        if (!engine.activeRunId) await enqueue(() => detachAll());
+        if (!engine.isActive(id)) await enqueue(() => releaseRun(id));
         throw error62;
       } finally {
-        starting = false;
+        if (reserved) endAdmission(id);
         await releaseIdleBrowser();
       }
     }
