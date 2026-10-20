@@ -21,7 +21,18 @@ import Configuration from "./Configuration";
 import HistoryDialog from "./HistoryDialog";
 import { applyTheme, readTheme } from "./theme";
 import { readVisibleModels } from "./modelVisibility";
+import ActiveTasks from "./ActiveTasks";
 import { useT } from "./i18n";
+
+const MAX_TASKS = 3;
+const activeIdsOf = (state: Pick<AppState, "activeRunId"> & Partial<Pick<AppState, "activeRunIds">> | null | undefined): string[] =>
+  state ? state.activeRunIds ?? (state.activeRunId ? [state.activeRunId] : []) : [];
+/** Add or remove one task from the active set, keeping the single-id alias in step. */
+function withActive(old: AppState, id: string, running: boolean): Pick<AppState, "activeRunIds" | "activeRunId"> {
+  const current = activeIdsOf(old);
+  const ids = running ? (current.includes(id) ? current : [...current, id]) : current.filter((other) => other !== id);
+  return { activeRunIds: ids, activeRunId: ids.at(-1) ?? null };
+}
 
 export default function App() {
   const [theme, setTheme] = useState(readTheme);
@@ -50,9 +61,11 @@ export default function App() {
     selectedRef.current = selectedId;
   });
   const run = state?.runs.find((r) => r.id === selectedId);
-  const activeRun = state?.runs.find((r) => r.id === state.activeRunId);
-  const busy =
-    !!activeRun && ["running", "awaiting_approval"].includes(activeRun.status);
+  const activeIds = activeIdsOf(state);
+  const busy = !!run && activeIds.includes(run.id) && ["running", "awaiting_approval"].includes(run.status);
+  const activeRun = busy ? run : undefined;
+  const atCapacity = activeIds.length >= MAX_TASKS;
+  const [runModes, setRunModes] = useState<Record<string, Settings["approvalMode"]>>({});
   function mergeRun(incoming: RunRecord) {
     setState((previous) => {
       if (!previous) return previous;
@@ -76,11 +89,7 @@ export default function App() {
       } as RunRecord;
       return {
         ...previous,
-        activeRunId: ["running", "awaiting_approval"].includes(merged.status)
-          ? merged.id
-          : previous.activeRunId === merged.id
-            ? null
-            : previous.activeRunId,
+        ...withActive(previous, merged.id, ["running", "awaiting_approval"].includes(merged.status)),
         runs: [
           merged,
           ...previous.runs.filter((r) => r.id !== incoming.id),
@@ -99,7 +108,7 @@ export default function App() {
       const local = stateRef.current;
       if (!local) return;
       const wanted = new Set(
-        [selectedRef.current, fresh.activeRunId, local.activeRunId].filter(
+        [selectedRef.current, ...activeIdsOf(fresh), ...activeIdsOf(local)].filter(
           (id): id is string => !!id,
         ),
       );
@@ -116,8 +125,8 @@ export default function App() {
           mergeRun(await api<RunRecord>(`/api/runs/${id}`));
       }
       setState((old) =>
-        old && old.activeRunId !== fresh.activeRunId
-          ? { ...old, activeRunId: fresh.activeRunId }
+        old && activeIdsOf(old).join() !== activeIdsOf(fresh).join()
+          ? { ...old, activeRunIds: activeIdsOf(fresh), activeRunId: activeIdsOf(fresh).at(-1) ?? null }
           : old,
       );
     } catch {
@@ -129,7 +138,7 @@ export default function App() {
   reconcileRef.current = reconcile;
   const watching =
     !!state &&
-    (!!state.activeRunId ||
+    (activeIds.length > 0 ||
       (!!run && ["running", "awaiting_approval"].includes(run.status)));
   useEffect(() => {
     if (!watching) return;
@@ -236,15 +245,11 @@ export default function App() {
             old
               ? {
                   ...old,
-                  activeRunId: ["running", "awaiting_approval"].includes(
-                    update.status,
-                  )
-                    ? update.id
-                    : old.activeRunId === update.id
-                      ? null
-                      : old.activeRunId,
+                  ...(Array.isArray(update.activeRunIds)
+                    ? { activeRunIds: update.activeRunIds, activeRunId: update.activeRunIds.at(-1) ?? null }
+                    : withActive(old, update.id, ["running", "awaiting_approval"].includes(update.status))),
                   runs: old.runs.map((r) =>
-                    r.id === update.id ? { ...r, ...update } : r,
+                    r.id === update.id ? { ...r, status: update.status, updatedAt: update.updatedAt } : r,
                   ),
                 }
               : old,
@@ -263,13 +268,7 @@ export default function App() {
                 : undefined;
             return {
               ...old,
-              activeRunId: status
-                ? ["running", "awaiting_approval"].includes(status)
-                  ? update.runId
-                  : old.activeRunId === update.runId
-                    ? null
-                    : old.activeRunId
-                : old.activeRunId,
+              ...(status ? withActive(old, update.runId, ["running", "awaiting_approval"].includes(status)) : {}),
               runs: old.runs.map((r) =>
                 r.id === update.runId &&
                 !r.events.some((e) => e.id === update.event.id)
@@ -363,25 +362,33 @@ export default function App() {
     });
   }
   async function changeApprovalMode(mode: Settings["approvalMode"]) {
+    const runId = busy && run ? run.id : undefined;
     const previous = state?.settings.approvalMode || "never";
-    setState((old) =>
-      old ? { ...old, settings: { ...old.settings, approvalMode: mode } } : old,
-    );
-    update("approvalMode", mode);
+    // While a task runs the switch is for that task only; otherwise it sets the default for new tasks.
+    if (runId) setRunModes((old) => ({ ...old, [runId]: mode }));
+    else {
+      setState((old) =>
+        old ? { ...old, settings: { ...old.settings, approvalMode: mode } } : old,
+      );
+      update("approvalMode", mode);
+    }
     await action("approval-mode", async () => {
       try {
         const result = await api<{ settings: Settings; hasApiKey: boolean }>(
           "/api/approval-mode",
-          { method: "PUT", body: json({ mode }) },
+          { method: "PUT", body: json({ mode, ...(runId ? { runId } : {}) }) },
         );
-        setState((old) => (old ? { ...old, ...result } : old));
+        if (!runId) setState((old) => (old ? { ...old, ...result } : old));
       } catch (error) {
-        setState((old) =>
-          old
-            ? { ...old, settings: { ...old.settings, approvalMode: previous } }
-            : old,
-        );
-        update("approvalMode", previous);
+        if (runId) setRunModes((old) => { const next = { ...old }; delete next[runId]; return next; });
+        else {
+          setState((old) =>
+            old
+              ? { ...old, settings: { ...old.settings, approvalMode: previous } }
+              : old,
+          );
+          update("approvalMode", previous);
+        }
         throw error;
       }
     });
@@ -448,11 +455,11 @@ export default function App() {
           >
             <History size={18} />
           </button>
-          {!busy && (
+          {(
             <button
               className="icon-button"
               aria-label={t("New task")}
-              title={t("New task")}
+              title={atCapacity ? t("Up to {n} tasks can run at once.", { n: MAX_TASKS }) : t("New task")}
               onClick={() => {
                 setSelectedId(null);
                 setNewChatVersion((value) => value + 1);
@@ -475,6 +482,17 @@ export default function App() {
           </button>
         </div>
       </header>
+      {state && (
+        <ActiveTasks
+          runs={state.runs}
+          activeIds={activeIds}
+          selectedId={selectedId}
+          onOpen={(id) => {
+            setSelectedId(id);
+            setPage("workbench");
+          }}
+        />
+      )}
       <main className="main-shell">
         {error && (
           <div className="message error" role="alert">
@@ -517,6 +535,7 @@ export default function App() {
                 mergeRun={mergeRun}
                 streamConnected={streamConnected}
                 changeApprovalMode={changeApprovalMode}
+                approvalMode={(run && runModes[run.id]) || state.settings.approvalMode}
                 visible={page === "workbench"}
               />
             </div>

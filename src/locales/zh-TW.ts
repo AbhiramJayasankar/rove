@@ -244,6 +244,7 @@ const zhTW: Record<string, string> = {
   "Type “{text}”": "輸入「{text}」",
   "Ultra": "極高",
   "Up to {n} attachments": "最多 {n} 個附件",
+  "Up to {n} tasks can run at once.": "最多可同時執行 {n} 個任務。",
   "Upload file": "上傳檔案",
   "Upload files": "上傳檔案",
   "Use dark mode": "切換到深色模式",

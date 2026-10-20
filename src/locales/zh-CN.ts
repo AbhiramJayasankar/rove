@@ -244,6 +244,7 @@ const zhCN: Record<string, string> = {
   "Type “{text}”": "输入“{text}”",
   "Ultra": "极高",
   "Up to {n} attachments": "最多 {n} 个附件",
+  "Up to {n} tasks can run at once.": "最多可同时运行 {n} 个任务。",
   "Upload file": "上传文件",
   "Upload files": "上传文件",
   "Use dark mode": "切换到深色模式",

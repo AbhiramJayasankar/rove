@@ -57,6 +57,7 @@ type Props = {
   mergeRun: (run: RunRecord) => void;
   streamConnected: boolean;
   changeApprovalMode: (mode: Settings["approvalMode"]) => Promise<void>;
+  approvalMode: Settings["approvalMode"];
   visible: boolean;
 };
 export default function Workbench({
@@ -73,6 +74,7 @@ export default function Workbench({
   mergeRun,
   streamConnected,
   changeApprovalMode,
+  approvalMode,
   visible,
 }: Props) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -651,10 +653,10 @@ export default function Workbench({
               icon={<ShieldCheck size={13} />}
               placement="top"
               value={
-                state.settings.approvalMode === "never" ? "never" : "risky"
+                approvalMode === "never" ? "never" : "risky"
               }
               displayLabel={
-                state.settings.approvalMode === "never" ? t("Auto-approve") : t("Ask first")
+                approvalMode === "never" ? t("Auto-approve") : t("Ask first")
               }
               options={[
                 {
