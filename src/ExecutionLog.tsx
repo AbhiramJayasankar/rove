@@ -13,6 +13,7 @@ import {
 import type { RunEvent, RunRecord } from "../shared/types";
 import { AssistantMessage, json, ToolActivity } from "./ui";
 import { tokenCount } from "./ModelPicker";
+import { useT } from "./i18n";
 
 function reasoningText(message: any): string {
   const parts = [message?.reasoning_content, message?.reasoning];
@@ -33,6 +34,7 @@ export default function ExecutionLog({
   onReply?: (message: string) => Promise<void>;
   replyPending?: boolean;
 }) {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
   const pendingQuestion =
     run.status === "awaiting_approval"
@@ -82,10 +84,10 @@ export default function ExecutionLog({
         <span>
           <strong>
             {calls.length
-              ? `${calls.length} ${calls.length === 1 ? "action" : "actions"}`
+              ? t(calls.length === 1 ? "{n} action" : "{n} actions", { n: calls.length })
               : running
-                ? "Working…"
-                : "Model response"}
+                ? t("Working…")
+                : t("Model response")}
           </strong>
         </span>
         <ChevronDown size={16} className={expanded ? "" : "collapsed"} />
@@ -127,13 +129,13 @@ export default function ExecutionLog({
                   <strong>
                     {response
                       ? stepCalls.length
-                        ? "Tools selected"
-                        : "Response"
+                        ? t("Tools selected")
+                        : t("Response")
                       : rejected
-                        ? "Context adjusted"
+                        ? t("Context adjusted")
                         : running
-                          ? "Generating"
-                          : "Interrupted"}
+                          ? t("Generating")
+                          : t("Interrupted")}
                   </strong>
                   <span>
                     {response?.data.durationMs
@@ -141,22 +143,21 @@ export default function ExecutionLog({
                       : ""}
                   </span>
                   {response?.data.usage?.prompt_tokens != null && (
-                    <span title="Input tokens reported by provider">
-                      {tokenCount(response.data.usage.prompt_tokens)} in
+                    <span title={t("Input tokens reported by provider")}>
+                      {t("{n} in", { n: tokenCount(response.data.usage.prompt_tokens) })}
                     </span>
                   )}
                 </div>
                 {rejected && (
                   <div className="context-adjustment">
-                    The endpoint rejected the context. Rove compacted
-                    observations and retried this request.
+                    {t("The endpoint rejected the context. Rove compacted observations and retried this request.")}
                   </div>
                 )}
                 {reason && (
                   <details className="reasoning-block" open={!response}>
                     <summary>
                       <Brain size={14} />
-                      Reasoning
+                      {t("Reasoning")}
                       {!response && running && (
                         <LoaderCircle size={12} className="spin" />
                       )}
@@ -238,6 +239,7 @@ export function TraceView({
   onExportMarkdown?: () => void;
   exportPending?: boolean;
 }) {
+  const t = useT();
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -252,8 +254,8 @@ export function TraceView({
     <div className="trace-view">
       <div className="trace-controls">
         <input
-          aria-label="Search trace"
-          placeholder="Filter trace…"
+          aria-label={t("Search trace")}
+          placeholder={t("Filter trace…")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -261,8 +263,8 @@ export function TraceView({
           <button
             type="button"
             className="icon-button"
-            aria-label="Export chat as Markdown"
-            title="Export chat as Markdown"
+            aria-label={t("Export chat as Markdown")}
+            title={t("Export chat as Markdown")}
             disabled={exportPending}
             onClick={onExportMarkdown}
           >
@@ -273,8 +275,8 @@ export function TraceView({
           <button
             type="button"
             className="icon-button"
-            aria-label="Export run"
-            title="Export run"
+            aria-label={t("Export run")}
+            title={t("Export run")}
             disabled={exportPending}
             onClick={onExport}
           >
@@ -286,13 +288,13 @@ export function TraceView({
           className="text-button"
           onClick={() => setOpen(!open)}
         >
-          {open ? "Collapse all" : "Expand all"}
+          {open ? t("Collapse all") : t("Expand all")}
         </button>
         <button
           type="button"
           className="icon-button"
-          aria-label="Copy trace"
-          title="Copy full trace"
+          aria-label={t("Copy trace")}
+          title={t("Copy full trace")}
           onClick={async () => {
             try {
               await navigator.clipboard.writeText(json(events));

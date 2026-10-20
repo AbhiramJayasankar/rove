@@ -1,8 +1,9 @@
 import type { RunRecord } from "../shared/types";
 import { useState, useEffect, useRef, useImperativeHandle, type Ref } from "react";
-import { Pencil, X, Check } from "lucide-react";
+import { Pencil, X, Check, FileText } from "lucide-react";
 import ExecutionLog from "./ExecutionLog";
 import { AssistantMessage } from "./ui";
+import { useT } from "./i18n";
 export type ConversationHandle = { editLatest: () => void };
 export default function Conversation({
   run,
@@ -20,6 +21,7 @@ export default function Conversation({
   editorRef?: Ref<ConversationHandle>;
 }) {
   const [editing, setEditing] = useState<number | null>(null);
+  const t = useT();
   const [draft, setDraft] = useState("");
   const editInput = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {
@@ -69,7 +71,7 @@ export default function Conversation({
                 <textarea
                   ref={editInput}
                   rows={1}
-                  aria-label="Edit message"
+                  aria-label={t("Edit message")}
                   value={draft}
                   onChange={(event) => setDraft(event.target.value)}
                   onKeyDown={(event) => {
@@ -93,8 +95,8 @@ export default function Conversation({
                   <button
                     type="button"
                     className="icon-button"
-                    aria-label="Cancel edit"
-                    title="Cancel edit"
+                    aria-label={t("Cancel edit")}
+                    title={t("Cancel edit")}
                     onClick={() => setEditing(null)}
                   >
                     <X size={14} />
@@ -102,8 +104,8 @@ export default function Conversation({
                   <button
                     type="submit"
                     className="message-confirm-button"
-                    aria-label="Save and run"
-                    title="Save and run"
+                    aria-label={t("Save and run")}
+                    title={t("Save and run")}
                     disabled={disabled || !draft.trim()}
                   >
                     <Check size={15} />
@@ -112,12 +114,30 @@ export default function Conversation({
               </form>
             ) : (
               <div className="user-message editable-message">
-                <span>{turn.prompt}</span>
+                <span>
+                  {turn.prompt}
+                  {turn.events.some((event) => event.type === "attachment") && (
+                    <span className="sent-attachments">
+                      {turn.events
+                        .filter((event) => event.type === "attachment")
+                        .map((event) => (
+                          <span className="attachment-chip" key={event.id}>
+                            {event.data.kind === "image" && typeof event.data.dataUrl === "string" ? (
+                              <img src={event.data.dataUrl} alt="" />
+                            ) : (
+                              <FileText size={13} aria-hidden="true" />
+                            )}
+                            <span>{String(event.data.name)}</span>
+                          </span>
+                        ))}
+                    </span>
+                  )}
+                </span>
                 <button
                   type="button"
                   className="message-edit-button"
-                  aria-label="Edit message"
-                  title="Edit message"
+                  aria-label={t("Edit message")}
+                  title={t("Edit message")}
                   disabled={disabled}
                   onClick={() => {
                     setDraft(turn.prompt);

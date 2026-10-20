@@ -14,6 +14,7 @@ import {
   ArrowUp,
   Check,
   Code2,
+  FileText,
   ScanSearch,
   Globe,
   LoaderCircle,
@@ -26,6 +27,8 @@ import {
 import ModelPicker from "./ModelPicker";
 import UsageRing from "./UsageRing";
 import ShortcutMenu, { shortcutMatches, slashQuery } from "./ShortcutMenu";
+import AttachButton from "./AttachButton";
+import { attachmentPayload, type Attachment } from "./attachments";
 import { shortcutText, useShortcuts, type Shortcut } from "./shortcuts";
 import VoiceInput from "./VoiceInput";
 import Conversation, { type ConversationHandle } from "./Conversation";
@@ -39,6 +42,7 @@ import { downloadJson, downloadText } from "./transport";
 import { runToMarkdown } from "../shared/markdown";
 import type { AppState, RunRecord, Settings } from "../shared/types";
 import { api, json, toolTitle, type Action, type Page, type Shot } from "./ui";
+import { useT } from "./i18n";
 type Props = {
   newChatVersion: number;
   state: AppState;
@@ -72,10 +76,16 @@ export default function Workbench({
   visible,
 }: Props) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const t = useT();
+  const [attachDrafts, setAttachDrafts] = useState<Record<string, Attachment[]>>({});
+  const [attachError, setAttachError] = useState("");
   const draftId = run?.id || "new";
   const prompt = drafts[draftId] || "";
   const setPrompt = (value: string) =>
     setDrafts((previous) => ({ ...previous, [draftId]: value }));
+  const attachments = attachDrafts[draftId] || [];
+  const setAttachments = (items: Attachment[]) =>
+    setAttachDrafts((previous) => ({ ...previous, [draftId]: items }));
   const tabs = state.bridge.tabs.filter((tab) => {
     try {
       const url = new URL(tab.url);
@@ -233,14 +243,27 @@ export default function Workbench({
           method: "POST",
           body: json(
             run
-              ? { message: message.trim(), tabId: tabId ?? null, editMessageId }
-              : { prompt: message.trim(), tabId: tabId ?? null },
+              ? {
+                  message: message.trim(),
+                  tabId: tabId ?? null,
+                  editMessageId,
+                  ...(editMessageId === undefined && attachments.length ? { attachments: attachmentPayload(attachments) } : {}),
+                }
+              : {
+                  prompt: message.trim(),
+                  tabId: tabId ?? null,
+                  ...(attachments.length ? { attachments: attachmentPayload(attachments) } : {}),
+                },
           ),
         },
       );
       mergeRun(created);
       selectRun(created.id);
-      if (editMessageId === undefined) setPrompt("");
+      if (editMessageId === undefined) {
+        setPrompt("");
+        setAttachments([]);
+      }
+      setAttachError("");
       setManualShot(null);
       setMobileView("task");
       saved = true;
@@ -274,11 +297,11 @@ export default function Workbench({
       <div className="context-strip">
         <ChoiceMenu
           className="target-picker"
-          label="Chrome tab"
+          label={t("Chrome tab")}
           icon={<Globe size={14} />}
           value={String(tabId ?? "")}
           options={[
-            { value: "", label: "New Tab" },
+            { value: "", label: t("New Tab") },
             ...tabs.map((tab) => ({
               value: String(tab.id),
               label: tab.title || tab.url,
@@ -295,7 +318,7 @@ export default function Workbench({
           <div
             className="view-switch"
             role="group"
-            aria-label="View"
+            aria-label={t("View")}
             style={
               {
                 "--view-index":
@@ -310,8 +333,8 @@ export default function Workbench({
             <span className="view-switch-thumb" aria-hidden="true" />
             <button
               type="button"
-              aria-label="Browser preview"
-              title="Browser preview"
+              aria-label={t("Browser preview")}
+              title={t("Browser preview")}
               aria-pressed={mobileView === "browser"}
               disabled={!tabId}
               onClick={() => {
@@ -323,8 +346,8 @@ export default function Workbench({
             </button>
             <button
               type="button"
-              aria-label="Activity"
-              title="Activity"
+              aria-label={t("Activity")}
+              title={t("Activity")}
               aria-pressed={
                 mobileView === "task" && activityView === "activity"
               }
@@ -337,8 +360,8 @@ export default function Workbench({
             </button>
             <button
               type="button"
-              aria-label="Trace"
-              title="Trace"
+              aria-label={t("Trace")}
+              title={t("Trace")}
               aria-pressed={mobileView === "task" && activityView === "trace"}
               onClick={() => {
                 setMobileView("task");
@@ -350,22 +373,22 @@ export default function Workbench({
           </div>
         </div>
       </div>
-      <section className="task-panel" aria-label="Task and activity">
+      <section className="task-panel" aria-label={t("Task and activity")}>
         {approval && (
           <div
             className="decision-panel"
             role="region"
-            aria-label="Approval required"
+            aria-label={t("Approval required")}
           >
             <>
               <strong>
-                {toolTitle(approval.data.tool, approval.data.args)}
+                {toolTitle(approval.data.tool, approval.data.args, t)}
               </strong>
               {approval.data.reason === "site rule" && (
-                <p className="decision-note">Your site rules ask before acting on {String(approval.data.site)}.</p>
+                <p className="decision-note">{t("Your site rules ask before acting on {site}.", { site: String(approval.data.site) })}</p>
               )}
               <details>
-                <summary>Action details</summary>
+                <summary>{t("Action details")}</summary>
                 <pre>
                   {json({
                     tool: approval.data.tool,
@@ -390,7 +413,7 @@ export default function Workbench({
                   }
                 >
                   <Check size={14} />
-                  Approve once
+                  {t("Approve once")}
                 </button>
                 <button
                   className="button secondary"
@@ -407,7 +430,7 @@ export default function Workbench({
                     })
                   }
                 >
-                  Deny
+                  {t("Deny")}
                 </button>
               </div>
               {approval.data.reason !== "site rule" && (
@@ -416,7 +439,7 @@ export default function Workbench({
                   disabled={!!pending}
                   onClick={() => changeApprovalMode("never")}
                 >
-                  Auto-approve and continue
+                  {t("Auto-approve and continue")}
                 </button>
               )}
             </>
@@ -443,7 +466,7 @@ export default function Workbench({
                     void action("export-markdown", async () => {
                       const record = await api<RunRecord>(`/api/runs/${run.id}/export`);
                       downloadText(
-                        runToMarkdown(record, toolTitle, { app: "Rove", version: __APP_VERSION__ }),
+                        runToMarkdown(record, (name, args) => toolTitle(name, args, t), { app: "Rove", version: __APP_VERSION__ }),
                         `rove-chat-${run.id.slice(0, 8)}.md`,
                         "text/markdown",
                       );
@@ -478,7 +501,7 @@ export default function Workbench({
               )}
               {run.status === "stopped" && (
                 <div className="stopped-message">
-                  Stopped{" "}
+                  {t("Stopped")}{" "}
                   <button
                     type="button"
                     className="text-button"
@@ -487,7 +510,7 @@ export default function Workbench({
                       setRetryEditRequested(true);
                     }}
                   >
-                    Edit & retry
+                    {t("Edit & retry")}
                   </button>
                 </div>
               )}
@@ -495,13 +518,13 @@ export default function Workbench({
             </>
           ) : (
             <div className="task-empty">
-              <h1>What’s the task?</h1>
+              <h1>{t("What’s the task?")}</h1>
               {!state.settings.model ? (
                 <button
                   className="setup-model"
                   onClick={() => setPage("settings")}
                 >
-                  Connect a model
+                  {t("Connect a model")}
                   <ArrowUp size={14} />
                 </button>
               ) : (
@@ -514,12 +537,12 @@ export default function Workbench({
                     <button
                       key={label as string}
                       onClick={() => {
-                        setPrompt(text as string);
+                        setPrompt(t(text as string));
                         promptRef.current?.focus();
                       }}
                     >
                       <Icon size={15} aria-hidden="true" />
-                      {label as string}
+                      {t(label as string)}
                     </button>
                   ))}
                 </div>
@@ -534,6 +557,27 @@ export default function Workbench({
             if (canRun) startRun();
           }}
         >
+          {attachments.length > 0 && (
+            <div className="attachment-chips" aria-label={t("Attachments")}>
+              {attachments.map((item) => (
+                <span className="attachment-chip" key={item.id}>
+                  {item.kind === "image" && item.dataUrl ? <img src={item.dataUrl} alt="" /> : <FileText size={13} aria-hidden="true" />}
+                  <span>{item.name}</span>
+                  <button type="button" aria-label={t("Remove {name}", { name: item.name })} onClick={() => setAttachments(attachments.filter((other) => other.id !== item.id))}>
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          {attachments.some((item) => item.kind === "image") && state.modelInfo?.supportsVision === false && (
+            <div className="attach-note">{t("This model cannot see images, so image attachments will be left out.")}</div>
+          )}
+          {attachError && (
+            <div className="voice-error attach-error" role="alert">
+              {attachError}
+            </div>
+          )}
           {slashOpen && (
             <ShortcutMenu
               shortcuts={shortcuts}
@@ -545,8 +589,8 @@ export default function Workbench({
           )}
           <textarea
             ref={promptRef}
-            aria-label="Task prompt"
-            placeholder={run ? "Reply to Rove…" : "Ask Rove…"}
+            aria-label={t("Task prompt")}
+            placeholder={run ? t("Reply to Rove…") : t("Ask Rove…")}
             rows={1}
             readOnly={voiceBusy}
             value={prompt}
@@ -594,34 +638,34 @@ export default function Workbench({
             />
 
             {reasoningChoices.length > 1 && <ChoiceMenu
-              label="Reasoning level"
+              label={t("Reasoning level")}
               icon={<Brain size={14} />}
               placement="top"
               value={resolvedReasoningEffort(state.settings, state.modelInfo)}
-              options={reasoningChoices}
+              options={reasoningChoices.map((option) => ({ ...option, label: t(option.label), ...(option.description ? { description: t(option.description) } : {}) }))}
               onChange={(reasoningEffort) => runOptions({ reasoningEffort })}
               disabled={busy || pending === "run-options"}
             />}
             <ChoiceMenu
-              label="Approval mode"
+              label={t("Approval mode")}
               icon={<ShieldCheck size={13} />}
               placement="top"
               value={
                 state.settings.approvalMode === "never" ? "never" : "risky"
               }
               displayLabel={
-                state.settings.approvalMode === "never" ? "Auto-approve" : "Ask first"
+                state.settings.approvalMode === "never" ? t("Auto-approve") : t("Ask first")
               }
               options={[
                 {
                   value: "never",
-                  label: "Auto-approve",
-                  description: "Run enabled tools without pausing.",
+                  label: t("Auto-approve"),
+                  description: t("Run enabled tools without pausing."),
                 },
                 {
                   value: "risky",
-                  label: "Ask permission",
-                  description: "Review browser changes before they run.",
+                  label: t("Ask permission"),
+                  description: t("Review browser changes before they run."),
                 },
               ]}
               onChange={(mode) =>
@@ -634,13 +678,23 @@ export default function Workbench({
               model={state.modelInfo}
               connected={streamConnected}
             />
+            <AttachButton
+              tabId={tabId}
+              count={attachments.length}
+              disabled={busy || voiceBusy}
+              onAdd={(items) => {
+                setAttachError("");
+                setAttachments([...attachments, ...items]);
+              }}
+              onError={setAttachError}
+            />
             <VoiceInput input={promptRef} value={prompt} onChange={setPrompt} context={`${draftId}:${newChatVersion}`} visible={visible} onBusy={setVoiceBusy} />
             {busy ? (
               <button
                 className="run-button stop-generation"
                 type="button"
-                aria-label="Stop generation"
-                title="Stop (Escape)"
+                aria-label={t("Stop generation")}
+                title={t("Stop (Escape)")}
                 disabled={pending === "stop"}
                 onClick={stopRun}
               >
@@ -650,8 +704,8 @@ export default function Workbench({
               <button
                 className="run-button"
                 type="submit"
-                aria-label="Run task"
-                title="Run task (Enter)"
+                aria-label={t("Run task")}
+                title={t("Run task (Enter)")}
                 disabled={!canRun}
               >
                 {pending === "run" ? (
@@ -666,18 +720,18 @@ export default function Workbench({
       </section>
       <section
         className="browser-stage"
-        aria-label="Browser view"
+        aria-label={t("Browser view")}
         ref={browserRef}
       >
         <div className="browser-toolbar">
           <Globe size={15} />
-          <h2>Preview</h2>
+          <h2>{t("Preview")}</h2>
           <div className="browser-actions">
             <button
               className="icon-button"
-              aria-label="Inspect page"
+              aria-label={t("Inspect page")}
               title={
-                busy ? "Stop the task before inspecting refs" : "Inspect page"
+                busy ? t("Stop the task before inspecting refs") : t("Inspect page")
               }
               disabled={!tabId || !!pending || busy}
               onClick={() => capture(true)}
@@ -686,8 +740,8 @@ export default function Workbench({
             </button>
             <button
               className="icon-button"
-              aria-label="Take browser screenshot"
-              title="Refresh screenshot"
+              aria-label={t("Take browser screenshot")}
+              title={t("Refresh screenshot")}
               disabled={!tabId || !!pending}
               onClick={() => capture()}
             >
@@ -698,8 +752,8 @@ export default function Workbench({
             </button>
             <button
               className="icon-button"
-              aria-label="Expand browser view"
-              title="Expand browser view"
+              aria-label={t("Expand browser view")}
+              title={t("Expand browser view")}
               onClick={() => {
                 if (document.fullscreenElement)
                   document.exitFullscreen().catch(() => {});
@@ -719,19 +773,19 @@ export default function Workbench({
           {shot ? (
             <img
               src={shot.dataUrl}
-              alt={`Chrome view: ${shot.title || "current page"}`}
+              alt={t("Chrome view: {title}", { title: shot.title || t("current page") })}
             />
           ) : (
             <div className="browser-empty">
               <Monitor size={30} strokeWidth={1.25} />
-              <p>{tabId ? "No screenshot yet" : "Choose a tab to preview it"}</p>
+              <p>{tabId ? t("No screenshot yet") : t("Choose a tab to preview it")}</p>
               <button
                 className="button secondary"
                 disabled={!tabId || !!pending}
                 onClick={() => capture()}
               >
                 <RefreshCw size={14} />
-                Take screenshot
+                {t("Take screenshot")}
               </button>
             </div>
           )}
@@ -739,10 +793,10 @@ export default function Workbench({
         {snapshot !== null && (
           <div className="snapshot-drawer">
             <div className="panel-toolbar">
-              <strong>Page snapshot</strong>
+              <strong>{t("Page snapshot")}</strong>
               <button
                 className="icon-button"
-                aria-label="Close snapshot"
+                aria-label={t("Close snapshot")}
                 onClick={() => setSnapshot(null)}
               >
                 <X size={16} />

@@ -6,3 +6,6 @@ test-results/
 playwright-report/
 .env
 *.log
+
+# Local agent worktrees
+.claude/worktrees/

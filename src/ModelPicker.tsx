@@ -12,6 +12,7 @@ import { api } from "./ui";
 import { usePopover } from "./Popover";
 import { useVisibleModels } from "./modelVisibility";
 import type { ModelInfo } from "../shared/types";
+import { useT } from "./i18n";
 export const tokenCount = (count: number) =>
   count >= 1_000_000
     ? `${(count / 1_000_000).toFixed(2).replace(/0+$/, "").replace(/\.$/, "")}M`
@@ -36,6 +37,7 @@ export default function ModelPicker({
   placement?: "top" | "bottom";
 }) {
   const id = useId();
+  const t = useT();
   const popup = usePopover({ width: 330, placement });
   const searchRef = useRef<HTMLInputElement>(null);
   const options = useRef<(HTMLButtonElement | null)[]>([]);
@@ -98,14 +100,14 @@ export default function ModelPicker({
   const name =
     label ||
     models.find((info) => info.id === model && (!providerId || info.providerId === providerId))?.name ||
-    (model ? "Selected model" : "Choose model");
+    (model ? t("Selected model") : t("Choose model"));
   return (
     <>
       <button
         ref={popup.trigger}
         type="button"
         className="model-picker-trigger"
-        aria-label="Choose model"
+        aria-label={t("Choose model")}
         title={name}
         aria-haspopup="dialog"
         aria-expanded={popup.open}
@@ -123,7 +125,7 @@ export default function ModelPicker({
             ref={popup.panel}
             id={id}
             role="dialog"
-            aria-label="Model picker"
+            aria-label={t("Model picker")}
             className="model-catalogue anchored-popover"
             style={popup.style}
           >
@@ -131,8 +133,8 @@ export default function ModelPicker({
               <Search size={14} />
               <input
                 ref={searchRef}
-                aria-label="Search models"
-                placeholder="Search models…"
+                aria-label={t("Search models")}
+                placeholder={t("Search models…")}
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 onKeyDown={(event) => {
@@ -145,21 +147,21 @@ export default function ModelPicker({
               <button
                 type="button"
                 className={`catalogue-free ${freeOnly ? "selected" : ""}`}
-                aria-label="Free models only"
+                aria-label={t("Free models only")}
                 aria-pressed={freeOnly}
-                title="Free models only"
+                title={t("Free models only")}
                 onClick={() => {
                   setFreeOnly(!freeOnly);
                   localStorage.setItem("relay.freeModels", String(!freeOnly));
                 }}
               >
-                Free
+                {t("Free")}
               </button>
               <button
                 type="button"
                 className="icon-button"
-                aria-label="Refresh models"
-                title="Refresh models"
+                aria-label={t("Refresh models")}
+                title={t("Refresh models")}
                 disabled={loading}
                 onClick={() => load(true)}
               >
@@ -173,7 +175,7 @@ export default function ModelPicker({
             <div
               className="catalogue-list"
               role="listbox"
-              aria-label="Available models"
+              aria-label={t("Available models")}
             >
               {filtered.map((info, index) => (
                 <button
@@ -210,11 +212,11 @@ export default function ModelPicker({
                 </button>
               ))}
               {loading && !models.length && (
-                <div className="catalogue-empty">Loading models…</div>
+                <div className="catalogue-empty">{t("Loading models…")}</div>
               )}
               {!loading && (error || !filtered.length) && (
                 <div className="catalogue-empty">
-                  {error || "No matching models."}
+                  {error || t("No matching models.")}
                 </div>
               )}
             </div>

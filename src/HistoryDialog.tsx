@@ -2,6 +2,7 @@ import { useState, type RefObject } from "react";
 import { Search, X } from "lucide-react";
 import type { RunRecord } from "../shared/types";
 import { statusLabels } from "./ui";
+import { useT } from "./i18n";
 
 export default function HistoryDialog({
   dialogRef,
@@ -15,6 +16,7 @@ export default function HistoryDialog({
   onSelect: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
+  const t = useT();
   const filtered = runs.filter((run) =>
     run.prompt.toLowerCase().includes(query.toLowerCase()),
   );
@@ -22,17 +24,17 @@ export default function HistoryDialog({
     <dialog
       ref={dialogRef}
       className="history-dialog"
-      aria-label="Task history"
+      aria-label={t("Task history")}
       onClose={() => setQuery("")}
       onClick={(event) => {
         if (event.target === event.currentTarget) dialogRef.current?.close();
       }}
     >
       <div className="dialog-heading">
-        <h2>History</h2>
+        <h2>{t("History")}</h2>
         <button
           className="icon-button"
-          aria-label="Close history"
+          aria-label={t("Close history")}
           onClick={() => dialogRef.current?.close()}
         >
           <X size={18} />
@@ -42,8 +44,8 @@ export default function HistoryDialog({
         <Search size={16} />
         <input
           autoFocus
-          aria-label="Search tasks"
-          placeholder="Search tasks"
+          aria-label={t("Search tasks")}
+          placeholder={t("Search tasks")}
           value={query}
           onChange={(event) => setQuery(event.target.value)}
         />
@@ -62,7 +64,7 @@ export default function HistoryDialog({
           >
             <span
               className={`status-dot ${run.status}`}
-              title={statusLabels[run.status]}
+              title={t(statusLabels[run.status])}
             />
             <span className="history-item-title">{run.prompt}</span>
             <time dateTime={run.updatedAt}>
@@ -75,7 +77,7 @@ export default function HistoryDialog({
         ))}
         {!filtered.length && (
           <p className="history-empty">
-            {query ? "No matching tasks." : "Your tasks will appear here."}
+            {query ? t("No matching tasks.") : t("Your tasks will appear here.")}
           </p>
         )}
       </div>

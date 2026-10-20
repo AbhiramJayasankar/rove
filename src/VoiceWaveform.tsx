@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
+import { useT } from "./i18n";
 
 export default function VoiceWaveform({ stream }: { stream: MediaStream | null }) {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const t = useT();
   useEffect(() => {
     if (!stream || !canvas.current) return;
     const element = canvas.current;
@@ -31,5 +33,5 @@ export default function VoiceWaveform({ stream }: { stream: MediaStream | null }
     draw();
     return () => { cancelAnimationFrame(frame); source.disconnect(); analyser.disconnect(); void audio.close(); };
   }, [stream]);
-  return <canvas ref={canvas} className="voice-waveform" role="img" aria-label="Live microphone waveform" />;
+  return <canvas ref={canvas} className="voice-waveform" role="img" aria-label={t("Live microphone waveform")} />;
 }

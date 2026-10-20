@@ -21,9 +21,11 @@ import Configuration from "./Configuration";
 import HistoryDialog from "./HistoryDialog";
 import { applyTheme, readTheme } from "./theme";
 import { readVisibleModels } from "./modelVisibility";
+import { useT } from "./i18n";
 
 export default function App() {
   const [theme, setTheme] = useState(readTheme);
+  const t = useT();
   useEffect(() => applyTheme(theme), [theme]);
   const historyDialog = useRef<HTMLDialogElement>(null);
   const [state, setState] = useState<AppState | null>(null);
@@ -414,7 +416,7 @@ export default function App() {
       <header className="extension-header">
         <button
           className={page === "workbench" ? "brand" : "back-to-chat"}
-          aria-label={page === "workbench" ? "Rove workbench" : "Back to chat"}
+          aria-label={page === "workbench" ? t("Rove workbench") : t("Back to chat")}
           onClick={() => setPage("workbench")}
         >
           {page === "workbench" ? (
@@ -425,23 +427,23 @@ export default function App() {
           ) : (
             <>
               <ArrowLeft size={17} />
-              <span>Back to chat</span>
+              <span>{t("Back to chat")}</span>
             </>
           )}
         </button>
         <div className="header-actions">
           <button
             className="icon-button"
-            aria-label={theme === "light" ? "Use dark mode" : "Use light mode"}
-            title={theme === "light" ? "Dark mode" : "Light mode"}
+            aria-label={theme === "light" ? t("Use dark mode") : t("Use light mode")}
+            title={theme === "light" ? t("Dark mode") : t("Light mode")}
             onClick={() => setTheme(theme === "light" ? "dark" : "light")}
           >
             {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
           </button>
           <button
             className="icon-button"
-            aria-label="Task history"
-            title="History"
+            aria-label={t("Task history")}
+            title={t("History")}
             onClick={() => historyDialog.current?.showModal()}
           >
             <History size={18} />
@@ -449,8 +451,8 @@ export default function App() {
           {!busy && (
             <button
               className="icon-button"
-              aria-label="New task"
-              title="New task"
+              aria-label={t("New task")}
+              title={t("New task")}
               onClick={() => {
                 setSelectedId(null);
                 setNewChatVersion((value) => value + 1);
@@ -462,8 +464,8 @@ export default function App() {
           )}
           <button
             className={`icon-button ${page !== "workbench" ? "selected" : ""}`}
-            aria-label="Settings"
-            title="Settings"
+            aria-label={t("Settings")}
+            title={t("Settings")}
             aria-pressed={page !== "workbench"}
             onClick={() =>
               setPage(page === "workbench" ? "settings" : "workbench")
@@ -480,7 +482,7 @@ export default function App() {
             <span>{error}</span>
             <button
               className="icon-button"
-              aria-label="Dismiss error"
+              aria-label={t("Dismiss error")}
               onClick={() => setError("")}
             >
               <X size={15} />
@@ -490,13 +492,13 @@ export default function App() {
         {notice && (
           <div className="toast" role="status">
             <Check size={15} />
-            {notice}
+            {t(notice)}
           </div>
         )}
         {!state ? (
           <div className="loading-state">
             <LoaderCircle size={22} className="spin" />
-            <span>Connecting…</span>
+            <span>{t("Connecting…")}</span>
           </div>
         ) : (
           <>

@@ -25,6 +25,7 @@ import { useShortcutsEditor } from "./shortcuts";
 import { useModelVisibility } from "./modelVisibility";
 import VoiceSettings, { useVoiceSettings } from "./VoiceSettings";
 import ChoiceMenu from "./ChoiceMenu";
+import { LANGUAGE_NAMES, useLanguage, useT, type LanguagePreference } from "./i18n";
 import { json, toolTitle, type Action, type Page } from "./ui";
 
 type Props = {
@@ -60,6 +61,8 @@ export default function Configuration({
   keyChanged,
   notice,
 }: Props) {
+  const t = useT();
+  const { preference, setPreference } = useLanguage();
   const [showKey, setShowKey] = useState(false);
   const voice = useVoiceSettings();
   const visibility = useModelVisibility(state.activeProviderId);
@@ -84,7 +87,7 @@ export default function Configuration({
     <section className="settings-page">
       <div className="settings-nav">
         <nav
-          aria-label="Settings sections"
+          aria-label={t("Settings sections")}
           className="settings-tabs"
           style={{ "--tab-index": tabs.findIndex(([id]) => id === page) } as React.CSSProperties}
         >
@@ -97,7 +100,7 @@ export default function Configuration({
               onClick={() => setPage(id)}
             >
               <Icon size={15} aria-hidden="true" />
-              {label}
+              {t(label)}
             </button>
           ))}
         </nav>
@@ -105,24 +108,24 @@ export default function Configuration({
       <div className="settings-content">
         {state.activeRunId && (
           <div className="message">
-            Stop the current task before saving settings.
+            {t("Stop the current task before saving settings.")}
           </div>
         )}
         {page === "settings" ? (
           <section className="connection-settings">
-            <h2 className="settings-title">Language model</h2>
+            <h2 className="settings-title">{t("Language model")}</h2>
             <div className="panel provider-panel">
               <div className="provider-picker-row">
-                <ChoiceMenu label="Configure provider" value={state.activeProviderId} options={[
+                <ChoiceMenu label={t("Configure provider")} value={state.activeProviderId} options={[
                   ...state.providers.map(provider => ({ value: provider.id, label: provider.name })),
-                  { value: "add:openrouter", label: "+ Add OpenRouter" },
-                  { value: "add:custom", label: "+ Add compatible provider" },
+                  { value: "add:openrouter", label: t("+ Add OpenRouter") },
+                  { value: "add:custom", label: t("+ Add compatible provider") },
                 ]} onChange={id => void changeProvider(id)} disabled={!!pending || !!state.activeRunId} />
-                <button type="button" className="icon-button" aria-label="Remove provider" title="Remove provider" disabled={!!pending || !!state.activeRunId || state.providers.length < 2} onClick={() => void changeProvider("remove")}><Trash2 size={15} /></button>
+                <button type="button" className="icon-button" aria-label={t("Remove provider")} title={t("Remove provider")} disabled={!!pending || !!state.activeRunId || state.providers.length < 2} onClick={() => void changeProvider("remove")}><Trash2 size={15} /></button>
               </div>
-              <label className="field"><span>Provider name</span><input value={providerName} maxLength={80} onChange={event => setProviderName(event.target.value)} /></label>
+              <label className="field"><span>{t("Provider name")}</span><input value={providerName} maxLength={80} onChange={event => setProviderName(event.target.value)} /></label>
               <label className="field">
-                <span>API base URL</span>
+                <span>{t("API base URL")}</span>
                 <input
                   type="url"
                   value={draft.baseUrl}
@@ -133,10 +136,10 @@ export default function Configuration({
               </label>
               <div className="field">
                 <label htmlFor="provider-key">
-                  API key{" "}
+                  {t("API key")}{" "}
                   {state.hasApiKey && (
                     <span className="field-state">
-                      <Check size={12} /> Saved
+                      <Check size={12} /> {t("Saved")}
                     </span>
                   )}
                 </label>
@@ -150,21 +153,21 @@ export default function Configuration({
                     onChange={(e) => setApiKey(e.target.value)}
                     placeholder={
                       state.hasApiKey
-                        ? "Saved key · enter to replace"
-                        : "Enter API key"
+                        ? t("Saved key · enter to replace")
+                        : t("Enter API key")
                     }
                   />
                   <button
                     type="button"
                     className="icon-button"
-                    aria-label={showKey ? "Hide API key" : "Show API key"}
+                    aria-label={showKey ? t("Hide API key") : t("Show API key")}
                     onClick={() => setShowKey(!showKey)}
                   >
                     {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
                   </button>
                 </div>
                 <div className="field-footer">
-                  <span>Saved in this Chrome profile across sessions.</span>
+                  <span>{t("Saved in this Chrome profile across sessions.")}</span>
                   {state.hasApiKey && (
                     <button
                       type="button"
@@ -174,7 +177,7 @@ export default function Configuration({
                         notice("Save changes to clear the key.");
                       }}
                     >
-                      Clear key
+                      {t("Clear key")}
                     </button>
                   )}
                 </div>
@@ -182,7 +185,7 @@ export default function Configuration({
             </div>
             <div className="panel model-panel">
               <div className="field model-connection-field">
-                <span>Models in chat</span>
+                <span>{t("Models in chat")}</span>
                 <ModelChecklist
                   providerId={state.activeProviderId}
                   connection={{
@@ -198,9 +201,9 @@ export default function Configuration({
                 />
               </div>
               <div className="tool-round-limit">
-                <label htmlFor="step-limit">Step limit</label>
+                <label htmlFor="step-limit">{t("Step limit")}</label>
                 <div className="stepper">
-                  <button type="button" className="icon-button" aria-label="Fewer steps" disabled={!!state.activeRunId || draft.maxSteps <= 1} onClick={() => update("maxSteps", Math.max(1, draft.maxSteps - 1))}><Minus size={14} /></button>
+                  <button type="button" className="icon-button" aria-label={t("Fewer steps")} disabled={!!state.activeRunId || draft.maxSteps <= 1} onClick={() => update("maxSteps", Math.max(1, draft.maxSteps - 1))}><Minus size={14} /></button>
                   <input
                     id="step-limit"
                     type="number"
@@ -213,28 +216,41 @@ export default function Configuration({
                       update("maxSteps", Math.max(1, Math.min(200, Math.trunc(event.target.valueAsNumber) || 1)))
                     }
                   />
-                  <button type="button" className="icon-button" aria-label="More steps" disabled={!!state.activeRunId || draft.maxSteps >= 200} onClick={() => update("maxSteps", Math.min(200, draft.maxSteps + 1))}><Plus size={14} /></button>
+                  <button type="button" className="icon-button" aria-label={t("More steps")} disabled={!!state.activeRunId || draft.maxSteps >= 200} onClick={() => update("maxSteps", Math.min(200, draft.maxSteps + 1))}><Plus size={14} /></button>
                 </div>
               </div>
             </div>
             <VoiceSettings voice={voice} />
+            <div className="field language-field">
+              <span>{t("Language")}</span>
+              <ChoiceMenu
+                label={t("Language")}
+                value={preference}
+                placement="top"
+                options={[
+                  { value: "auto", label: t("Match Chrome") },
+                  ...(Object.entries(LANGUAGE_NAMES) as [string, string][]).map(([value, label]) => ({ value, label })),
+                ]}
+                onChange={(value) => setPreference(value as LanguagePreference)}
+              />
+            </div>
             <p className="about-line">
               Rove {__APP_VERSION__}
               <button type="button" className="text-button" onClick={() => whatsNew.current?.showModal()}>
-                What&apos;s new
+                {t("What's new")}
               </button>
             </p>
             <dialog
               ref={whatsNew}
               className="history-dialog changelog-dialog"
-              aria-label="What's new"
+              aria-label={t("What's new")}
               onClick={(event) => {
                 if (event.target === event.currentTarget) whatsNew.current?.close();
               }}
             >
               <div className="dialog-heading">
-                <h2>What&apos;s new</h2>
-                <button className="icon-button" aria-label="Close what's new" onClick={() => whatsNew.current?.close()}>
+                <h2>{t("What's new")}</h2>
+                <button className="icon-button" aria-label={t("Close what's new")} onClick={() => whatsNew.current?.close()}>
                   <X size={18} />
                 </button>
               </div>
@@ -246,12 +262,12 @@ export default function Configuration({
         ) : page === "instructions" ? (
           <section className="instructions-settings">
             <div className="settings-heading">
-              <h2 className="settings-title">System instructions</h2>
+              <h2 className="settings-title">{t("System instructions")}</h2>
               <button
                 type="button"
                 className="icon-button"
-                aria-label="Reset instructions"
-                title="Reset instructions"
+                aria-label={t("Reset instructions")}
+                title={t("Reset instructions")}
                 onClick={() => update("systemPrompt", DEFAULT_PROMPT)}
               >
                 <RotateCcw size={16} />
@@ -259,7 +275,7 @@ export default function Configuration({
             </div>
             <div className="panel editor-panel">
               <textarea
-                aria-label="System instructions"
+                aria-label={t("System instructions")}
                 className="instructions-editor"
                 value={draft.systemPrompt}
                 onChange={(e) => update("systemPrompt", e.target.value)}
@@ -267,13 +283,13 @@ export default function Configuration({
               />
             </div>
             <div className="settings-heading">
-              <h2 className="settings-title">Standing instructions</h2>
+              <h2 className="settings-title">{t("Standing instructions")}</h2>
             </div>
             <div className="panel memory-panel">
               <textarea
-                aria-label="Standing instructions"
+                aria-label={t("Standing instructions")}
                 className="instructions-editor memory-editor"
-                placeholder="Things Rove should always know or follow, in every chat."
+                placeholder={t("Things Rove should always know or follow, in every chat.")}
                 value={draft.memory}
                 onChange={(e) => update("memory", e.target.value)}
                 spellCheck={false}
@@ -284,23 +300,23 @@ export default function Configuration({
         ) : (
           <section className="tools-settings">
             <div className="settings-heading">
-              <h2 className="settings-title">Browser tools</h2>
-              <span className="tool-count" aria-label={`${enabledCount} of ${state.tools.length} enabled`}>
+              <h2 className="settings-title">{t("Browser tools")}</h2>
+              <span className="tool-count" aria-label={t("{n} of {total} enabled", { n: enabledCount, total: state.tools.length })}>
                 <strong>{enabledCount}</strong>/{state.tools.length}
               </span>
             </div>
             <input
               type="search"
               className="tool-search"
-              aria-label="Search tools"
-              placeholder="Find a tool…"
+              aria-label={t("Search tools")}
+              placeholder={t("Find a tool…")}
               value={toolSearch}
               onChange={(e) => setToolSearch(e.target.value)}
             />
             {groups.map(({ risk, items }) => (
               <div className="tool-group" key={risk}>
                 <h3 className={`tool-group-title ${risk}`}>
-                  {risk === "read" ? "Look" : risk === "write" ? "Act" : "Dangerous"}
+                  {risk === "read" ? t("Look") : risk === "write" ? t("Act") : t("Dangerous")}
                 </h3>
                 <div className="panel tools-list">
                   {items.map((tool) => (
@@ -308,7 +324,7 @@ export default function Configuration({
                       <div className="tool-definition">
                         <details>
                           <summary>
-                            <strong>{toolTitle(tool.name, {})}</strong>
+                            <strong>{toolTitle(tool.name, {}, t)}</strong>
                           </summary>
                           <p>{tool.description}</p>
                           <pre>
@@ -355,7 +371,7 @@ export default function Configuration({
           ) : (
             <Check size={15} />
           )}
-          Save changes
+          {t("Save changes")}
         </button>
       </footer>
     </section>

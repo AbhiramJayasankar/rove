@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { DEFAULT_VOICE, readVoice, transcriptionUrl, type VoiceSettings as Options } from "./voice";
 import { Check, Cloud, Mic } from "lucide-react";
+import { useT } from "./i18n";
 
 export function useVoiceSettings() {
   const [value, setValue] = useState<Options>(DEFAULT_VOICE);
@@ -22,19 +23,20 @@ const backends: { value: Options["backend"]; label: string; note: string; Icon: 
 ];
 export default function VoiceSettings({ voice }: { voice: ReturnType<typeof useVoiceSettings> }) {
   const { value, setValue, key, setKey, setChanged, savedKey } = voice;
+  const t = useT();
   return <section className="voice-settings">
-    <h2 className="settings-title">Speech to text</h2>
+    <h2 className="settings-title">{t("Speech to text")}</h2>
     <div className="panel voice-panel">
-      <div className="backend-tiles" role="radiogroup" aria-label="Dictation backend">
+      <div className="backend-tiles" role="radiogroup" aria-label={t("Dictation backend")}>
         {backends.map(({ value: id, label, note, Icon }) => <button key={id} type="button" role="radio" aria-checked={value.backend === id} className="backend-tile" onClick={() => setValue({ ...value, backend: id })}>
-          <Icon size={18} aria-hidden="true" /><strong>{label}</strong><small>{note}</small>
+          <Icon size={18} aria-hidden="true" /><strong>{t(label)}</strong><small>{t(note)}</small>
         </button>)}
       </div>
       {value.backend === "api" && <>
-        <label className="field"><span>Transcription base URL</span><input type="url" value={value.baseUrl} onChange={e => setValue({ ...value, baseUrl: e.target.value })} /></label>
-        <label className="field"><span>Transcription model</span><input value={value.model} onChange={e => setValue({ ...value, model: e.target.value })} /></label>
-        <label className="field"><span>Voice API key {savedKey && <span className="field-state"><Check size={12} /> Saved</span>}</span><input type="password" autoComplete="off" spellCheck={false} value={key} placeholder={savedKey ? "Enter to replace saved key" : "Separate from your model key"} onChange={e => { setKey(e.target.value); setChanged(true); }} /></label>
-        {savedKey && <button type="button" className="text-button" onClick={() => { setKey(""); setChanged(true); }}>Clear voice key</button>}
+        <label className="field"><span>{t("Transcription base URL")}</span><input type="url" value={value.baseUrl} onChange={e => setValue({ ...value, baseUrl: e.target.value })} /></label>
+        <label className="field"><span>{t("Transcription model")}</span><input value={value.model} onChange={e => setValue({ ...value, model: e.target.value })} /></label>
+        <label className="field"><span>{t("Voice API key")} {savedKey && <span className="field-state"><Check size={12} /> {t("Saved")}</span>}</span><input type="password" autoComplete="off" spellCheck={false} value={key} placeholder={savedKey ? t("Enter to replace saved key") : t("Separate from your model key")} onChange={e => { setKey(e.target.value); setChanged(true); }} /></label>
+        {savedKey && <button type="button" className="text-button" onClick={() => { setKey(""); setChanged(true); }}>{t("Clear voice key")}</button>}
       </>}
     </div>
   </section>;

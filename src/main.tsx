@@ -8,10 +8,13 @@ import "./composer.css";
 import "./settings.css";
 import "./chat.css";
 import { applyTheme, readTheme } from "./theme";
+import { I18nProvider } from "./i18n";
 applyTheme(readTheme());
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   new URLSearchParams(location.search).has("voice") ? <VoiceCapture /> : <React.StrictMode>
-    <App />
+    <I18nProvider>
+      <App />
+    </I18nProvider>
   </React.StrictMode>,
 );

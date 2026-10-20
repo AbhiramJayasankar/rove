@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Slash } from "lucide-react";
 import type { Shortcut } from "./shortcuts";
+import { useT } from "./i18n";
 
 /** Suggestions above the composer while the message starts with "/". */
 export function slashQuery(prompt: string): string | null {
@@ -26,11 +27,12 @@ export default function ShortcutMenu({
   onSettings: () => void;
 }) {
   const matches = shortcutMatches(shortcuts, query);
+  const t = useT();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted) return null;
   return (
-    <div className="shortcut-menu" role="listbox" aria-label="Saved prompts">
+    <div className="shortcut-menu" role="listbox" aria-label={t("Saved prompts")}>
       {matches.map((item, position) => (
         <button
           key={item.id}
@@ -50,9 +52,9 @@ export default function ShortcutMenu({
       ))}
       {!matches.length && (
         <div className="shortcut-empty">
-          {shortcuts.length ? "No saved prompt matches." : "No saved prompts yet."}
+          {shortcuts.length ? t("No saved prompt matches.") : t("No saved prompts yet.")}
           <button type="button" className="text-button" onMouseDown={(event) => event.preventDefault()} onClick={onSettings}>
-            Add one in Settings
+            {t("Add one in Settings")}
           </button>
         </div>
       )}

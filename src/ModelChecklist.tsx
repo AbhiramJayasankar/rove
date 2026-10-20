@@ -4,6 +4,7 @@ import { api } from "./ui";
 import { tokenCount } from "./ModelPicker";
 import type { ModelInfo } from "../shared/types";
 import type { ModelVisibility } from "./modelVisibility";
+import { useT } from "./i18n";
 
 export default function ModelChecklist({
   providerId,
@@ -19,6 +20,7 @@ export default function ModelChecklist({
   onFirstPick: (model: string) => void;
 }) {
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const t = useT();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
@@ -64,6 +66,8 @@ export default function ModelChecklist({
   }, [models, model]);
   const isOn = (id: string) => selected === null || selected.has(id);
   const count = models.filter((info) => isOn(info.id)).length;
+  // Word order differs by language, so the count sits inside the translated sentence.
+  const inChat = t("{count} of {n} in chat", { count: "\u0000", n: models.length }).split("\u0000");
   function apply(ids: string[], on: boolean) {
     const next = new Set(selected ?? models.map((info) => info.id));
     for (const id of ids) on ? next.add(id) : next.delete(id);
@@ -76,8 +80,8 @@ export default function ModelChecklist({
         <div className="checklist-search">
           <Search size={14} aria-hidden="true" />
           <input
-            aria-label="Search models"
-            placeholder="Search models…"
+            aria-label={t("Search models")}
+            placeholder={t("Search models…")}
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -87,13 +91,13 @@ export default function ModelChecklist({
             aria-pressed={freeOnly}
             onClick={() => setFreeOnly(!freeOnly)}
           >
-            Free
+            {t("Free")}
           </button>
           <button
             type="button"
             className="icon-button"
-            aria-label="Refresh models"
-            title="Refresh models"
+            aria-label={t("Refresh models")}
+            title={t("Refresh models")}
             disabled={loading}
             onClick={() => setReload((value) => value + 1)}
           >
@@ -102,7 +106,7 @@ export default function ModelChecklist({
         </div>
         <div className="checklist-bulk">
           <span className="checklist-count">
-            <strong>{count}</strong> of {models.length} in chat
+            {inChat[0]}<strong>{count}</strong>{inChat[1]}
           </span>
           <button
             type="button"
@@ -110,7 +114,7 @@ export default function ModelChecklist({
             disabled={!shown.length}
             onClick={() => apply(shown.map((info) => info.id), true)}
           >
-            Select {search || freeOnly ? "shown" : "all"}
+            {search || freeOnly ? t("Select shown") : t("Select all")}
           </button>
           <button
             type="button"
@@ -118,11 +122,11 @@ export default function ModelChecklist({
             disabled={!shown.length}
             onClick={() => apply(shown.map((info) => info.id), false)}
           >
-            Clear
+            {t("Clear")}
           </button>
         </div>
       </div>
-      <div className="checklist-list" role="group" aria-label="Models shown in chat">
+      <div className="checklist-list" role="group" aria-label={t("Models shown in chat")}>
         {shown.map((info) => (
           <label className="checklist-row" key={info.id}>
             <input
@@ -136,16 +140,16 @@ export default function ModelChecklist({
             </span>
             <span className="checklist-name">
               {info.name}
-              {info.free && <em>Free</em>}
+              {info.free && <em>{t("Free")}</em>}
             </span>
             {info.contextWindow && <small>{tokenCount(info.contextWindow)}</small>}
           </label>
         ))}
-        {loading && !models.length && <p className="checklist-empty">Loading models…</p>}
+        {loading && !models.length && <p className="checklist-empty">{t("Loading models…")}</p>}
         {!loading && error && <p className="checklist-empty">{error}</p>}
         {!loading && !error && !shown.length && (
           <p className="checklist-empty">
-            {models.length ? "No matching models." : "Add your endpoint and key to list its models."}
+            {models.length ? t("No matching models.") : t("Add your endpoint and key to list its models.")}
           </p>
         )}
       </div>

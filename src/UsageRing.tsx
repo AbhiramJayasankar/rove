@@ -4,6 +4,7 @@ import type { ModelInfo, RunRecord } from "../shared/types";
 import { chatUsage } from "../shared/usage";
 import { tokenCount } from "./ModelPicker";
 import { usePopover } from "./Popover";
+import { useT } from "./i18n";
 const format = (value: number) => value.toLocaleString();
 export default function UsageRing({
   run,
@@ -15,6 +16,7 @@ export default function UsageRing({
   connected: boolean;
 }) {
   const id = useId();
+  const t = useT();
   const popup = usePopover({ width: 270 });
   useEffect(() => {
     if (popup.open) popup.panel.current?.focus();
@@ -31,11 +33,11 @@ export default function UsageRing({
         ref={popup.trigger}
         type="button"
         className={`usage-ring ${percent > 85 ? "near-limit" : ""} ${!connected ? "disconnected" : ""}`}
-        aria-label="Chat usage"
+        aria-label={t("Chat usage")}
         title={
           connected
-            ? `${Math.round(percent)}% context used`
-            : "Reconnecting to Rove"
+            ? t("{percent}% context used", { percent: Math.round(percent) })
+            : t("Reconnecting to Rove")
         }
         aria-haspopup="dialog"
         aria-expanded={popup.open}
@@ -61,44 +63,44 @@ export default function UsageRing({
             ref={popup.panel}
             id={id}
             role="dialog"
-            aria-label="Chat usage"
+            aria-label={t("Chat usage")}
             tabIndex={-1}
             className="usage-popover anchored-popover"
             style={popup.style}
           >
             <div className="usage-heading">
-              <strong>Context</strong>
+              <strong>{t("Context")}</strong>
               <span>{Math.round(percent)}%</span>
             </div>
             <div className="usage-context">
               {usage.estimated && usage.current > 0 ? "~" : ""}
               {tokenCount(usage.current)}{" "}
-              <span>of {tokenCount(usage.contextWindow)}</span>
+              <span>{t("of {n}", { n: tokenCount(usage.contextWindow) })}</span>
             </div>
             <div className="usage-bar">
               <i style={{ width: `${percent}%` }} />
             </div>
             <dl className="usage-totals">
-              <dt>Total input tokens</dt>
+              <dt>{t("Total input tokens")}</dt>
               <dd>{total(usage.input, usage.inputReports)}</dd>
-              <dt>Total output tokens</dt>
+              <dt>{t("Total output tokens")}</dt>
               <dd>{total(usage.output, usage.outputReports)}</dd>
               {usage.cached > 0 && (
                 <>
-                  <dt>Cached input</dt>
+                  <dt>{t("Cached input")}</dt>
                   <dd>{format(usage.cached)}</dd>
                 </>
               )}
               {usage.reasoning > 0 && (
                 <>
-                  <dt>Reasoning tokens</dt>
+                  <dt>{t("Reasoning tokens")}</dt>
                   <dd>{format(usage.reasoning)}</dd>
                 </>
               )}
-              <dt>Estimated cost</dt>
+              <dt>{t("Estimated cost")}</dt>
               <dd>
                 {usage.cost == null
-                  ? "Not available"
+                  ? t("Not available")
                   : new Intl.NumberFormat("en-US", {
                       style: "currency",
                       currency: "USD",
@@ -112,22 +114,21 @@ export default function UsageRing({
               <dl className="usage-limits">
                 {usage.inputBudget != null && (
                   <>
-                    <dt>Input budget</dt>
+                    <dt>{t("Input budget")}</dt>
                     <dd>{tokenCount(usage.inputBudget)}</dd>
                   </>
                 )}
                 {usage.outputBudget != null && (
                   <>
-                    <dt>Output reserve</dt>
+                    <dt>{t("Output reserve")}</dt>
                     <dd>{tokenCount(usage.outputBudget)}</dd>
                   </>
                 )}
               </dl>
             )}
             <p className="usage-note">
-              {usage.requests} {usage.requests === 1 ? "request" : "requests"}{" "}
-              in this chat
-              {!connected ? " · Reconnecting" : ""}
+              {t(usage.requests === 1 ? "{n} request in this chat" : "{n} requests in this chat", { n: usage.requests })}
+              {!connected ? ` · ${t("Reconnecting")}` : ""}
             </p>
           </div>,
           document.body,

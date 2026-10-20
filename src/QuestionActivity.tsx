@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ArrowUp, MessageCircle } from "lucide-react";
+import { useT } from "./i18n";
 
 export default function QuestionActivity({
   question,
@@ -15,11 +16,12 @@ export default function QuestionActivity({
   onReply?: (message: string) => Promise<void>;
 }) {
   const [reply, setReply] = useState("");
+  const t = useT();
   return (
     <div
       className="question-activity"
       role={waiting ? "region" : undefined}
-      aria-label={waiting ? "Reply required" : undefined}
+      aria-label={waiting ? t("Reply required") : undefined}
     >
       <div className="question-text">
         <MessageCircle size={14} />
@@ -37,8 +39,8 @@ export default function QuestionActivity({
           }}
         >
           <input
-            aria-label="Reply to Rove"
-            placeholder="Your answer…"
+            aria-label={t("Reply to Rove")}
+            placeholder={t("Your answer…")}
             value={reply}
             onChange={(event) => setReply(event.target.value)}
             disabled={disabled}
@@ -47,8 +49,8 @@ export default function QuestionActivity({
           <button
             type="submit"
             className="message-confirm-button"
-            aria-label="Send answer"
-            title="Send answer"
+            aria-label={t("Send answer")}
+            title={t("Send answer")}
             disabled={disabled || !reply.trim()}
           >
             <ArrowUp size={15} />

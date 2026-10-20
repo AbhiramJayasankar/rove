@@ -2,11 +2,13 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import { LoaderCircle, Mic, X } from "lucide-react";
 import { beginDictation } from "./dictation";
 import VoiceWaveform from "./VoiceWaveform";
+import { useT } from "./i18n";
 
 type Props = { input: RefObject<HTMLTextAreaElement | null>; value: string; onChange: (text: string) => void; context: string; visible: boolean; onBusy: (busy: boolean) => void };
 export default function VoiceInput({ input, value, onChange, context, visible, onBusy }: Props) {
   const [phase, setPhase] = useState<"idle" | "starting" | "recording" | "processing">("idle");
   const [seconds, setSeconds] = useState(0);
+  const t = useT();
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState("");
   const session = useRef<{ capture: ReturnType<typeof beginDictation>; before: string; update: (value: string) => void } | null>(null);
@@ -46,12 +48,12 @@ export default function VoiceInput({ input, value, onChange, context, visible, o
     session.current = { capture, before: value, update: onChange };
   }
   return <>
-    <span className="visually-hidden" role="status">{phase === "recording" ? "Recording. Click the mic to stop; Escape cancels." : phase === "starting" ? "Starting microphone." : phase === "processing" ? "Transcribing your recording." : ""}</span>
+    <span className="visually-hidden" role="status">{phase === "recording" ? t("Recording. Click the mic to stop; Escape cancels.") : phase === "starting" ? t("Starting microphone.") : phase === "processing" ? t("Transcribing your recording.") : ""}</span>
     {phase !== "idle" && <div className="voice-activity">
-      {phase === "recording" ? <><VoiceWaveform stream={stream} /><span role="timer" aria-label="Recording duration">{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</span></> : <span>{phase === "starting" ? "Starting microphone…" : "Transcribing…"}</span>}
-      <button type="button" className="voice-button" aria-label="Cancel dictation" onClick={() => finish(true)}><X size={13} /></button>
+      {phase === "recording" ? <><VoiceWaveform stream={stream} /><span role="timer" aria-label={t("Recording duration")}>{Math.floor(seconds / 60)}:{String(seconds % 60).padStart(2, "0")}</span></> : <span>{phase === "starting" ? t("Starting microphone…") : t("Transcribing…")}</span>}
+      <button type="button" className="voice-button" aria-label={t("Cancel dictation")} onClick={() => finish(true)}><X size={13} /></button>
     </div>}
-    <button type="button" className={`voice-button ${phase === "recording" ? "recording" : ""}`} aria-label={phase === "idle" ? "Start dictation" : phase === "starting" ? "Cancel microphone setup" : phase === "processing" ? "Transcribing voice" : "Stop dictation"} aria-pressed={phase !== "idle"} title={phase === "idle" ? "Dictate a task" : "Stop dictation · Escape cancels"} disabled={phase === "processing"} onClick={() => { if (phase === "idle") start(); else if (phase === "starting") finish(true); else session.current?.capture.stop(); }}>
+    <button type="button" className={`voice-button ${phase === "recording" ? "recording" : ""}`} aria-label={phase === "idle" ? t("Start dictation") : phase === "starting" ? t("Cancel microphone setup") : phase === "processing" ? t("Transcribing voice") : t("Stop dictation")} aria-pressed={phase !== "idle"} title={phase === "idle" ? t("Dictate a task") : t("Stop dictation · Escape cancels")} disabled={phase === "processing"} onClick={() => { if (phase === "idle") start(); else if (phase === "starting") finish(true); else session.current?.capture.stop(); }}>
       {phase === "processing" || phase === "starting" ? <LoaderCircle size={15} className="spin" /> : <Mic size={15} />}
     </button>
     {error && <span className="voice-error" role="alert">{error}</span>}

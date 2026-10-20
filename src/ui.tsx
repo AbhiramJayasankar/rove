@@ -9,6 +9,7 @@ import {
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { RunEvent } from "../shared/types";
+import { useT } from "./i18n";
 export const statusLabels: Record<string, string> = {
   running: "Working",
   awaiting_approval: "Waiting for you",
@@ -31,21 +32,23 @@ export type Shot = {
   tabId?: number;
 };
 export type Action = (name: string, task: () => Promise<void>) => Promise<void>;
+type Translate = (text: string, vars?: Record<string, string | number>) => string;
 export function toolTitle(
   name: string,
   args: Record<string, any> = {},
+  t: Translate = (text, vars) => (vars ? text.replace(/\{(\w+)\}/g, (m, key) => String(vars[key] ?? m)) : text),
 ): string {
   if (name === "browser_type")
-    return args.text ? `Type “${String(args.text).slice(0, 80)}”` : "Type text";
+    return args.text ? t("Type “{text}”", { text: String(args.text).slice(0, 80) }) : t("Type text");
   if (name === "browser_navigate") {
     try {
-      return `Open ${new URL(args.url).hostname}`;
+      return t("Open {host}", { host: new URL(args.url).hostname });
     } catch {
-      return "Open page";
+      return t("Open page");
     }
   }
   if (name === "browser_press_key")
-    return args.key ? `Press ${args.key}` : "Press key";
+    return args.key ? t("Press {key}", { key: args.key }) : t("Press key");
   const titles: Record<string, string> = {
     browser_snapshot: "Read page",
     browser_screenshot: "Capture screenshot",
@@ -59,14 +62,14 @@ export function toolTitle(
     browser_hover: "Hover element",
     browser_drag: "Drag element",
     browser_downloads: "Check downloads",
-    browser_save_file: args.filename ? `Save ${String(args.filename).slice(0, 60)}` : "Save file",
+    browser_save_file: args.filename ? t("Save {name}", { name: String(args.filename).slice(0, 60) }) : "Save file",
     browser_dialog: "Handle dialog",
     browser_upload: "Upload file",
     browser_evaluate: "Run page script",
     browser_cdp: "Run browser command",
     ask_user: "Ask a question",
   };
-  return titles[name] || name;
+  return titles[name] ? t(titles[name]) : name;
 }
 export function AssistantMessage({ content }: { content: string }) {
   return (
@@ -98,6 +101,7 @@ export function ToolActivity({
   result?: RunEvent;
   working: boolean;
 }) {
+  const t = useT();
   const [expanded, setExpanded] = useState(false);
   return (
     <div className={`tool-activity ${result?.data.error ? "has-error" : ""}`}>
@@ -115,7 +119,7 @@ export function ToolActivity({
         ) : (
           <ChevronRight size={14} />
         )}
-        <span>{toolTitle(event.data.name, event.data.args)}</span>
+        <span>{toolTitle(event.data.name, event.data.args, t)}</span>
         <ChevronRight size={13} className={expanded ? "rotated" : ""} />
       </button>
       {expanded && (
