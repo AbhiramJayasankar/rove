@@ -297,6 +297,16 @@ export function TraceView({
     </div>
   );
 }
+const traceKind = (type: string) =>
+  type.startsWith("model") || type === "run_configuration" || type === "context_usage"
+    ? "model"
+    : type.startsWith("tool") || type === "screenshot" || type.startsWith("approval")
+      ? "tool"
+      : type === "error" || type === "model_error"
+        ? "error"
+        : type.startsWith("user")
+          ? "user"
+          : "status";
 function TraceRecord({
   event,
   expanded,
@@ -312,7 +322,7 @@ function TraceRecord({
         }
       : event.data;
   return (
-    <details className="trace-event" open={expanded}>
+    <details className={`trace-event kind-${traceKind(event.type)}`} open={expanded}>
       <summary>
         <span>{event.type.replaceAll("_", " ")}</span>
         <time>{new Date(event.time).toLocaleTimeString()}</time>

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { api } from "./ui";
 import { usePopover } from "./Popover";
+import { useVisibleModels } from "./modelVisibility";
 import type { ModelInfo } from "../shared/types";
 export const tokenCount = (count: number) =>
   count >= 1_000_000
@@ -43,6 +44,7 @@ export default function ModelPicker({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  const visible = useVisibleModels();
   const [freeOnly, setFreeOnly] = useState(
     localStorage.getItem("relay.freeModels") !== "false",
   );
@@ -82,9 +84,13 @@ export default function ModelPicker({
     if (popup.open) searchRef.current?.focus();
   }, [popup.open]);
   const showProviders = new Set(models.map(model => model.providerId)).size > 1;
+  const isCurrent = (info: ModelInfo) =>
+    info.id === model && (!providerId || info.providerId === providerId);
   const filtered = models.filter(
     (info) =>
-      (!freeOnly || info.free) &&
+      (visible[info.providerId || providerId || ""]
+        ? visible[info.providerId || providerId || ""].includes(info.id) || isCurrent(info)
+        : !freeOnly || info.free) &&
       `${info.name} ${info.id} ${info.owner || ""} ${info.providerName || ""}`
         .toLowerCase()
         .includes(search.toLowerCase()),

@@ -14,7 +14,8 @@ import {
 } from "lucide-react";
 import type { AppState, Settings } from "../shared/types";
 import { DEFAULT_PROMPT } from "../shared/defaults";
-import ModelPicker, { tokenCount } from "./ModelPicker";
+import ModelChecklist from "./ModelChecklist";
+import { useModelVisibility } from "./modelVisibility";
 import VoiceSettings, { useVoiceSettings } from "./VoiceSettings";
 import ChoiceMenu from "./ChoiceMenu";
 import { json, toolTitle, type Action, type Page } from "./ui";
@@ -54,12 +55,8 @@ export default function Configuration({
 }: Props) {
   const [showKey, setShowKey] = useState(false);
   const voice = useVoiceSettings();
+  const visibility = useModelVisibility(state.activeProviderId);
   const [toolSearch, setToolSearch] = useState("");
-  const info =
-    state.settings.baseUrl === draft.baseUrl &&
-    state.modelInfo?.id === draft.model
-      ? state.modelInfo
-      : null;
   const tabs: [Page, string, typeof Cpu][] = [
     ["settings", "Model", Cpu],
     ["instructions", "Instructions", ScrollText],
@@ -176,35 +173,20 @@ export default function Configuration({
             </div>
             <div className="panel model-panel">
               <div className="field model-connection-field">
-                <span>Model</span>
-                <ModelPicker
+                <span>Models in chat</span>
+                <ModelChecklist
                   providerId={state.activeProviderId}
-                  model={draft.model}
-                  label={info?.name}
                   connection={{
                     baseUrl: draft.baseUrl,
                     ...(keyChanged ? { apiKey } : {}),
                   }}
-                  onSelect={(model, _context, providerId) => {
-                    if (providerId && providerId !== state.activeProviderId) { void changeProvider(providerId, model); return; }
+                  model={draft.model}
+                  visibility={visibility}
+                  onFirstPick={(model) => {
                     update("model", model);
                     update("reasoningEffort", "default");
                   }}
                 />
-                {info && (info.contextWindow || info.maxOutputTokens) && (
-                  <div className="connection-facts">
-                    {info.contextWindow && (
-                      <span>
-                        <strong>{tokenCount(info.contextWindow)}</strong> context
-                      </span>
-                    )}
-                    {info.maxOutputTokens && (
-                      <span>
-                        <strong>{tokenCount(info.maxOutputTokens)}</strong> max output
-                      </span>
-                    )}
-                  </div>
-                )}
               </div>
               <div className="tool-round-limit">
                 <label htmlFor="step-limit">Step limit</label>
@@ -318,7 +300,7 @@ export default function Configuration({
         <button
           className="button primary"
           disabled={!!pending || !!state.activeRunId}
-          onClick={() => saveSettings(voice.save)}
+          onClick={() => saveSettings(async () => { await voice.save(); await visibility.save(); })}
         >
           {pending === "save" ? (
             <LoaderCircle className="spin" size={15} />

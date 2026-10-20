@@ -52,3 +52,9 @@ Review: retaining a two-row control area would repeat the exact spacing problem 
 ## Settings redesign
 
 Settings drop hairline rules for tonal panels (`--panel` behind `--field` inputs), so grouping is carried by tone and spacing. A sliding icon switch replaces the text tabs, matching the workbench view switch. Syne carries section titles and the provider name, which acts as the page's identity. Step limit is a pill stepper; model facts are pills; dictation backends are two selectable tiles; tools are grouped by risk (Look, Act, Dangerous) with a colored dot instead of per-row tags. Save floats on a fade rather than a bordered footer. All rules live in `src/settings.css`, scoped to `.settings-page`.
+
+## App-wide pass
+
+The tonal language from Settings now covers the whole app (`src/chat.css`): pill tab picker and view switch, panel composer with 32px pill controls, rounded popovers lifted by shadow instead of outlines, tonal tables, action ledger and trace rows (colored dot by event kind), history and approval cards. Hairlines are gone everywhere except the step timeline's connector.
+
+Behavior fixes: the Settings model dropdown is replaced by a per-provider "Models in chat" checklist (stored in `chrome.storage.local.visibleModels`; a provider with no entry shows all, and the active model is always listed); the reasoning menu is hidden when a model has no real levels; the approval control reads Auto-approve / Ask first; Inspect page uses its own icon instead of the Trace icon; dead "Connect Chrome" states are removed because the extension is always connected.

@@ -79,8 +79,7 @@ test("settings adds OpenRouter, saves its own connection and keeps existing prov
   await expect(ui.getByRole("textbox", { name: "API base URL", exact: true })).toHaveValue("https://openrouter.ai/api/v1");
   await ui.getByRole("textbox", { name: "API base URL", exact: true }).fill(origin + "/router/v1");
   await ui.locator("#provider-key").fill("router-ui-secret");
-  await ui.getByRole("button", { name: "Choose model", exact: true }).last().click();
-  await ui.getByRole("dialog", { name: "Model picker" }).getByRole("option").filter({ hasText: "OpenRouter" }).click();
+  await expect(ui.getByRole("checkbox", { name: "Shared model", exact: true })).toBeChecked();
   await ui.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect.poll(async () => (await rpc("/api/state")).settings.baseUrl).toBe(origin + "/router/v1");
   expect((await rpc("/api/state")).providers).toHaveLength(3);

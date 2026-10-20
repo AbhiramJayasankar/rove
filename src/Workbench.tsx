@@ -14,11 +14,11 @@ import {
   ArrowUp,
   Check,
   Code2,
+  ScanSearch,
   Globe,
   LoaderCircle,
   Maximize2,
   Monitor,
-  Plug,
   RefreshCw,
   Square,
   X,
@@ -247,7 +247,6 @@ export default function Workbench({
   }
   const canRun =
     !!prompt.trim() &&
-    state.bridge.connected &&
     !!state.settings.model &&
     !busy &&
     !voiceBusy &&
@@ -474,26 +473,22 @@ export default function Workbench({
                 </button>
               ) : (
                 <div className="quick-actions">
-                  <button
-                    onClick={() => {
-                      setPrompt(
-                        "Summarize the current page. Read its content and give me the key points.",
-                      );
-                      promptRef.current?.focus();
-                    }}
-                  >
-                    <AlignLeft size={16} />
-                    Summarize this page
-                  </button>
-                  <button
-                    onClick={() => {
-                      setPrompt("Find ");
-                      promptRef.current?.focus();
-                    }}
-                  >
-                    <Search size={16} />
-                    Find something
-                  </button>
+                  {[
+                    [AlignLeft, "Summarize this page", "Summarize the current page. Read its content and give me the key points."],
+                    [Search, "Find something on this page", "Find "],
+                    [Globe, "Open a site and do something", "Open "],
+                  ].map(([Icon, label, text]) => (
+                    <button
+                      key={label as string}
+                      onClick={() => {
+                        setPrompt(text as string);
+                        promptRef.current?.focus();
+                      }}
+                    >
+                      <Icon size={15} aria-hidden="true" />
+                      {label as string}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
@@ -538,17 +533,15 @@ export default function Workbench({
               onSelect={(model, _context, providerId) => runOptions({ model, providerId })}
             />
 
-            <ChoiceMenu
+            {reasoningChoices.length > 1 && <ChoiceMenu
               label="Reasoning level"
               icon={<Brain size={14} />}
               placement="top"
               value={resolvedReasoningEffort(state.settings, state.modelInfo)}
               options={reasoningChoices}
               onChange={(reasoningEffort) => runOptions({ reasoningEffort })}
-              disabled={
-                pending === "run-options" || reasoningChoices.length < 2
-              }
-            />
+              disabled={pending === "run-options"}
+            />}
             <ChoiceMenu
               label="Approval mode"
               icon={<ShieldCheck size={13} />}
@@ -557,7 +550,7 @@ export default function Workbench({
                 state.settings.approvalMode === "never" ? "never" : "risky"
               }
               displayLabel={
-                state.settings.approvalMode === "never" ? "Auto" : "Ask"
+                state.settings.approvalMode === "never" ? "Auto-approve" : "Ask first"
               }
               options={[
                 {
@@ -626,16 +619,16 @@ export default function Workbench({
               title={
                 busy ? "Stop the task before inspecting refs" : "Inspect page"
               }
-              disabled={!state.bridge.connected || !tabId || !!pending || busy}
+              disabled={!tabId || !!pending || busy}
               onClick={() => capture(true)}
             >
-              <Code2 size={16} />
+              <ScanSearch size={16} />
             </button>
             <button
               className="icon-button"
               aria-label="Take browser screenshot"
               title="Refresh screenshot"
-              disabled={!state.bridge.connected || !tabId || !!pending}
+              disabled={!tabId || !!pending}
               onClick={() => capture()}
             >
               <RefreshCw
@@ -670,26 +663,15 @@ export default function Workbench({
             />
           ) : (
             <div className="browser-empty">
-              <Monitor size={32} strokeWidth={1.25} />
-              <h2>{state.bridge.connected ? "" : "Chrome unavailable"}</h2>
+              <Monitor size={30} strokeWidth={1.25} />
+              <p>{tabId ? "No screenshot yet" : "Choose a tab to preview it"}</p>
               <button
                 className="button secondary"
-                disabled={state.bridge.connected && (!tabId || !!pending)}
-                onClick={() =>
-                  state.bridge.connected ? capture() : setPage("settings")
-                }
+                disabled={!tabId || !!pending}
+                onClick={() => capture()}
               >
-                {state.bridge.connected ? (
-                  <>
-                    <RefreshCw size={14} />
-                    Take screenshot
-                  </>
-                ) : (
-                  <>
-                    <Plug size={14} />
-                    Connect Chrome
-                  </>
-                )}
+                <RefreshCw size={14} />
+                Take screenshot
               </button>
             </div>
           )}

@@ -176,23 +176,13 @@ test("connection settings use unsaved credentials for discovery and retain only 
     .getByRole("textbox", { name: "API base URL", exact: true })
     .fill(origin + "/v1");
   await ui.getByLabel("API key", { exact: true }).fill(secret);
-  await ui.getByRole("button", { name: "Choose model", exact: true }).click();
-  const picker = ui.getByRole("dialog", {
-    name: "Model picker",
-    exact: true,
-  });
-  await expect(
-    picker.getByRole("option", { name: "UI fixture model", exact: true }),
-  ).toContainText("UI fixture model");
-  await expect(
-    picker.getByRole("option", { name: "Paid fixture", exact: true }),
-  ).toHaveCount(0);
-  await picker
-    .getByRole("option", { name: "UI fixture model", exact: true })
-    .click();
-  await expect(
-    ui.getByRole("button", { name: "Choose model", exact: true }),
-  ).toContainText("UI fixture model");
+  const checklist = ui.getByRole("group", { name: "Models shown in chat", exact: true });
+  await expect(checklist.getByRole("checkbox", { name: "UI fixture model", exact: true })).toBeChecked();
+  await expect(checklist.getByRole("checkbox", { name: "Paid fixture", exact: true })).toBeChecked();
+  await ui.getByRole("button", { name: "Free", exact: true }).click();
+  await expect(checklist.getByRole("checkbox", { name: "Paid fixture", exact: true })).toHaveCount(0);
+  await ui.getByRole("button", { name: "Free", exact: true }).click();
+  await checklist.getByRole("checkbox", { name: "Paid fixture", exact: true }).uncheck();
   expect((await rpc("/api/settings")).settings.baseUrl).not.toBe(
     origin + "/v1",
   );
@@ -239,6 +229,11 @@ test("connection settings use unsaved credentials for discovery and retain only 
   ).toBeChecked();
   await expect(ui.getByText("Custom tools", { exact: true })).toHaveCount(0);
   await ui.getByRole("button", { name: "Back to chat", exact: true }).click();
+  await ui.getByRole("button", { name: "Choose model", exact: true }).click();
+  const shown = ui.getByRole("dialog", { name: "Model picker", exact: true });
+  await expect(shown.getByRole("option", { name: "UI fixture model", exact: true })).toHaveCount(1);
+  await expect(shown.getByRole("option", { name: "Paid fixture", exact: true })).toHaveCount(0);
+  await ui.keyboard.press("Escape");
 });
 
 test("composer exposes model names, custom reasoning controls, approvals, trace, themes and responsive layout", async () => {
@@ -266,13 +261,13 @@ test("composer exposes model names, custom reasoning controls, approvals, trace,
   const auto = ui
     .locator(".task-composer")
     .getByRole("combobox", { name: "Approval mode", exact: true });
-  await expect(auto).toHaveText("Auto");
+  await expect(auto).toHaveText("Auto-approve");
   await auto.click();
   await ui.getByRole("option", { name: "Ask permission", exact: true }).click();
-  await expect(auto).toHaveText("Ask");
+  await expect(auto).toHaveText("Ask first");
   await auto.click();
   await ui.getByRole("option", { name: "Auto-approve", exact: true }).click();
-  await expect(auto).toHaveText("Auto");
+  await expect(auto).toHaveText("Auto-approve");
   await expect(
     ui
       .locator(".context-strip")

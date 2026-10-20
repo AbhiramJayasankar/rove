@@ -1,0 +1,599 @@
+/* App-wide pass: the same tonal-panel language as settings.css, applied to the shell,
+   conversation, composer, menus, trace and history. Loaded after the base sheets. */
+
+/* Shell */
+.app-shell .extension-header {
+  padding: 12px 16px 6px;
+}
+.app-shell .icon-button {
+  border-radius: 50%;
+}
+.app-shell .icon-button:hover,
+.app-shell .icon-button.selected {
+  background: var(--panel);
+}
+.app-shell .context-strip {
+  gap: 8px;
+  padding: 6px 16px 10px;
+  border: 0;
+}
+.app-shell .target-picker {
+  height: 38px;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+.app-shell .target-picker:hover {
+  background: var(--accent-soft);
+}
+.app-shell .view-switch {
+  padding: 3px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--panel);
+}
+.app-shell .view-switch-thumb {
+  top: 3px;
+  left: 3px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--field);
+  box-shadow: 0 1px 2px var(--shadow);
+  transform: translateX(calc(var(--view-index) * 32px));
+  transition: transform 240ms cubic-bezier(0.3, 0.8, 0.25, 1);
+}
+.app-shell .view-switch button {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+}
+.app-shell .task-panel {
+  background: transparent;
+}
+.app-shell .activity-scroll {
+  padding: 10px 18px 22px;
+}
+
+/* Empty state */
+.app-shell .task-empty {
+  padding: 0 4px 56px;
+}
+.app-shell .task-empty h1 {
+  margin-bottom: 22px;
+  font-size: clamp(30px, 9vw, 40px);
+  font-weight: 700;
+  line-height: 1.08;
+  letter-spacing: -1.6px;
+}
+.app-shell .quick-actions {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.app-shell .quick-actions button {
+  gap: 8px;
+  padding: 9px 14px 9px 12px;
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 500;
+  transition: background 140ms;
+}
+.app-shell .quick-actions button svg {
+  color: var(--accent);
+}
+.app-shell .quick-actions button:hover {
+  background: var(--accent-soft);
+  color: var(--ink);
+}
+.app-shell .setup-model {
+  gap: 12px;
+  padding: 11px 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+.app-shell .setup-model > svg {
+  transform: rotate(45deg);
+}
+
+/* Conversation */
+.app-shell .user-message {
+  padding: 9px 14px;
+  border-radius: 18px;
+  background: var(--accent-soft);
+  margin-bottom: 14px;
+}
+.app-shell .markdown table {
+  display: table;
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 14px 0;
+  border-radius: 14px;
+  background: var(--panel);
+  font-size: 12.5px;
+}
+.app-shell .markdown th,
+.app-shell .markdown td {
+  border: 0;
+  padding: 9px 14px;
+}
+.app-shell .markdown th {
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 11.5px;
+}
+.app-shell .markdown tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--ink) 4%, transparent);
+}
+.app-shell .markdown td {
+  overflow-wrap: anywhere;
+}
+.app-shell .markdown pre {
+  border-radius: 14px;
+  background: var(--panel);
+  padding: 14px;
+}
+.app-shell .markdown code {
+  background: var(--panel);
+  border-radius: 6px;
+}
+.app-shell .markdown blockquote {
+  border: 0;
+  border-radius: 14px;
+  background: var(--panel);
+  padding: 10px 16px;
+}
+.app-shell .activity-error {
+  border-radius: 14px;
+}
+.app-shell .stopped-message {
+  align-items: center;
+  width: fit-content;
+  padding: 5px 6px 5px 14px;
+  border-radius: 999px;
+  background: var(--panel);
+}
+
+/* Action ledger */
+.app-shell .execution-ledger {
+  margin: 0 0 16px;
+}
+.app-shell .execution-summary {
+  width: auto;
+  min-width: 150px;
+  padding: 5px 14px 5px 8px;
+  border-radius: 999px;
+  background: var(--panel);
+  transition: background 140ms;
+}
+.app-shell .execution-summary:hover {
+  background: var(--accent-soft);
+}
+.app-shell .execution-summary > svg {
+  margin-left: auto;
+}
+.app-shell .execution-symbol {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+}
+.app-shell .execution-steps {
+  margin-top: 8px;
+  padding: 8px 14px 8px 8px;
+  border-radius: 18px;
+  background: var(--panel);
+}
+.app-shell .execution-step {
+  border-left-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.app-shell .step-number {
+  background: var(--panel);
+}
+.app-shell .tool-activity-summary {
+  padding: 7px 10px;
+  margin: 2px 0;
+  border-radius: 10px;
+  background: var(--field);
+}
+.app-shell .tool-activity pre {
+  margin: 4px 0 0;
+  border-radius: 12px;
+  background: var(--field);
+}
+.app-shell .reasoning-text {
+  padding: 8px 12px;
+  margin-top: 4px;
+  border-radius: 12px;
+  background: var(--field);
+}
+.app-shell .question-activity {
+  border: 0;
+  border-radius: 16px;
+  background: var(--panel);
+  padding: 12px 14px;
+}
+.app-shell .question-reply {
+  border: 1.5px solid transparent;
+  border-radius: 999px;
+  background: var(--field);
+  padding: 3px 3px 3px 12px;
+}
+.app-shell .question-reply:focus-within {
+  border-color: var(--accent);
+}
+.app-shell .question-answer {
+  border-radius: 12px;
+}
+.app-shell .message-editor {
+  margin: 3px 0 16px 22px;
+  padding: 8px 8px 8px 12px;
+  border: 1.5px solid var(--accent);
+  border-radius: 18px;
+  background: var(--panel);
+}
+.app-shell .message-confirm-button,
+.app-shell .message-editor-footer .icon-button {
+  border-radius: 50%;
+}
+
+/* Approval */
+.app-shell .decision-panel {
+  margin: 4px 16px 8px;
+  padding: 16px 16px 12px;
+  border: 0;
+  border-radius: 20px;
+  background: var(--panel);
+}
+.app-shell .decision-panel strong {
+  font-family: var(--display);
+  font-size: 16px;
+  letter-spacing: -0.3px;
+}
+.app-shell .decision-panel pre {
+  margin: 10px 0 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--field);
+}
+.app-shell .button {
+  min-height: 38px;
+  padding: 8px 18px;
+  border-radius: 999px;
+}
+.app-shell .button.secondary {
+  border: 0;
+  background: var(--field);
+}
+.app-shell .button.secondary:hover {
+  background: var(--accent-soft);
+}
+.app-shell .text-button {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* Notices */
+.app-shell .message.error {
+  margin: 4px 16px 8px;
+  padding: 11px 14px;
+  border-radius: 16px;
+}
+.app-shell .toast {
+  border-radius: 999px;
+  padding: 10px 18px;
+  box-shadow: 0 8px 28px var(--shadow);
+}
+
+/* Composer */
+.app-shell .task-composer {
+  margin: 6px 14px 14px;
+  padding: 10px 10px 8px 14px;
+  gap: 8px;
+  border: 0;
+  border-radius: 24px;
+  background: var(--panel);
+  box-shadow: 0 0 0 1.5px transparent;
+  transition: box-shadow 160ms;
+}
+.app-shell .task-composer:focus-within {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+.app-shell .task-composer textarea {
+  padding: 2px 2px 0;
+  font-size: 14.5px;
+}
+.app-shell .composer-controls {
+  gap: 4px;
+}
+.app-shell .composer-controls:not(:has(.voice-activity, .voice-error)) {
+  height: 32px;
+}
+.app-shell .composer-controls > .choice-trigger,
+.app-shell .composer-controls > .model-picker-trigger {
+  height: 32px;
+  min-height: 32px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--field);
+  font-size: 12px;
+  font-weight: 500;
+}
+.app-shell .composer-controls > .choice-trigger:hover,
+.app-shell .composer-controls > .model-picker-trigger:hover {
+  background: var(--accent-soft);
+}
+.app-shell .composer-controls > .model-picker-trigger {
+  flex: 0 1 auto;
+  max-width: 55%;
+}
+.app-shell .composer-controls > .choice-trigger[aria-label="Approval mode"] {
+  color: var(--accent);
+}
+.app-shell .usage-ring,
+.app-shell .voice-button {
+  width: 32px;
+  height: 32px;
+  flex-basis: 32px;
+  border-radius: 50%;
+}
+.app-shell .usage-ring:hover,
+.app-shell .voice-button:hover {
+  background: var(--field);
+}
+.app-shell .run-button {
+  flex-basis: 32px;
+  width: 32px;
+  height: 32px;
+  margin-left: 2px;
+}
+.app-shell .run-button:disabled {
+  background: var(--field);
+}
+.app-shell .run-button.stop-generation {
+  border-radius: 50%;
+}
+@media (min-width: 700px) {
+  .app-shell .task-composer {
+    margin: 6px 28px 20px;
+  }
+}
+
+/* Menus and popovers: lifted surface, no outline rule */
+.anchored-popover {
+  border: 0;
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--ink) 7%, transparent),
+    0 14px 44px var(--shadow);
+}
+.choice-menu {
+  padding: 6px;
+}
+.choice-option {
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+.choice-option.active,
+.choice-option[aria-selected="true"] {
+  background: var(--panel);
+}
+.model-catalogue {
+  padding: 8px;
+}
+.catalogue-search {
+  margin: 0 0 6px;
+  padding: 3px 4px 3px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--panel);
+}
+.catalogue-search input {
+  font-size: 13px;
+}
+.catalogue-free {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-weight: 500;
+}
+.catalogue-free.selected {
+  background: var(--accent-soft);
+}
+.catalogue-search .icon-button {
+  width: 30px;
+  height: 30px;
+}
+.catalogue-model {
+  padding: 10px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+}
+.catalogue-model:hover,
+.catalogue-model:focus-visible {
+  background: var(--panel);
+}
+.catalogue-model[aria-selected="true"] {
+  background: var(--accent-soft);
+}
+.catalogue-model-text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+}
+.catalogue-model-text .model-provider-name {
+  display: inline;
+  margin: 0;
+  font-size: 11px;
+}
+.usage-popover {
+  padding: 18px;
+}
+.usage-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--panel);
+}
+.usage-bar > i {
+  border-radius: 999px;
+}
+.usage-limits {
+  border: 0;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--panel);
+}
+
+/* Trace */
+.app-shell .trace-controls {
+  top: -10px;
+  gap: 6px;
+  padding: 6px 0 12px;
+}
+.app-shell .trace-controls input {
+  min-height: 38px;
+  padding: 8px 14px;
+  border: 1.5px solid transparent;
+  border-radius: 999px;
+  background: var(--panel);
+  font-size: 12.5px;
+}
+.app-shell .trace-controls input:focus-visible {
+  outline: 0;
+  border-color: var(--accent);
+}
+.app-shell .trace-event {
+  margin: 0 0 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: var(--panel);
+}
+.app-shell .trace-event summary {
+  align-items: center;
+  padding: 11px 14px;
+  list-style: none;
+  font-size: 12.5px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+.app-shell .trace-event summary::-webkit-details-marker {
+  display: none;
+}
+.app-shell .trace-event summary > span {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.app-shell .trace-event summary > span:before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.app-shell .trace-event.kind-model summary > span:before {
+  background: var(--muted);
+}
+.app-shell .trace-event.kind-tool summary > span:before {
+  background: var(--warning);
+}
+.app-shell .trace-event.kind-error summary > span:before {
+  background: var(--danger);
+}
+.app-shell .trace-event summary time {
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+}
+.app-shell .trace-event pre {
+  margin: 0 8px 8px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--field);
+}
+.app-shell .trace-screenshot {
+  margin: 0 8px 8px;
+  border-radius: 10px;
+}
+
+/* History dialog */
+.history-dialog {
+  border: 0;
+  border-radius: 28px;
+  background: var(--surface);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--ink) 7%, transparent),
+    0 24px 70px var(--shadow);
+}
+.history-dialog .dialog-heading h2 {
+  font-size: 24px;
+  letter-spacing: -0.8px;
+}
+.history-search {
+  border: 0;
+  border-radius: 999px;
+  background: var(--panel);
+}
+.history-item {
+  border-radius: 14px;
+}
+.history-item:hover,
+.history-item[aria-current="page"] {
+  background: var(--panel);
+}
+
+/* Preview */
+.app-shell .browser-toolbar {
+  padding: 8px 16px 10px;
+}
+.app-shell .browser-url {
+  margin: 0 16px 12px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--panel);
+}
+.app-shell .browser-viewport > img {
+  border: 0;
+  border-radius: 16px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 8%, transparent);
+}
+.app-shell .browser-empty {
+  margin: 0 16px 16px;
+  border-radius: 24px;
+  background: var(--panel);
+  gap: 12px;
+}
+.app-shell .browser-empty > svg {
+  display: block;
+}
+.app-shell .snapshot-drawer {
+  border: 0;
+  border-radius: 24px 24px 0 0;
+  background: var(--panel);
+}
+
+.app-shell .assistant-message .markdown {
+  flex: 1;
+}
+@media (max-width: 380px) {
+  .app-shell .composer-controls > .choice-trigger[aria-label="Approval mode"] > span {
+    display: none;
+  }
+  .app-shell .composer-controls > .choice-trigger[aria-label="Approval mode"] {
+    padding-inline: 10px;
+  }
+  .app-shell .composer-controls > .choice-trigger[aria-label="Approval mode"] > svg:first-child {
+    display: block;
+  }
+}
