@@ -17,6 +17,10 @@ The gateway's advertised output cap takes priority over a larger direct-upstream
 
 Context and output capacity are shared. Relay starts with the model's maximum output, reserves space for actual instructions and the newest complete tool group, and then compacts older complete groups when needed. Lower limits reported by a context rejection are applied to the working request while the original model metadata remains inspectable. Rejected model requests can retry; browser actions never replay.
 
+## OpenRouter reasoning object
+
+OpenRouter's `/models` publishes `reasoning: { mandatory, supported_efforts, default_effort, default_enabled }`. Relay reads it and sends `reasoning: { effort }`. Without tiers, an optional model gets a Thinking off/on control (`reasoning: { enabled }`); mandatory or absent reasoning shows no control. Checked 2026-10-21 against the live catalogue of 468 models: 196 show three or more levels, 98 show on/off, 174 have no control. TokenHarbor's catalogue publishes no reasoning fields, so only its four documented models have controls.
+
 ## MiMo effort names versus distinct intensity
 
 Xiaomi's Chat Completions protocol documents `thinking.type` with `enabled` and `disabled`. Its Responses protocol accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, and `ultra` through `reasoning.effort`, but explicitly states that all non-`none` values currently enable the same reasoning behavior. Those accepted names do not establish different intensity tiers. Relay uses Chat Completions and shows the documented binary control when the connected catalogue does not advertise effort tiers. If an endpoint advertises effort enums, those levels and its declared reasoning protocol override the fallback automatically.

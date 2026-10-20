@@ -1366,6 +1366,11 @@ function reasoningOptions(_settings, info) {
       ) || []
     )
   ];
+  if (info.reasoningFormat === "reasoning" && info.reasoningToggle && !efforts.length)
+    return [
+      { value: "none", label: "Thinking off" },
+      { value: "high", label: "Thinking on" }
+    ];
   if (info.reasoningToggle && !efforts.includes("none"))
     efforts.unshift("none");
   if (!efforts.length) return [{ value: "default", label: "Automatic" }];
@@ -1451,7 +1456,8 @@ function generationOptions(settings, model) {
       result.thinking = { type: effort === "none" ? "disabled" : "enabled" };
     else if (format2 === "enable_thinking")
       result.enable_thinking = effort !== "none";
-    else if (format2 === "reasoning") result.reasoning = { effort };
+    else if (format2 === "reasoning")
+      result.reasoning = model?.reasoningToggle && !model.reasoningEfforts?.length ? { enabled: effort !== "none" } : { effort };
     else {
       if (model?.reasoningToggle)
         result.thinking = { type: effort === "none" ? "disabled" : "enabled" };
@@ -1926,7 +1932,9 @@ var boolean = (...values) => values.find((v) => typeof v === "boolean");
 var strings = (value) => Array.isArray(value) ? value.filter((v) => typeof v === "string") : void 0;
 function normalizeModel(raw, source) {
   const documented = documentedCapabilities(raw.id, source);
-  const efforts = strings(
+  const nested = raw.reasoning && typeof raw.reasoning === "object" && !Array.isArray(raw.reasoning) ? raw.reasoning : void 0;
+  const nestedEfforts = strings(nested?.supported_efforts)?.filter(Boolean);
+  const efforts = (nestedEfforts?.length ? nestedEfforts : void 0) ?? strings(
     raw.reasoning_efforts ?? raw.supported_reasoning_efforts ?? raw.effort?.supported_levels ?? raw.capabilities?.reasoning?.efforts ?? raw.capabilities?.reasoning?.levels ?? raw.parameters?.reasoning_effort?.enum ?? raw.parameters?.reasoning?.properties?.effort?.enum
   );
   const parameters = strings(
@@ -1938,7 +1946,7 @@ function normalizeModel(raw, source) {
   const output2 = strings(
     raw.architecture?.output_modalities ?? raw.output_modalities ?? raw.modalities?.output
   );
-  const reasoningFormat = parameters?.includes("reasoning") && !parameters?.includes("reasoning_effort") ? "reasoning" : parameters?.includes("reasoning_effort") || efforts ? "reasoning_effort" : parameters?.some((p) => p === "thinking" || p === "thinking.type") ? "thinking" : parameters?.includes("enable_thinking") ? "enable_thinking" : parameters?.includes("reasoning") ? "reasoning" : void 0;
+  const reasoningFormat = nested ? "reasoning" : parameters?.includes("reasoning") && !parameters?.includes("reasoning_effort") ? "reasoning" : parameters?.includes("reasoning_effort") || efforts ? "reasoning_effort" : parameters?.some((p) => p === "thinking" || p === "thinking.type") ? "thinking" : parameters?.includes("enable_thinking") ? "enable_thinking" : parameters?.includes("reasoning") ? "reasoning" : void 0;
   const pricing = raw.pricing && typeof raw.pricing === "object" ? raw.pricing : void 0;
   const inputPrice = pricing?.prompt ?? pricing?.input_usd_per_1m ?? pricing?.input;
   const outputPrice = pricing?.completion ?? pricing?.output_usd_per_1m ?? pricing?.output;
@@ -1983,6 +1991,8 @@ function normalizeModel(raw, source) {
     reasoningEfforts: efforts ?? documented.reasoningEfforts,
     reasoningToggle: boolean(
       raw.capabilities?.reasoning?.toggle,
+      // A reasoning object with no effort tiers that can be switched off is a plain on/off control.
+      nested && !nestedEfforts?.length && nested.mandatory === false ? true : void 0,
       parameters?.some((p) => p === "thinking" || p === "thinking.type") ? true : void 0
     ) ?? documented.reasoningToggle,
     outputTokenParameter: parameters?.includes("max_completion_tokens") ? "max_completion_tokens" : parameters?.includes("max_tokens") ? "max_tokens" : documented.outputTokenParameter,

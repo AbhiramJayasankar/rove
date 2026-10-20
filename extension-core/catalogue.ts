@@ -18,7 +18,13 @@ export function normalizeModel(
   source: string,
 ): ModelInfo {
   const documented = documentedCapabilities(raw.id, source);
-  const efforts = strings(
+  // OpenRouter publishes a nested object: { mandatory, supported_efforts, default_effort, default_enabled }.
+  const nested =
+    raw.reasoning && typeof raw.reasoning === "object" && !Array.isArray(raw.reasoning)
+      ? (raw.reasoning as Record<string, any>)
+      : undefined;
+  const nestedEfforts = strings(nested?.supported_efforts)?.filter(Boolean);
+  const efforts = (nestedEfforts?.length ? nestedEfforts : undefined) ?? strings(
     raw.reasoning_efforts ??
       raw.supported_reasoning_efforts ??
       raw.effort?.supported_levels ??
@@ -42,8 +48,9 @@ export function normalizeModel(
       raw.output_modalities ??
       raw.modalities?.output,
   );
-  const reasoningFormat =
-    parameters?.includes("reasoning") &&
+  const reasoningFormat = nested
+    ? "reasoning"
+    : parameters?.includes("reasoning") &&
     !parameters?.includes("reasoning_effort")
       ? "reasoning"
       : parameters?.includes("reasoning_effort") || efforts
@@ -108,6 +115,8 @@ export function normalizeModel(
     reasoningToggle:
       boolean(
         raw.capabilities?.reasoning?.toggle,
+        // A reasoning object with no effort tiers that can be switched off is a plain on/off control.
+        nested && !nestedEfforts?.length && nested.mandatory === false ? true : undefined,
         parameters?.some((p) => p === "thinking" || p === "thinking.type")
           ? true
           : undefined,

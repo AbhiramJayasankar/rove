@@ -86,7 +86,11 @@ export function generationOptions(
       result.thinking = { type: effort === "none" ? "disabled" : "enabled" };
     else if (format === "enable_thinking")
       result.enable_thinking = effort !== "none";
-    else if (format === "reasoning") result.reasoning = { effort };
+    else if (format === "reasoning")
+      result.reasoning =
+        model?.reasoningToggle && !model.reasoningEfforts?.length
+          ? { enabled: effort !== "none" }
+          : { effort };
     else {
       if (model?.reasoningToggle)
         result.thinking = { type: effort === "none" ? "disabled" : "enabled" };

@@ -6,6 +6,7 @@ import {
 } from "../catalogue";
 import { generationOptions, ModelEndpointError } from "../model";
 import { DEFAULT_SETTINGS } from "../../shared/defaults";
+import { reasoningOptions, resolvedReasoningEffort } from "../../shared/capabilities";
 afterEach(() => vi.unstubAllGlobals());
 describe("endpoint model metadata", () => {
   it("uses labels, prices, tools, modalities and the most restrictive limits", () => {
@@ -57,6 +58,37 @@ describe("endpoint model metadata", () => {
     expect(
       generationOptions({ ...settings, reasoningEffort: "high" }, info),
     ).toEqual({ max_completion_tokens: 8192, reasoning_effort: "high" });
+  });
+  it("reads OpenRouter's nested reasoning object for effort tiers", () => {
+    const info = normalizeModel(
+      {
+        id: "vendor/tiered:free",
+        context_length: 200000,
+        supported_parameters: ["tools", "reasoning", "reasoning_effort", "include_reasoning"],
+        reasoning: { mandatory: false, supported_efforts: ["max", "xhigh", "high", "medium", "low", "none"], default_effort: "high" },
+      },
+      "https://openrouter.ai/api/v1/models",
+    );
+    expect(info.reasoningFormat).toBe("reasoning");
+    expect(reasoningOptions(DEFAULT_SETTINGS, info).map((o) => o.value)).toEqual(["none", "low", "medium", "high", "xhigh", "max"]);
+    expect(resolvedReasoningEffort(DEFAULT_SETTINGS, info)).toBe("max");
+    expect(generationOptions({ ...DEFAULT_SETTINGS, reasoningEffort: "xhigh" }, info)).toMatchObject({ reasoning: { effort: "xhigh" } });
+  });
+  it("shows an on/off control for optional reasoning without tiers, and nothing for mandatory or absent reasoning", () => {
+    const toggle = normalizeModel(
+      { id: "vendor/toggle", supported_parameters: ["reasoning"], reasoning: { mandatory: false, default_enabled: true } },
+      "https://openrouter.ai/api/v1/models",
+    );
+    expect(reasoningOptions(DEFAULT_SETTINGS, toggle).map((o) => o.label)).toEqual(["Thinking off", "Thinking on"]);
+    expect(generationOptions({ ...DEFAULT_SETTINGS, reasoningEffort: "none" }, toggle)).toMatchObject({ reasoning: { enabled: false } });
+    expect(generationOptions({ ...DEFAULT_SETTINGS, reasoningEffort: "high" }, toggle)).toMatchObject({ reasoning: { enabled: true } });
+    const mandatory = normalizeModel(
+      { id: "vendor/always", supported_parameters: ["reasoning"], reasoning: { mandatory: true } },
+      "https://openrouter.ai/api/v1/models",
+    );
+    expect(reasoningOptions(DEFAULT_SETTINGS, mandatory)).toHaveLength(1);
+    const none = normalizeModel({ id: "vendor/plain", supported_parameters: ["tools"] }, "https://openrouter.ai/api/v1/models");
+    expect(reasoningOptions(DEFAULT_SETTINGS, none)).toHaveLength(1);
   });
   it("does not invent capabilities from an unknown model ID", () => {
     const info = normalizeModel(

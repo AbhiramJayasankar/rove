@@ -39,6 +39,15 @@ export function reasoningOptions(
       ) || [],
     ),
   ];
+  if (
+    info.reasoningFormat === "reasoning" &&
+    info.reasoningToggle &&
+    !efforts.length
+  )
+    return [
+      { value: "none", label: "Thinking off" },
+      { value: "high", label: "Thinking on" },
+    ];
   if (info.reasoningToggle && !efforts.includes("none"))
     efforts.unshift("none");
   if (!efforts.length) return [{ value: "default", label: "Automatic" }];
