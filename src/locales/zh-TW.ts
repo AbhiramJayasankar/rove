@@ -86,6 +86,8 @@ const zhTW: Record<string, string> = {
   "What the endpoint reports": "端點提供的資訊",
   "Raw endpoint data": "端點原始資料",
   "Details for {name}": "{name} 的詳情",
+  "Model abilities and details appear once the endpoint lists {model}.": "端點列出 {model} 後，這裡會顯示模型能力和詳情。",
+  "Choose a model above to see its abilities and what the endpoint reports.": "在上方選擇一個模型，即可查看其能力和端點提供的資訊。",
   "Act": "操作",
   "Action details": "操作詳情",
   "Activity": "動態",

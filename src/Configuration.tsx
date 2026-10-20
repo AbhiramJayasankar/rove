@@ -16,7 +16,7 @@ import {
   Wrench,
   X,
 } from "lucide-react";
-import type { AppState, Settings } from "../shared/types";
+import type { AppState, ModelInfo, Settings } from "../shared/types";
 import { DEFAULT_PROMPT } from "../shared/defaults";
 import ModelChecklist from "./ModelChecklist";
 import ModelAbilities from "./ModelAbilities";
@@ -71,6 +71,7 @@ export default function Configuration({
   const voice = useVoiceSettings();
   const visibility = useModelVisibility(state.activeProviderId);
   const shortcuts = useShortcutsEditor();
+  const [listed, setListed] = useState<ModelInfo[]>([]);
   const [toolSearch, setToolSearch] = useState("");
   const whatsNew = useRef<HTMLDialogElement>(null);
   const tabs: [Page, string, typeof Cpu][] = [
@@ -78,6 +79,9 @@ export default function Configuration({
     ["instructions", "Instructions", ScrollText],
     ["tools", "Tools", Wrench],
   ];
+  const selectedInfo =
+    (state.modelInfo?.id === draft.model && state.settings.baseUrl === draft.baseUrl ? state.modelInfo : undefined) ??
+    listed.find((info) => info.id === draft.model);
   const enabledCount = state.tools.length - draft.disabledTools.length;
   const tools = state.tools.filter((tool) =>
     (tool.name + tool.description)
@@ -197,6 +201,7 @@ export default function Configuration({
                     ...(keyChanged ? { apiKey } : {}),
                   }}
                   model={draft.model}
+                  onModels={setListed}
                   visibility={visibility}
                   onFirstPick={(model) => {
                     update("model", model);
@@ -204,11 +209,17 @@ export default function Configuration({
                   }}
                 />
               </div>
-              {state.modelInfo?.id === draft.model && state.settings.baseUrl === draft.baseUrl && (
+              {selectedInfo ? (
                 <>
-                  <ModelDetails model={state.modelInfo} />
-                  <ModelAbilities model={state.modelInfo} endpoint={state.settings.baseUrl} />
+                  <ModelDetails model={selectedInfo} />
+                  <ModelAbilities model={selectedInfo} endpoint={draft.baseUrl} />
                 </>
+              ) : (
+                <p className="abilities-note model-abilities-empty">
+                  {draft.model
+                    ? t("Model abilities and details appear once the endpoint lists {model}.", { model: draft.model })
+                    : t("Choose a model above to see its abilities and what the endpoint reports.")}
+                </p>
               )}
               <div className="tool-round-limit">
                 <label htmlFor="step-limit">{t("Step limit")}</label>

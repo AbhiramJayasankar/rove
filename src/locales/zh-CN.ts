@@ -86,6 +86,8 @@ const zhCN: Record<string, string> = {
   "What the endpoint reports": "接口提供的信息",
   "Raw endpoint data": "接口原始数据",
   "Details for {name}": "{name} 的详情",
+  "Model abilities and details appear once the endpoint lists {model}.": "接口列出 {model} 后，这里会显示模型能力和详情。",
+  "Choose a model above to see its abilities and what the endpoint reports.": "在上方选择一个模型，即可查看其能力和接口提供的信息。",
   "Act": "操作",
   "Action details": "操作详情",
   "Activity": "动态",

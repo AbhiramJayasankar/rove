@@ -14,12 +14,14 @@ export default function ModelChecklist({
   model,
   visibility,
   onFirstPick,
+  onModels,
 }: {
   providerId: string;
   connection: { baseUrl: string; apiKey?: string };
   model: string;
   visibility: ModelVisibility;
   onFirstPick: (model: string) => void;
+  onModels?: (models: ModelInfo[]) => void;
 }) {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const t = useT();
@@ -41,7 +43,9 @@ export default function ModelChecklist({
           body: JSON.stringify({ ...connection, refresh: reload > 0 }),
         });
         if (!current) return;
-        setModels(result.models.filter((info) => !info.providerId || info.providerId === providerId));
+        const own = result.models.filter((info) => !info.providerId || info.providerId === providerId);
+        setModels(own);
+        onModels?.(own);
         setError(result.warnings?.join(" ") || "");
       } catch (failure) {
         if (current) setError(failure instanceof Error ? failure.message : String(failure));

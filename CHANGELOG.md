@@ -2,6 +2,23 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## 2.3.0 - 2026-10-21
+
+Better local-model support and more visibility into what each endpoint reports.
+
+### Added
+- Output speed in tokens per second on each answer, on every step in the trace and averaged in the usage popover.
+- Time sent on every message, and a copy button on your messages and Rove's answers.
+- Model abilities in Settings → Model: send images always or never for a given model, and replace its reasoning control with your own levels (each level is JSON merged into the request, with presets for llama.cpp, vLLM, DeepSeek, OpenAI and OpenRouter styles).
+- Model details: what the endpoint reports for a model (context, max input and output, input and output types, tool calling, images, reasoning, price, accepted parameters, size and quantization when given) with "Not reported" where it is silent, plus the raw endpoint entry. Shown on the Model settings page, and as an info popover on every model in the picker and in the chat checklist.
+- llama.cpp servers are detected: Rove reads the loaded context size, whether the model accepts images and whether it has a thinking switch.
+
+### Changed
+- Your message's time now sits at the right of the row under the bubble, with copy and edit to its left.
+- A model that gets no images no longer takes automatic screenshots or sees the screenshot tool, and is told to rely on page snapshots.
+- Edit and copy now sit outside the message bubble, under it, and appear on hover or focus.
+- The recording indicator is a time-based waveform in the top-right of the message box, so the box no longer grows while you dictate.
+
 ## 2.2.0 - 2026-10-21
 
 Closes the main gaps against other bring-your-own-model browser agents.
@@ -17,17 +34,8 @@ Closes the main gaps against other bring-your-own-model browser agents.
 - English, Simplified Chinese and Traditional Chinese, following Chrome by default and switchable in Settings.
 - Alt+Shift+O shortcut for the toolbar action, and an MIT license.
 - Info tooltips on the Tools page: every tool explains what it does, how risky it is, when it asks for approval and what inputs it takes. Group headings, the enabled count and site rules explain themselves too, and the approval prompt shows the same detail for the tool being approved.
-- Output speed in tokens per second on each answer, on every step in the trace and averaged in the usage popover.
-- Time sent on every message, and a copy button on your messages and Rove's answers.
-
-- Model abilities in Settings → Model: send images always or never for a given model, and replace its reasoning control with your own levels (each level is JSON merged into the request, with presets for llama.cpp, vLLM, DeepSeek, OpenAI and OpenRouter styles).
-- Model details: what the endpoint reports for a model (context, max input and output, input and output types, tool calling, images, reasoning, price, accepted parameters, size and quantization when given) with "Not reported" where it is silent, plus the raw endpoint entry. Shown on the Model settings page, and as an info popover on every model in the picker and in the chat checklist.
-- llama.cpp servers are detected: Rove reads the loaded context size, whether the model accepts images and whether it has a thinking switch.
 
 ### Changed
-- A model that gets no images no longer takes automatic screenshots or sees the screenshot tool, and is told to rely on page snapshots.
-- Edit and copy now sit outside the message bubble, under it, and appear on hover or focus.
-- The recording indicator is a time-based waveform in the top-right of the message box, so the box no longer grows while you dictate.
 - Model and reasoning changes are allowed while other tasks run, and apply to the next task. Provider and endpoint changes still wait until no task is running.
 - Auto-approve now applies per task, so switching it never approves another task's pending action.
 
