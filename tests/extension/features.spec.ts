@@ -110,6 +110,17 @@ test("tool tooltips explain each tool, its risk and its inputs, and group headin
   await expect(tip).toContainText("textOffset");
   await expect(tip).toContainText("whole number");
   await ui.screenshot({ path: "test-results/tool-tooltip.png" });
+  // The panel sits fully on screen and stays open while the pointer is on it, so it can be read.
+  const box = (await tip.boundingBox())!;
+  expect(box.y).toBeGreaterThanOrEqual(0);
+  expect(box.y + box.height).toBeLessThanOrEqual(850);
+  expect(box.x).toBeGreaterThanOrEqual(0);
+  expect(box.x + box.width).toBeLessThanOrEqual(420);
+  await ui.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await ui.waitForTimeout(400);
+  await expect(tip).toBeVisible();
+  const overflow = await tip.evaluate((element) => element.scrollHeight - element.clientHeight);
+  expect(overflow).toBeLessThanOrEqual(1);
   await ui.mouse.move(5, 400);
   await expect(tip).toHaveCount(0);
   // Keyboard users get the same explanation, and Escape closes it.

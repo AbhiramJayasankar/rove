@@ -239,7 +239,7 @@ const zhTW: Record<string, string> = {
   "Stop dictation": "停止聽寫",
   "Stop dictation · Escape cancels": "停止聽寫 · 按 Esc 取消",
   "Stop generation": "停止產生",
-  "Stop the current task before saving settings.": "請先停止目前任務，再儲存設定。",
+  "Stop the running tasks before saving settings.": "請先停止執行中的任務，再儲存設定。",
   "Stop the task before inspecting refs": "請先停止任務再檢查頁面元素",
   "Stopped": "已停止",
   "Summarize the current page. Read its content and give me the key points.": "摘要目前頁面。閱讀其內容並提供重點。",

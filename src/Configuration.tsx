@@ -110,7 +110,7 @@ export default function Configuration({
       <div className="settings-content">
         {state.activeRunId && (
           <div className="message">
-            {t("Stop the current task before saving settings.")}
+            {t("Stop the running tasks before saving settings.")}
           </div>
         )}
         {page === "settings" ? (

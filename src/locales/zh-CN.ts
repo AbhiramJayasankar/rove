@@ -239,7 +239,7 @@ const zhCN: Record<string, string> = {
   "Stop dictation": "停止听写",
   "Stop dictation · Escape cancels": "停止听写 · 按 Esc 取消",
   "Stop generation": "停止生成",
-  "Stop the current task before saving settings.": "请先停止当前任务，再保存设置。",
+  "Stop the running tasks before saving settings.": "请先停止正在运行的任务，再保存设置。",
   "Stop the task before inspecting refs": "请先停止任务再检查页面元素",
   "Stopped": "已停止",
   "Summarize the current page. Read its content and give me the key points.": "总结当前页面。阅读其内容并给出要点。",
