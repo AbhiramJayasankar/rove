@@ -19,4 +19,7 @@ export const DEFAULT_SETTINGS: Settings = {
   approvalMode: "never",
   vision: true,
   disabledTools: ["browser_evaluate", "browser_cdp", "browser_upload"],
+  backgroundTabs: true,
+  groupTabs: true,
+  keepGoingOnBarClose: true,
 };

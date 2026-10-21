@@ -66,6 +66,9 @@ export const settingsSchema = z.preprocess(
     approvalMode: z.enum(["always", "risky", "never"]),
     vision: z.literal(true).default(true),
     disabledTools: z.array(z.string()).max(100),
+    backgroundTabs: z.boolean().default(DEFAULT_SETTINGS.backgroundTabs),
+    groupTabs: z.boolean().default(DEFAULT_SETTINGS.groupTabs),
+    keepGoingOnBarClose: z.boolean().default(DEFAULT_SETTINGS.keepGoingOnBarClose),
   }),
 );
 

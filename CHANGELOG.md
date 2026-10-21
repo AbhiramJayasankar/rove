@@ -2,6 +2,20 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## 2.5.0 - 2026-10-21
+
+Rove no longer takes over your browser while it works.
+
+### Added
+- Background work. Rove opens and drives its tabs without switching to them, so you can keep using Chrome (or another app) while a task runs. Hidden tabs keep rendering at full speed during a task and go back to normal afterwards, and screenshots of them work without bringing them forward.
+- Tab groups. Tabs Rove opens go into one Chrome tab group titled Rove per task, so you can see what it opened and close it together. Your own tabs are never grouped, and the group stays after the task so you can review it.
+- Settings → Tools → Browsing, with switches for working in the background, grouping tabs, and keeping going when you close Chrome's debugging bar. All three are on by default and apply to the next browser action.
+- Closing Chrome's debugging bar no longer ends a task by default. Rove reconnects on its next action (the bar returns with it). Chrome does not let an extension hide that bar; launching Chrome with `--silent-debugger-extension-api` does.
+
+### Changed
+- Starting a task, opening a new tab and taking a screenshot no longer switch to the tab. The "Work in the background" switch restores the old behavior.
+- A browser command that times out no longer tells you to bring the tab to the foreground.
+
 ## 2.4.1 - 2026-10-21
 
 ### Removed

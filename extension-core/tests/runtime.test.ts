@@ -13,6 +13,9 @@ vi.mock("../../extension-src/browser.js", () => ({
   setNotifier: (notify: typeof fixture.notify) => { fixture.notify = notify; },
   listTabs: async () => [7, 8, 9].map(id => ({ id, url: "https://example.com", title: "Page" })),
   prepareRun: fixture.prepare,
+  configureBrowser: () => {},
+  groupTab: async () => {},
+  forgetGroup: () => {},
   releaseTab: fixture.releaseTab,
   detachAll: fixture.detachAll,
   hasPendingDialogs: () => false,
@@ -172,7 +175,16 @@ describe("concurrent runtime lifecycle", () => {
     expect(clear).toHaveBeenCalledWith(keepAlive);
   });
 
-  it("banner cancellation stops every active run even from a nonselected tab", async () => {
+  it("closing Chrome's debugging bar leaves every active run going by default", async () => {
+    const first = await start("first", 7), second = await start("second", 8);
+    fixture.notify("browser_notice", { event: "detached", tabId: 99, reason: "canceled_by_user" });
+    expect((await rpc("/api/state")).activeRunIds).toEqual([first.id, second.id]);
+    for (const run of [first, second]) expect((await rpc(`/api/runs/${run.id}`)).status).toBe("awaiting_approval");
+  });
+
+  it("banner cancellation stops every active run, even from a nonselected tab, when keeping going is off", async () => {
+    const settings = (await rpc("/api/state")).settings;
+    await rpc("/api/settings", "PUT", { ...settings, keepGoingOnBarClose: false });
     const first = await start("first", 7), second = await start("second", 8);
     fixture.notify("browser_notice", { event: "detached", tabId: 99, reason: "canceled_by_user" });
     expect((await rpc("/api/state")).activeRunIds).toEqual([]);

@@ -469,7 +469,7 @@ test("editing immediately after provider failure safely reconnects and replaces 
   expect(record.prompt).toBe("Approval fixture edit after rejection");
 });
 
-test("a discarded background tab wakes before edit-and-run initializes its debugger", async () => {
+test("a discarded background tab is restored in place before edit-and-run initializes its debugger", async () => {
   await configure({ approvalMode: "never" });
   const tabId = await targetId();
   const original = await api("/api/runs", "POST", {
@@ -506,7 +506,8 @@ test("a discarded background tab wakes before edit-and-run initializes its debug
   await finished(edited.id);
   const tab = await ui.evaluate(async (id) => chrome.tabs.get(id), restoredId);
   expect(tab.discarded).toBe(false);
-  expect(tab.active).toBe(true);
+  // Background mode restores the tab in place; it does not take the user's view away from Rove's page.
+  expect(tab.active).toBe(false);
 });
 
 test("a completed chat continues from its journal after a worker restart", async () => {

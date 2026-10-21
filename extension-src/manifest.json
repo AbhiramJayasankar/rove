@@ -1,10 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Rove",
-  "version": "2.4.1",
+  "version": "2.5.0",
   "description": "Your browser agent. Your endpoint, prompts, tools and history. Runs entirely in Chrome.",
   "minimum_chrome_version": "125",
-  "permissions": ["debugger", "tabs", "storage", "downloads", "sidePanel", "unlimitedStorage"],
+  "permissions": ["debugger", "tabs", "tabGroups", "storage", "downloads", "sidePanel", "unlimitedStorage"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "background": { "service_worker": "runtime.js", "type": "module" },
   "side_panel": { "default_path": "index.html" },

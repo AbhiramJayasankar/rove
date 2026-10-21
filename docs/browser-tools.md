@@ -8,7 +8,7 @@ Build the extension, load the generated `extension/` directory as an unpacked ex
 
 The browser module exports:
 
-- `prepareRun(tabId?)` selects and attaches the run's target **before the first model request**, returning `{tabId, url, title}`. Active debugger sessions keep the MV3 worker alive. When no target is supplied and no ordinary tab exists, it creates and attaches a blank starter tab; an explicit restricted target is rejected.
+- `prepareRun(tabId?)` selects and attaches the run's target **before the first model request**, returning `{tabId, url, title}`. Active debugger sessions keep the MV3 worker alive. When no target is supplied and no ordinary tab exists, it creates and attaches a blank starter tab; an explicit restricted target is rejected. It does not switch to the target unless `backgroundTabs` is off, and it reports tabs it created to the lease callback (`claimTab(tabId, {created: true})`) so the worker can group them.
 - `perform(action, args?)` executes one browser operation and returns its result or throws an actionable error. The caller owns serial scheduling and cancellation.
 - `listTabs()` returns the browser's current tab inventory.
 - `detachAll()` releases all attached debugger sessions at the end of a run.
@@ -36,7 +36,7 @@ Forced service-worker termination can leave Chrome's extension-owned debugger se
 
 ## Tabs, frames, and references
 
-Before using a cached debugger attachment, each browser operation probes the root session. If Chrome has disconnected it, Rove clears the stale cache and stops an active task. It does not replay the rejected command. A new task or manual observation acquires a fresh session. A detach notification stops an active task only when the user cancels Chrome's debugger banner or the tab the task is working in is lost. A different tab it used earlier, or a command timeout, is reported to the model on its next use instead.
+Before using a cached debugger attachment, each browser operation probes the root session. If Chrome has disconnected it, Rove clears the stale cache and stops an active task. It does not replay the rejected command. A new task or manual observation acquires a fresh session. A detach notification stops an active task only when the tab the task is working in is lost, or when the user cancels Chrome's debugger banner and `keepGoingOnBarClose` is off. With it on, the task continues and its next action attaches again. A different tab it used earlier, or a command timeout, is reported to the model on its next use instead.
 
 Most tools accept an optional numeric `tabId`. An explicit ID is preferable: without one the bridge uses its last controlled tab, or chooses an active controllable tab. `browser_tabs` returns IDs, titles, URLs, active state, and a `controllable` flag. A tab listed by Chrome is not necessarily controllable.
 
@@ -106,7 +106,7 @@ Return JSON-serializable data. Page exceptions become tool errors. These scripts
 
 ## Limits and failure recovery
 
-- Chrome 125+ is required. Debugger permissions produce Chrome's visible permission/control indicators. Opening DevTools, closing a tab, browser policy, or canceling the debugging banner can detach the session.
+- Chrome 125+ is required. Debugger permissions produce Chrome's visible permission/control indicators. Opening DevTools, closing a tab, browser policy, or closing the debugging bar (its Cancel and close buttons both detach with `canceled_by_user`) can detach the session. An extension cannot hide the bar; only launching Chrome with `--silent-debugger-extension-api` does.
 - Rove refuses its own extension pages, Chrome internals, and Chrome Web Store pages. It also rejects snapshots/evaluation of an embedded Rove extension frame. Ordinary localhost sites remain controllable. Advanced JavaScript is deliberately powerful and can initiate navigation; subsequent operations still check the resulting target.
 - Same-process iframe coordinates are adjusted using the embedding frame. Out-of-process iframes have child sessions; native pointer targets are translated through their embedding frames to the root viewport. Deeply nested/transformed frame geometry requires testing against the target site; use fresh frame snapshots when an interaction fails.
 - Open shadow roots are traversed. Closed shadow roots, canvas-only controls, inaccessible inputs, browser menus, OS dialogs, browser authentication prompts, and CAPTCHA challenges are not universally covered.

@@ -13,6 +13,19 @@ export function setNotifier(callback) {
   notifier = typeof callback === 'function' ? callback : () => {};
 }
 
+const DEFAULT_OPTIONS = { backgroundTabs: true, groupTabs: true };
+let readOptions = () => DEFAULT_OPTIONS;
+/** The worker supplies a live view of the user's browser settings; nothing here caches them. */
+export function configureBrowser(provider) {
+  readOptions = typeof provider === 'function' ? provider : () => DEFAULT_OPTIONS;
+}
+const option = name => { try { return readOptions()?.[name] ?? DEFAULT_OPTIONS[name]; } catch { return DEFAULT_OPTIONS[name]; } };
+const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+/** A tab Rove opens. In background mode it never takes over the user's view. */
+async function createTab(url) {
+  return chrome.tabs.create({ url, active: !option('backgroundTabs') });
+}
+
 /** Manual tool calls retain their debugger while a user-visible modal is open. */
 export function hasPendingDialogs() {
   return [...attached.values()].some(state => !!state.dialog);
@@ -90,7 +103,17 @@ async function ensureTab(tabId) {
     throw new Error(
       "No controllable tab. Open an ordinary website or use browser_navigate with newTab:true.",
     );
-  return tab;
+  return restoreIfDiscarded(tab);
+}
+/** A tab Chrome discarded to save memory has no renderer, so a debugger attached to it never answers.
+ * Reloading restores it where it is; only the opt-out has to switch to it.
+ */
+async function restoreIfDiscarded(tab) {
+  if (!tab.discarded) return tab;
+  if (option('backgroundTabs')) await chrome.tabs.reload(tab.id);
+  else await chrome.tabs.update(tab.id, { active: true });
+  await waitForLoad(tab.id);
+  return chrome.tabs.get(tab.id);
 }
 function target(tabId, sessionId) {
   return sessionId ? { tabId, sessionId } : { tabId };
@@ -148,7 +171,7 @@ function jpegDimensions(base64) {
   }
   throw new Error('Could not read the screenshot dimensions.');
 }
-async function cdp(tabId, method, params = {}, sessionId) {
+async function cdp(tabId, method, params = {}, sessionId, {timeout: limit = 15000, soft = false} = {}) {
   const state = attached.get(tabId);
   if (!state) {
     const error = new Error(`Browser session ended before dispatch (${method}, tab ${tabId}). Start the task again to reconnect.`);
@@ -181,18 +204,25 @@ async function cdp(tabId, method, params = {}, sessionId) {
   let interrupt, timeout;
   const deadline = new Promise((_, reject) => {
     timeout = setTimeout(() => {
+      if (soft) {
+        // The caller will retry: the session stays attached and this command is simply abandoned.
+        const error = new Error(`Chrome did not answer ${method} within ${Math.round(limit / 1000)} seconds.`);
+        error.softTimeout = true;
+        reject(error);
+        return;
+      }
       // A suspended renderer must not hold the serial command queue forever.
       // Detach cancels outstanding CDP work; never replay the browser action.
       // Settle this command's precise error before cancelling other waiters.
       reject(new Error(
-        `Chrome timed out during ${method}. The tab may be suspended or paused. Bring it to the foreground and inspect it before retrying. The action was not replayed.`,
+        `Chrome timed out during ${method}. The tab may be suspended or paused. Inspect it before retrying. The action was not replayed.`,
       ));
       if (sessionId) forgetChild(state, sessionId);
       else if (attached.get(tabId) === state) {
         lostSession(tabId, state, 'command_timeout');
         chrome.debugger.detach({ tabId }).catch(() => {});
       }
-    }, 15000);
+    }, limit);
   });
   let aborted;
   const cancelled = new Promise((_, reject) => {
@@ -227,6 +257,11 @@ async function initializeSession(tabId, sessionId) {
   // already disposed the client, masking the real failure as "session ended".
   await cdp(tabId, "Page.enable", {}, sessionId);
   await cdp(tabId, "Runtime.enable", {}, sessionId);
+  // A hidden tab stops animating, throttles timers to about 1 Hz and reports
+  // visibilityState "hidden". Focus emulation makes the page behave as if the
+  // user were looking at it, so Rove can work without switching to the tab.
+  if (!sessionId && option('backgroundTabs'))
+    await cdp(tabId, "Emulation.setFocusEmulationEnabled", {enabled:true}).catch(() => {});
   await cdp(
     tabId,
     "Target.setAutoAttach",
@@ -781,7 +816,7 @@ async function pressKey(tabId, key, sessionId) {
     sessionId,
   );
 }
-export async function perform(action, args = {}, claimTab = (_tabId) => {}, requireTab = false) {
+export async function perform(action, args = {}, claimTab = (_tabId, _info) => {}, requireTab = false) {
   if (action === "browser_tabs") return listTabs();
   if (action === "browser_downloads") {
     if (args.action === "cancel") {
@@ -840,9 +875,9 @@ export async function perform(action, args = {}, claimTab = (_tabId) => {}, requ
     if (requireTab && !args.newTab && args.tabId == null)
       throw new Error('Agent browser actions require an explicit tabId or newTab:true.');
     if (args.newTab)
-      tab = await chrome.tabs.create({ url: "about:blank" });
+      tab = await createTab("about:blank");
     else tab = await ensureTab(args.tabId);
-    claimTab(tab.id);
+    claimTab(tab.id, args.newTab ? { created: true } : undefined);
     // Attach before navigating so on-load dialogs are observable, including
     // when the destination is the first page in a newly created tab.
     await attach(tab.id, true);
@@ -862,8 +897,10 @@ export async function perform(action, args = {}, claimTab = (_tabId) => {}, requ
     case "browser_snapshot":
       return snapshot(tabId, args.frameId, args);
     case "browser_screenshot": {
-      // A hidden tab paints no frames, so capturing it hangs until Chrome times the command out.
-      if (!tab.active) {
+      // A hidden tab paints no frames, so a plain capture hangs. Background mode wakes
+      // its compositor instead of switching to the tab; the opt-out switches as before.
+      const background = option('backgroundTabs');
+      if (!tab.active && !background) {
         await chrome.tabs.update(tabId, { active: true });
         await settle();
       }
@@ -873,12 +910,12 @@ export async function perform(action, args = {}, claimTab = (_tabId) => {}, requ
         rootFrame,
         "({width:innerWidth,height:innerHeight,devicePixelRatio,scrollX,scrollY,coordinateSpace:'CSS pixels'})",
       );
-      const image = await cdp(tabId, "Page.captureScreenshot", {
+      const image = await capture(tabId, {
         format: "jpeg",
         quality: 75,
         captureBeyondViewport: false,
         clip: {x:viewport.scrollX,y:viewport.scrollY,width:viewport.width,height:viewport.height,scale:1},
-      });
+      }, background, !tab.active);
       return {
         tabId,
         url: tab.url,
@@ -1146,6 +1183,27 @@ export async function perform(action, args = {}, claimTab = (_tabId) => {}, requ
       throw new Error(`Unknown browser action: ${action}`);
   }
 }
+/** Chrome produces no frame for a tab nobody can see, so the first capture request hangs.
+ * That request does wake the tab's rendering, though: a tiny throwaway capture, then the real one
+ * a moment later, succeeds in about a second (measured against real hidden tabs). Waiting out the
+ * hang through cdp() would cost the whole debugger session, so these waits are soft.
+ */
+async function capture(tabId, params, background, hidden) {
+  if (!background) return cdp(tabId, "Page.captureScreenshot", params);
+  const poke = () => { chrome.debugger.sendCommand({tabId}, "Page.captureScreenshot", {format:'jpeg', quality:10, clip:{x:0,y:0,width:4,height:4,scale:1}}).catch(() => {}); };
+  let failure;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // A tab that looks foreground may still be covered or minimized, so it gets one plain try first.
+    if (hidden || attempt > 0) { poke(); await sleep(300); }
+    try {
+      return await cdp(tabId, "Page.captureScreenshot", params, undefined, {timeout: attempt === 0 && !hidden ? 2500 : 5000, soft: true});
+    } catch (error) {
+      if (!error?.softTimeout) throw error;
+      failure = error;
+    }
+  }
+  throw new Error(`Chrome did not render this tab in the background: ${errorMessage(failure)} Turn off "Work in the background" in Settings to let Rove switch to the tab for screenshots. The action was not replayed.`);
+}
 function settle() {
   return new Promise((resolve) => setTimeout(resolve, 200));
 }
@@ -1172,29 +1230,54 @@ export async function releaseTab(tabId) {
   return true;
 }
 
+// One Chrome tab group per task for the tabs Rove opens. Grouping is cosmetic: a failure never reaches the task.
+const taskGroups = new Map();
+const GROUP_COLORS = ['green', 'cyan', 'blue', 'purple', 'orange', 'pink'];
+export async function groupTab(key, tabId) {
+  if (!option('groupTabs') || !chrome.tabs?.group) return;
+  try {
+    const tab = await chrome.tabs.get(tabId);
+    let groupId = taskGroups.get(key);
+    if (groupId !== undefined) {
+      const existing = await chrome.tabGroups.get(groupId).catch(() => null);
+      if (!existing || existing.windowId !== tab.windowId) groupId = undefined;
+    }
+    const created = groupId === undefined;
+    groupId = await chrome.tabs.group(created ? { tabIds: [tabId], createProperties: { windowId: tab.windowId } } : { tabIds: [tabId], groupId });
+    taskGroups.set(key, groupId);
+    if (created)
+      await chrome.tabGroups.update(groupId, { title: 'Rove', color: GROUP_COLORS[(taskGroups.size - 1) % GROUP_COLORS.length], collapsed: false });
+  } catch (error) {
+    console.warn('[Rove tab group]', errorMessage(error));
+  }
+}
+/** The task is over. Its tabs stay grouped for the user to review or close. */
+export function forgetGroup(key) { taskGroups.delete(key); }
+
 /** Attach before model I/O, keeping the MV3 service worker alive for the run.
  * An omitted target may create a blank starter tab if no ordinary tab exists.
  * The caller owns serial execution, tab leases and release after terminal persistence.
  */
-export async function prepareRun(tabId, claimTab = (_tabId) => {}) {
-  let tab;
+export async function prepareRun(tabId, claimTab = (_tabId, _info) => {}) {
+  let tab, created = false;
   if (tabId === null) {
-    tab = await chrome.tabs.create({url:'about:blank'});
+    tab = await createTab('about:blank');
     starterTabs.add(tab.id);
-    claimTab(tab.id);
+    claimTab(tab.id, {created:true});
     await attach(tab.id, true, true);
     return {tabId:tab.id,url:tab.url||'',title:tab.title||''};
   }
   try { tab = await ensureTab(tabId); }
   catch(error) {
     if(tabId !== undefined && tabId !== null)throw error;
-    tab = await chrome.tabs.create({url:'about:blank'});
+    tab = await createTab('about:blank');
     starterTabs.add(tab.id);
+    created = true;
   }
-  claimTab(tab.id);
-  // Background/frozen renderers can accept debugger.attach but never answer
-  // Page.enable. Activate only at explicit task admission, before any action.
-  await chrome.tabs.update(tab.id, {active:true});
+  claimTab(tab.id, created ? {created:true} : undefined);
+  // Hidden tabs answer debugger commands, and initializeSession keeps them rendering,
+  // so a task no longer has to switch to its tab. Only the opt-out restores that.
+  if (!option('backgroundTabs')) await chrome.tabs.update(tab.id, {active:true});
   await attach(tab.id, true, true);
   return {tabId:tab.id,url:tab.url||'',title:tab.title||''};
 }

@@ -21,6 +21,9 @@ import {
   detachAll,
   releaseTab,
   prepareRun,
+  configureBrowser,
+  groupTab,
+  forgetGroup,
   setNotifier,
   hasPendingDialogs,
   recoverSessions,
@@ -89,6 +92,14 @@ function releaseIdleBrowser() {
     await cleanupIdleBrowser();
   });
 }
+/** The lease callback browser.js receives: claims the tab for the run and groups the tabs Rove itself opens. */
+function leaseFor(runId?: string, signal?: AbortSignal) {
+  return (tabId: number, info?: { created?: boolean }) => {
+    signal?.throwIfAborted();
+    claimTab(tabId, runId);
+    if (info?.created) void groupTab(runId ?? "manual", tabId);
+  };
+}
 function claimTab(tabId: number, runId?: string) {
   const owner = tabLeases.get(tabId);
   if (owner && owner !== runId && (engine.isActive(owner) || admitting.has(owner)))
@@ -96,6 +107,7 @@ function claimTab(tabId: number, runId?: string) {
   if (runId) tabLeases.set(tabId, runId);
 }
 async function releaseRun(runId: string) {
+  forgetGroup(runId);
   for (const [tabId, owner] of tabLeases) {
     if (owner === runId && await releaseTab(tabId)) tabLeases.delete(tabId);
   }
@@ -133,10 +145,7 @@ function transportForRun(runId?: string): BrowserTransport {
         await store.flush();
         signal?.throwIfAborted();
         if (runId && !engine.isActive(runId)) throw new Error("Run is not active.");
-        const result = await perform(action, args, (tabId: number) => {
-          signal?.throwIfAborted();
-          claimTab(tabId, runId);
-        }, !!runId);
+        const result = await perform(action, args, leaseFor(runId, signal), !!runId);
         signal?.throwIfAborted();
         if (action === "browser_tabs") {
           tabs = result;
@@ -207,6 +216,8 @@ const engine = new AgentEngine({
     if (first) broadcast("run", run);
   },
 });
+// Browser behaviour settings apply to the next action of every task, not just to tasks admitted afterwards.
+configureBrowser(() => store.settings);
 setNotifier((type: string, data: any) => {
   if (type === "tabs") {
     tabs = data;
@@ -215,7 +226,10 @@ setNotifier((type: string, data: any) => {
     broadcast(type, data);
     if (type === "browser_notice" && data.event === "detached") {
       const owner = tabLeases.get(data.tabId);
-      const stopped = data.reason === "canceled_by_user" ? engine.activeRunIds
+      // Closing Chrome's debugging bar detaches every tab. By default the tasks carry on: the next
+      // browser action attaches again (the bar returns with it), and an action already sent
+      // when the bar closed reports an ordinary tool error instead of being replayed.
+      const stopped = data.reason === "canceled_by_user" ? (store.settings.keepGoingOnBarClose ? [] : engine.activeRunIds)
         : ["target_closed", "connection_lost"].includes(data.reason) && owner && engine.isActive(owner) ? [owner] : [];
       for (const runId of stopped) engine.stop(
         runId,
@@ -473,7 +487,7 @@ async function route(path: string, method: string, body: any, settingsLocked = f
     admissions++;
     try {
       await enqueue(async () => {
-        if (!engine.activeRunIds.length) await prepareRun(undefined, (tabId: number) => claimTab(tabId));
+        if (!engine.activeRunIds.length) await prepareRun(undefined, leaseFor());
       });
       const info = await catalogue.resolve(candidate, key).catch(() => null);
       return {
@@ -522,7 +536,7 @@ async function route(path: string, method: string, body: any, settingsLocked = f
       if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
       const selected = input.tabId === null
         ? {tabId:undefined}
-        : await enqueue(() => prepareRun(input.tabId, (tabId: number) => claimTab(tabId, runId)));
+        : await enqueue(() => prepareRun(input.tabId, leaseFor(runId)));
       await refreshTabs();
       // Snapshot settings and key only after any concurrent picker commit finishes.
       const run = await changeSettings(async () => {
@@ -568,7 +582,7 @@ async function route(path: string, method: string, body: any, settingsLocked = f
           previous = historyBeforeEdit(previous, input.editMessageId, input.message);
         const selected = input.tabId === null
           ? {tabId:undefined}
-          : await enqueue(() => prepareRun(input.tabId, (tabId: number) => claimTab(tabId, id)));
+          : await enqueue(() => prepareRun(input.tabId, leaseFor(id)));
         await refreshTabs();
         if (input.editMessageId !== undefined) {
           await store.replaceRun(previous);

@@ -68,6 +68,12 @@ export interface Settings {
   approvalMode: "always" | "risky" | "never";
   vision: boolean;
   disabledTools: string[];
+  /** Open and drive tabs without switching to them, so the user can keep working elsewhere. */
+  backgroundTabs: boolean;
+  /** Collect the tabs Rove opens in one Chrome tab group per task. */
+  groupTabs: boolean;
+  /** Carry on if the user closes Chrome's "started debugging this browser" bar; Rove reconnects on its next action. */
+  keepGoingOnBarClose: boolean;
 }
 export interface TabInfo {
   id: number;

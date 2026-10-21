@@ -350,6 +350,33 @@ export default function Configuration({
         ) : (
           <section className="tools-settings">
             <div className="settings-heading">
+              <h2 className="settings-title">{t("Browsing")}</h2>
+            </div>
+            <div className="panel behavior-panel">
+              {([
+                ["backgroundTabs", t("Work in the background"), t("Rove opens and drives its tabs without switching to them, so you can keep using Chrome. Turn this off if a page only works while it is in front.")],
+                ["groupTabs", t("Group Rove's tabs"), t("Tabs Rove opens go into one Chrome tab group per task, so you can see them and close them together.")],
+                ["keepGoingOnBarClose", t("Keep going if I close Chrome's debugging bar"), t("An extension cannot hide that bar. If you close it, Rove reconnects at its next action and the bar returns. Turn this off to stop the task instead.")],
+              ] as const).map(([key, title, note]) => (
+                <div className="tool-row behavior-row" key={key}>
+                  <div className="behavior-text">
+                    <strong>{title}</strong>
+                    <small>{note}</small>
+                  </div>
+                  <label className="tool-toggle">
+                    <input
+                      type="checkbox"
+                      role="switch"
+                      aria-label={title}
+                      checked={draft[key]}
+                      onChange={(e) => update(key, e.target.checked)}
+                    />
+                    <span className="switch" aria-hidden="true" />
+                  </label>
+                </div>
+              ))}
+            </div>
+            <div className="settings-heading">
               <h2 className="settings-title">{t("Browser tools")}</h2>
               <span className="tool-count-wrap">
                 <span className="tool-count" aria-label={t("{n} of {total} enabled", { n: enabledCount, total: state.tools.length })}>

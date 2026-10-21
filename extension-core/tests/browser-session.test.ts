@@ -23,10 +23,17 @@ beforeEach(async () => {
       throw new Error("Debugger is not attached to the tab with id: 7.");
     return {};
   });
-  const tab = { id: 7, url: "https://example.com", title: "Fixture" };
+  const tab = { id: 7, url: "https://example.com", title: "Fixture", windowId: 1 };
   vi.stubGlobal("chrome", {
     runtime: { id: "rove" },
+    tabGroups: {
+      get: vi.fn(async (id: number) => ({ id, windowId: 1 })),
+      update: vi.fn(async () => ({})),
+    },
     tabs: {
+      create: vi.fn(async ({ url, active }: { url: string; active: boolean }) => ({ id: 9, url, active, windowId: 1 })),
+      group: vi.fn(async ({ groupId }: { groupId?: number }) => groupId ?? 55),
+      reload: vi.fn(async () => {}),
       update: vi.fn(async () => tab),
       get: vi.fn(async () => tab),
       query: vi.fn(async () => [tab]),
@@ -93,19 +100,116 @@ describe("debugger lifecycle", () => {
     await expect(browser.releaseTab(8)).resolves.toBe(true);
     expect(detach).toHaveBeenLastCalledWith({ tabId: 8 });
   });
-  it("wakes the selected tab before renderer initialization", async () => {
-    let awake = false;
-    vi.mocked(chrome.tabs.update).mockImplementation(async () => {
-      awake = true;
-      return {} as chrome.tabs.Tab;
-    });
+  it("works in the background: no tab switch, and the page keeps rendering", async () => {
+    await expect(browser.prepareRun(7)).resolves.toMatchObject({ tabId: 7 });
+    expect(chrome.tabs.update).not.toHaveBeenCalled();
+    const methods = send.mock.calls.map((call) => call[1]);
+    expect(methods.indexOf("Emulation.setFocusEmulationEnabled")).toBeGreaterThan(methods.indexOf("Page.enable"));
+    expect(send).toHaveBeenCalledWith({ tabId: 7 }, "Emulation.setFocusEmulationEnabled", { enabled: true });
+  });
+  it("switches to the task's tab only when background mode is off", async () => {
+    browser.configureBrowser(() => ({ backgroundTabs: false, groupTabs: true }));
+    await browser.prepareRun(7);
+    expect(chrome.tabs.update).toHaveBeenCalledWith(7, { active: true });
+    expect(send.mock.calls.some((call) => call[1] === "Emulation.setFocusEmulationEnabled")).toBe(false);
+  });
+  it.each([
+    [true, false],
+    [false, true],
+  ])("with background mode %s a new tab opens active: %s, and is reported as created", async (backgroundTabs, active) => {
+    browser.configureBrowser(() => ({ backgroundTabs, groupTabs: true }));
+    const claim = vi.fn();
+    await browser.prepareRun(null, claim);
+    expect(chrome.tabs.create).toHaveBeenCalledWith({ url: "about:blank", active });
+    expect(claim).toHaveBeenCalledWith(9, { created: true });
+    claim.mockClear();
+    vi.mocked(chrome.tabs.get).mockImplementation((async () => ({ id: 9, url: "https://example.com/next", status: "complete", windowId: 1 })) as unknown as typeof chrome.tabs.get);
+    // The snapshot after navigation has no page behind it here; only the tab's creation matters.
+    await browser.perform("browser_navigate", { url: "https://example.com/next", newTab: true }, claim, true).catch(() => {});
+    expect(chrome.tabs.create).toHaveBeenLastCalledWith({ url: "about:blank", active });
+    expect(claim).toHaveBeenCalledWith(9, { created: true });
+  });
+  it.each([
+    [true, "reloads it in place"],
+    [false, "switches to it"],
+  ])("restores a discarded tab before attaching: background mode %s %s", async (backgroundTabs) => {
+    browser.configureBrowser(() => ({ backgroundTabs, groupTabs: true }));
+    let restored = false;
+    vi.mocked(chrome.tabs.get).mockImplementation((async () => ({ id: 7, url: "https://example.com", status: "complete", windowId: 1, discarded: !restored })) as unknown as typeof chrome.tabs.get);
+    vi.mocked(chrome.tabs.reload).mockImplementation((async () => { restored = true; }) as unknown as typeof chrome.tabs.reload);
+    vi.mocked(chrome.tabs.update).mockImplementation((async () => { restored = true; return {}; }) as unknown as typeof chrome.tabs.update);
     send.mockImplementation(async (_target, method) => {
-      if (method === "Page.enable" && !awake)
-        throw new Error("Renderer is frozen");
+      if (method === "Page.enable" && !restored) throw new Error("No renderer for a discarded tab");
       return {};
     });
     await expect(browser.prepareRun(7)).resolves.toMatchObject({ tabId: 7 });
-    expect(chrome.tabs.update).toHaveBeenCalledWith(7, { active: true });
+    if (backgroundTabs) {
+      expect(chrome.tabs.reload).toHaveBeenCalledWith(7);
+      expect(chrome.tabs.update).not.toHaveBeenCalled();
+    } else {
+      expect(chrome.tabs.update).toHaveBeenCalledWith(7, { active: true });
+    }
+  });
+  it("groups the tabs a task opens under one Rove group", async () => {
+    await browser.groupTab("run-1", 9);
+    expect(chrome.tabs.group).toHaveBeenCalledWith({ tabIds: [9], createProperties: { windowId: 1 } });
+    expect(chrome.tabGroups.update).toHaveBeenCalledWith(55, { title: "Rove", color: "green", collapsed: false });
+    await browser.groupTab("run-1", 10);
+    expect(chrome.tabs.group).toHaveBeenLastCalledWith({ tabIds: [10], groupId: 55 });
+    expect(chrome.tabGroups.update).toHaveBeenCalledTimes(1);
+    browser.forgetGroup("run-1");
+    await browser.groupTab("run-1", 11);
+    expect(chrome.tabs.group).toHaveBeenLastCalledWith({ tabIds: [11], createProperties: { windowId: 1 } });
+  });
+  it("does not group when the setting is off, and never lets a grouping failure through", async () => {
+    browser.configureBrowser(() => ({ backgroundTabs: true, groupTabs: false }));
+    await browser.groupTab("run-2", 9);
+    expect(chrome.tabs.group).not.toHaveBeenCalled();
+    browser.configureBrowser(() => ({ backgroundTabs: true, groupTabs: true }));
+    vi.mocked(chrome.tabs.group).mockRejectedValueOnce(new Error("Tabs cannot be edited right now."));
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    await expect(browser.groupTab("run-2", 9)).resolves.toBeUndefined();
+  });
+  describe("screenshots of a tab nobody is looking at", () => {
+    // 1x1 JPEG: enough for the dimension reader.
+    const jpeg = "/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=";
+    function pageAnswers(capture: (params: any, state: { poked: boolean }) => unknown) {
+      const state = { poked: false };
+      vi.mocked(chrome.tabs.get).mockImplementation(async (id: number) => ({ id, url: "https://example.com", title: "Fixture", active: false, windowId: 1 }) as chrome.tabs.Tab);
+      send.mockImplementation(async (_target, method, params) => {
+        if (method === "Page.getFrameTree") return { frameTree: { frame: { id: "root", url: "https://example.com" } } };
+        if (method === "Page.createIsolatedWorld") return { executionContextId: 1 };
+        if (method === "Runtime.evaluate") return { result: { value: { width: 100, height: 80, devicePixelRatio: 1, scrollX: 0, scrollY: 0 } } };
+        if (method === "Page.captureScreenshot") return capture(params, state);
+        return {};
+      });
+    }
+    it("wakes the tab's rendering instead of switching to it", async () => {
+      pageAnswers((params, state) => {
+        if (params.clip?.width === 4) { state.poked = true; return new Promise(() => {}); } // Chrome never answers the wake-up capture
+        return state.poked ? { data: jpeg } : new Promise(() => {});
+      });
+      const result = await browser.perform("browser_screenshot", { tabId: 7 }, () => {}, true);
+      expect(result.dataUrl).toBe("data:image/jpeg;base64," + jpeg);
+      expect(chrome.tabs.update).not.toHaveBeenCalled();
+      expect(detach).not.toHaveBeenCalled();
+    });
+    it("reports a tab that never renders, keeps the session attached and points at the setting", async () => {
+      vi.useFakeTimers();
+      pageAnswers(() => new Promise(() => {}));
+      const run = browser.perform("browser_screenshot", { tabId: 7 }, () => {}, true);
+      const rejected = expect(run).rejects.toThrow('Turn off "Work in the background"');
+      await vi.advanceTimersByTimeAsync(30000);
+      await rejected;
+      expect(detach).not.toHaveBeenCalled();
+      expect(chrome.tabs.update).not.toHaveBeenCalled();
+    });
+    it("switches to the tab for the capture when background mode is off", async () => {
+      browser.configureBrowser(() => ({ backgroundTabs: false, groupTabs: true }));
+      pageAnswers(() => ({ data: jpeg }));
+      await browser.perform("browser_screenshot", { tabId: 7 }, () => {}, true);
+      expect(chrome.tabs.update).toHaveBeenCalledWith(7, { active: true });
+    });
   });
   it("preserves the Page.enable timeout instead of masking it with a later missing session", async () => {
     vi.useFakeTimers();

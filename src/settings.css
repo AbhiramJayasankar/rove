@@ -1183,3 +1183,29 @@
 .settings-page .model-inspect .text-button {
   margin-left: auto;
 }
+
+/* Browsing: how Rove treats your tabs */
+.settings-page .behavior-panel {
+  gap: 0;
+  padding: 6px 16px;
+}
+.settings-page .behavior-row {
+  align-items: center;
+  justify-content: space-between;
+}
+.settings-page .behavior-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.settings-page .behavior-text strong {
+  display: block;
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.settings-page .behavior-text small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
