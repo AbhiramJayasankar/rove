@@ -28,7 +28,6 @@ import ModelPicker from "./ModelPicker";
 import UsageRing from "./UsageRing";
 import ShortcutMenu, { shortcutMatches, slashQuery } from "./ShortcutMenu";
 import AttachButton from "./AttachButton";
-import ImageModeToggle from "./ImageModeToggle";
 import Tooltip from "./Tooltip";
 import { ToolDetails } from "./toolInfo";
 import { attachmentPayload, type Attachment } from "./attachments";
@@ -688,14 +687,6 @@ export default function Workbench({
               model={state.modelInfo}
               connected={streamConnected}
             />
-            {state.modelInfo?.id === state.settings.model && (
-              <ImageModeToggle
-                model={state.modelInfo}
-                endpoint={state.settings.baseUrl}
-                disabled={pending === "run-options"}
-                onError={setAttachError}
-              />
-            )}
             <AttachButton
               tabId={tabId}
               count={attachments.length}

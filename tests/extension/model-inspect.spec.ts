@@ -83,22 +83,16 @@ test("the reasoning picker survives listing every provider", async () => {
   await ui.keyboard.press("Escape");
 });
 
-test("image mode switches the current model to text only and back", async () => {
-  const toggle = ui.locator(".task-composer").getByRole("button", { name: "Image mode", exact: true });
-  await expect(toggle).toHaveAttribute("aria-pressed", "true");
-  await toggle.click();
-  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+test("turning images off for the chat model hides screenshots and trims the instructions", async () => {
+  await rpc("/api/model-override", "PUT", { baseUrl: origin + "/router/v1", model: "alpha", override: { images: "off" } });
   expect((await rpc("/api/state")).modelInfo).toMatchObject({ supportsVision: false, endpointVision: true, override: { images: "off" } });
-  await ui.screenshot({ path: "test-results/image-mode-off.png" });
-
   const textOnly = await ask("text only");
   expect(textOnly.tools.map((tool: any) => tool.function.name)).not.toContain("browser_screenshot");
   expect(textOnly.messages[0].content).toContain("This model cannot see images.");
   expect(textOnly.messages[0].content).not.toContain("browser_screenshot and coordinate tools");
 
-  await ui.locator(".task-composer").getByRole("button", { name: "Image mode", exact: true }).click();
-  await expect(ui.locator(".task-composer").getByRole("button", { name: "Image mode", exact: true })).toHaveAttribute("aria-pressed", "true");
-  // Back to the endpoint's own answer: no override is left behind.
+  // Clearing the choice returns to what the endpoint says.
+  await rpc("/api/model-override", "PUT", { baseUrl: origin + "/router/v1", model: "alpha", override: null });
   expect((await rpc("/api/state")).modelInfo.override).toBeUndefined();
   const withImages = await ask("with images");
   expect(withImages.tools.map((tool: any) => tool.function.name)).toContain("browser_screenshot");

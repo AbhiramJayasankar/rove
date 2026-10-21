@@ -2,6 +2,11 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## 2.4.1 - 2026-10-21
+
+### Removed
+- The image mode button next to the attach button. Choose images always, never or from the endpoint in Settings → Model → Model abilities; the composer layout returns to its 2.3.0 spacing.
+
 ## 2.4.0 - 2026-10-21
 
 Reasoning levels come back with several providers saved, any model can be inspected, and images can be switched off from the chat.
