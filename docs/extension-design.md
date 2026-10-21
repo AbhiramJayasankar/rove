@@ -34,7 +34,7 @@ The initial idea retained the existing narrow dark icon rail. Rejected: it consu
 
 Keep important controls reachable at 320px. Preserve explicit approval, Stop, model selection in chat, complete trace access and keyboard focus. Use motion only for interactive disclosure, and respect reduced motion. Review real extension screenshots at 360/400px and in a full tab before delivery.
 
-Guidance: [Anthropic frontend-design skill](https://raw.githubusercontent.com/anthropics/skills/main/skills/frontend-design/SKILL.md), read from the official repository on 2026-10-20. Font sources: [Syne](https://github.com/google/fonts/tree/main/ofl/syne), [Commissioner](https://github.com/google/fonts/tree/main/ofl/commissioner).
+Font sources: [Syne](https://github.com/google/fonts/tree/main/ofl/syne), [Commissioner](https://github.com/google/fonts/tree/main/ofl/commissioner).
 
 ## Settings and themes
 

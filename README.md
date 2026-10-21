@@ -1,5 +1,7 @@
 <h1 align="center">Rove</h1>
 
+<p align="center"><a href="https://github.com/AbhiramJayasankar/rove/actions/workflows/check.yml"><img src="https://github.com/AbhiramJayasankar/rove/actions/workflows/check.yml/badge.svg" alt="Build and tests"></a> <a href="https://github.com/AbhiramJayasankar/rove/releases/latest"><img src="https://img.shields.io/github/v/release/AbhiramJayasankar/rove" alt="Latest release"></a> <a href="LICENSE"><img src="https://img.shields.io/github/license/AbhiramJayasankar/rove" alt="MIT license"></a></p>
+
 <p align="center"><strong>A browser agent that lives in Chrome and answers to you.</strong><br>
 Bring any OpenAI-compatible model, from OpenAI or OpenRouter to a llama.cpp server on your laptop, and let it work in your own tabs while you do something else.</p>
 
@@ -152,7 +154,7 @@ src/             React interface: side panel, settings, trace
 tests/           Playwright tests that run the real unpacked extension
 ```
 
-More: [architecture](docs/architecture.md), [extension messaging](docs/api.md), [browser tools](docs/browser-tools.md), [model capabilities](docs/model-capabilities.md), [verification](docs/verification.md), [interface decisions](docs/extension-design.md) and [research notes](docs/research.md). [AGENTS.md](AGENTS.md) lists the invariants to keep when changing the code.
+More: [architecture](docs/architecture.md), [extension messaging](docs/api.md), [browser tools](docs/browser-tools.md), [model capabilities](docs/model-capabilities.md), [verification](docs/verification.md) and [interface decisions](docs/extension-design.md). [AGENTS.md](AGENTS.md) lists the invariants to keep when changing the code.
 
 ## License
 

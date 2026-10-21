@@ -5,6 +5,23 @@
   "license": "MIT",
   "type": "module",
   "description": "A self-contained Chrome browser agent with your own model endpoint",
+  "author": "Abhiram Jayasankar",
+  "homepage": "https://github.com/AbhiramJayasankar/rove#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AbhiramJayasankar/rove.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AbhiramJayasankar/rove/issues"
+  },
+  "keywords": [
+    "chrome-extension",
+    "browser-agent",
+    "llm",
+    "openai-compatible",
+    "manifest-v3",
+    "llama-cpp"
+  ],
   "engines": {
     "node": ">=22"
   },
