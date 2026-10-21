@@ -106,7 +106,8 @@
 
 /* Conversation */
 .app-shell .user-message {
-  padding: 9px 14px;
+  padding: 11px 16px;
+  text-wrap: pretty;
   border-radius: 18px;
   background: var(--accent-soft);
   margin-bottom: 14px;
@@ -157,10 +158,16 @@
 }
 .app-shell .stopped-message {
   align-items: center;
+  gap: 10px;
   width: fit-content;
-  padding: 5px 6px 5px 14px;
+  padding: 8px 16px;
   border-radius: 999px;
   background: var(--panel);
+  line-height: 1.2;
+}
+.app-shell .stopped-message .text-button {
+  padding: 0;
+  font-weight: 600;
 }
 
 /* Action ledger */

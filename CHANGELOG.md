@@ -2,6 +2,11 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## 2.5.1 - 2026-10-21
+
+### Fixed
+- The "Stopped · Edit & retry" pill is evenly padded and its text is centred, and your message bubbles have a little more room around the text.
+
 ## 2.5.0 - 2026-10-21
 
 Rove no longer takes over your browser while it works.
