@@ -1,101 +1,159 @@
-# Rove
+<h1 align="center">Rove</h1>
 
-Your own prompt-driven Chrome agent. Bring an OpenAI-compatible endpoint, choose a model, write a task, and inspect every request and browser action.
+<p align="center"><strong>A browser agent that lives in Chrome and answers to you.</strong><br>
+Bring any OpenAI-compatible model, from OpenAI or OpenRouter to a llama.cpp server on your laptop, and let it work in your own tabs while you do something else.</p>
 
-Rove v2 runs entirely inside a Chrome extension: the agent, browser controller, interface and history. Once built and installed, it needs no Node process, local server or pairing connection. Node.js is used only to build and test the source.
+<p align="center"><img src="docs/images/hero.png" alt="Rove's side panel next to a bookshop page. Rove has read the page, sorted the list and reported the cheapest hardcover." width="100%"></p>
+
+Rove is a Chrome extension. You type a task in the side panel (*"find the cheapest hardcover on this page"*, *"fill in this form from my notes"*, *"compare these three tabs"*), and the model reads the page, clicks, types and scrolls to get it done. Every request, tool call, result and screenshot is shown to you, and nothing runs on a server of ours because there isn't one.
+
+- **Your model, your key.** Any OpenAI-compatible endpoint with tool calling. The key stays in your browser.
+- **Your browser.** It drives your real tabs and signed-in sessions, not a throwaway headless copy.
+- **Works in the background.** Rove does not switch tabs or steal focus. Tabs it opens land behind the one you are using, grouped under a Rove tab group.
+- **Nothing hidden.** Full model requests and responses, tool arguments and results, reasoning, tokens per second and cost estimates.
+- **You stay in control.** Ask-first approvals, per-site Allow / Ask / Block rules, a Stop button, and tools you can switch off one by one.
+- **Good with local models.** Detects llama.cpp servers, lets you force text-only mode and define your own reasoning levels, and shows exactly what each endpoint reports about each model.
 
 ## Install
 
-Requires Chrome 125 or newer. To build from source, install Node.js 22 or newer and run:
+Rove is not in the Chrome Web Store, so you load it as an unpacked extension. It takes about a minute and needs Chrome 125 or newer. Pick whichever route suits you.
+
+### Option 1: download the zip (no tools needed)
+
+1. Download `rove-<version>.zip` from the [latest release](https://github.com/AbhiramJayasankar/rove/releases/latest) and unzip it. You get a folder called `rove-<version>` with `manifest.json` inside.
+2. Move that folder somewhere permanent. Chrome reads the extension from it every time it starts, so do not delete or rename it later.
+3. Open `chrome://extensions` in Chrome and switch on **Developer mode** (top right).
+4. Click **Load unpacked** and choose the `rove-<version>` folder (the one that contains `manifest.json`).
+5. Click the puzzle-piece icon in Chrome's toolbar and **pin Rove**. Click its icon, or press `Alt+Shift+O`, to open the side panel.
+
+### Option 2: clone the repository
+
+The built extension is committed, so you do not need Node.js:
 
 ```sh
-npm install
-npm run build
+git clone https://github.com/AbhiramJayasankar/rove.git
 ```
 
-1. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select the generated `extension` folder.
-2. Pin Rove and click its toolbar icon to open the side panel. Use the extension's **Options** page for the full workbench in a tab.
-3. In **Model settings → Language model**, enter an OpenAI-compatible base URL and a key if required. Choose a model from the searchable endpoint catalogue and save the settings.
-4. Open a normal webpage, select its tab in Rove, and enter a task. The activity, execution details and trace show what happens. Use **Stop** or Escape to prevent further dispatch.
+Then follow steps 3 to 5 above and choose the `extension` folder inside the clone. To update later, `git pull` and click the reload icon on Rove's card in `chrome://extensions`.
 
-After source changes, rebuild and reload Rove on `chrome://extensions`. Keep the generated folder in place while the unpacked extension is installed. Clicking the toolbar icon uses Chrome's [Side Panel API](https://developer.chrome.com/docs/extensions/reference/api/sidePanel).
+### Option 3: build it yourself
 
-## What you control
+Needs Node.js 22 or newer.
 
-- Your existing Chrome tabs and signed-in sessions: navigation/history, frame-aware snapshots, native pointer/keyboard input, forms/selects, hover/drag, screenshots, dialogs, download metadata and optional file uploads.
-- Editable instructions, browser tool enablement, model and reasoning selection, and approvals directly in the composer.
-- Streaming responses and provider-returned reasoning, model requests/responses, full tool arguments/results, screenshots, approvals, questions, saved history and individual run export.
+```sh
+git clone https://github.com/AbhiramJayasankar/rove.git
+cd rove
+npm install
+npm run build        # writes the loadable extension/ folder
+```
 
-**Auto-approve** is on by default. Turn it off in the composer to review interactions. Changes apply to the current run; enabling auto-approval releases a pending approval. Questions still wait for your answer. Generic JavaScript, raw CDP and file uploads begin disabled. Prompt-injection instructions guide the model, while approval settings determine which enabled actions require review.
+Load `extension` as in steps 3 to 5. `npm run package` also produces `release/rove-<version>.zip`.
 
-See [architecture](docs/architecture.md), [extension messaging](docs/api.md), [browser tools](docs/browser-tools.md) and [verification](docs/verification.md). Earlier technology comparisons are recorded in [research](docs/research.md).
+> **Chrome may nag about developer-mode extensions** when it starts. That is normal for unpacked extensions. Dismiss it, and Rove keeps working.
 
-The interface is designed for Chrome's side panel: a single conversation column, current-tab selector, optional screenshot preview and searchable history. Reply in the composer to continue the selected chat; New task starts a separate chat. The compact control row contains model, reasoning, approval mode, a context ring and Send. Model search and usage details open beside their buttons. Settings has an explicit Back to chat action and retains your draft. Syne and Commissioner fonts ship inside the extension with their licenses. Enter sends a task; Shift+Enter adds a line. See the [interface decisions](docs/extension-design.md).
+### First run
 
-## Models and context
+1. Open Rove's side panel and go to **Settings** (the sliders icon, top right).
+2. Under **Language model**, enter your endpoint's base URL and API key. For example `https://api.openai.com/v1`, `https://openrouter.ai/api/v1`, or `http://127.0.0.1:8080/v1` for a local server. Local servers can leave the key empty.
+3. Choose a model from the list. It must support tool calling. Press **Save changes**.
+4. Open an ordinary web page, pick its tab at the top of the panel and type a task.
 
-Rove uses OpenAI-compatible **Chat Completions function calling**. Set a base URL such as `https://api.openai.com/v1`, a compatible gateway, or a local model server. A full URL ending in `/chat/completions` also works. Local endpoints may omit the key. The model must support tools. Streaming is always requested; screenshots are sent automatically unless the endpoint explicitly reports a text-only model.
+Rove cannot control Chrome's own pages (`chrome://…`), the Chrome Web Store or other extensions' pages.
 
-The picker uses endpoint labels, prices, modalities, supported parameters and limits. Endpoint metadata takes precedence. Exact provider/model fallbacks from primary documentation fill missing capabilities for the configured free models. Unknown capabilities remain automatic; the interface does not invent effort levels. Context and output limits use the model maxima, reserving sufficient room for actual input. The trace shows provider reasoning when returned; Rove does not invent it. Documented effort aliases appear with their canonical mapping in the selector. The context-ring popover separates current context from cumulative chat input/output tokens and estimates cost from provider usage or model pricing; missing usage/pricing stays explicitly unknown.
+## See it work
 
-Before each request, Rove retains complete tool-call groups within the selected model's budget and limits older screenshots independently. Provider usage calibrates token estimates. Structured context rejections trigger bounded recovery of the model request, removing older images before older text. Browser mutations are not replayed. Learned input/image limits are isolated by endpoint, credential hash and model.
+<table>
+<tr>
+<td width="33%"><img src="docs/images/panel-chat-light.png" alt="A finished task: the question, three actions, a table of hardcovers and the answer with its speed in tokens per second"></td>
+<td width="33%"><img src="docs/images/panel-activity-light.png" alt="The activity view listing each step with its tool call, duration, speed and input size"></td>
+<td width="33%"><img src="docs/images/panel-approval.png" alt="An approval card asking before Rove clicks an element, with Approve once and Deny"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>Ask, watch, read the answer.</b> Each reply shows when it arrived and how fast it was generated.</sub></td>
+<td align="center"><sub><b>Every step is inspectable.</b> Open any action for its exact arguments, result and screenshot.</sub></td>
+<td align="center"><sub><b>Ask first.</b> Review a click, a form entry or a navigation before it runs, or switch to Auto-approve.</sub></td>
+</tr>
+</table>
 
-## Storage
+<table>
+<tr>
+<td width="33%"><img src="docs/images/settings-model.png" alt="Settings: provider, model list, what the endpoint reports about the selected model, and per-model abilities"></td>
+<td width="33%"><img src="docs/images/settings-tools.png" alt="Settings, Tools: browsing switches and the list of browser tools"></td>
+<td width="33%"><img src="docs/images/panel-activity-dark.png" alt="The same task in dark mode"></td>
+</tr>
+<tr>
+<td align="center"><sub><b>See what the endpoint tells you</b> about any model: context, limits, modalities, tools, reasoning, price. Override images and reasoning per model.</sub></td>
+<td align="center"><sub><b>Choose the tools</b> the model may use, and how Rove treats your tabs.</sub></td>
+<td align="center"><sub><b>Light and dark,</b> in English, 简体中文 or 繁體中文.</sub></td>
+</tr>
+</table>
 
-The model API key persists in a dedicated trusted `chrome.storage.local.modelApiKey` entry across Chrome and extension restarts. Settings, history, API responses and run exports exclude the key. Legacy session credentials migrate once. Save an empty key to clear it.
+<p align="center"><img src="docs/images/model-picker.png" alt="The model picker with an info tooltip listing Birch 405B's context window, limits, modalities, reasoning levels and price" width="33%"><br><sub><b>Pick a model with the facts in front of you.</b> Hover the info icon on any model.</sub></p>
 
-Settings and learned model limits use `chrome.storage.local`. Run metadata and append-only event history use IndexedDB. Page content and screenshots sent in model context go directly from the extension to your selected provider. Light/dark mode and the free-model filter persist within the extension profile.
+*(The screenshots use a made-up bookshop and a scripted demo model. Run `npm run build && node scripts/readme-screenshots.mjs` to regenerate them.)*
 
-The worker attaches the debugger before a run's model requests and releases it afterward. If Chrome interrupts a run, history remains and that run becomes failed on recovery; no browser action is resumed automatically. Durable journal checkpoints precede model/tool dispatch. Chrome documents the active-debugger worker lifetime behavior in its [service-worker lifecycle reference](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle).
+## What you can do
+
+- **Drive real pages.** Frame-aware page reading, native clicks and typing, forms and selects, hover and drag, scrolling, screenshots, dialogs, tabs and downloads. Generic JavaScript, raw DevTools commands and file upload exist but start switched off.
+- **Run up to three tasks at once,** each with its own tabs, while you keep browsing.
+- **Reuse prompts.** Standing instructions apply to every task, and a `/` menu inserts saved prompts.
+- **Attach context.** Add images, text files or a screenshot of the current tab.
+- **Dictate.** Speak your task with Chrome's built-in speech recognition, or with a Whisper-compatible endpoint of your choice.
+- **Keep a record.** Every task is saved locally. Export one as JSON or a readable Markdown transcript.
+
+The [user guide](docs/guide.md) covers models and local servers, multiple providers, browsing behavior, site rules, attachments, voice input and storage in detail.
+
+## Staying safe
+
+Web pages are untrusted. Rove tells the model so, but the settings below are what actually bound it.
+
+- **Approvals.** *Ask first* shows the exact arguments of every action that changes something and waits. *Auto-approve* runs enabled tools without pausing, and you can flip to it mid-task.
+- **Site rules.** Allow, Ask or Block per site, including its subdomains. Block never reaches the browser.
+- **Tools.** Switch off any tool and the model never sees it.
+- **Stop.** Press Stop or Escape. Actions already sent to Chrome cannot be undone.
+- **Chrome's debugging bar.** While Rove controls a tab, Chrome shows *"Rove started debugging this browser"*. That bar is Chrome's own, and an extension cannot hide it. Closing it does not have to end the task; see [Browsing behavior](docs/guide.md#browsing-behavior).
+- **Privacy.** There is no Rove server. Page text and screenshots go from your browser straight to the endpoint you configured, and your key never leaves your browser profile.
+
+## Troubleshooting
+
+| Problem | What to do |
+| --- | --- |
+| The extension does not load | Check that you chose the folder that contains `manifest.json`, and that Chrome is version 125 or newer (`chrome://version`). |
+| It stopped working after I moved or deleted the folder | Chrome reads an unpacked extension from its folder. Put it back, or remove Rove and load the new location. |
+| "Choose a model in settings first" | Open Settings, enter your endpoint and key, pick a model and press Save changes. |
+| The model list is empty | The endpoint must expose `GET /models`. Check the URL ends at the API root (for example `…/v1`) and the key is right. Press the refresh button beside the search box. |
+| "This model's endpoint metadata explicitly reports no tool support" | Rove needs tool calling. Choose a model that supports it. |
+| A local model cannot see images | Rove reads this from llama.cpp automatically. For other servers set **Model abilities → Images** to *Never send images*. |
+| The reasoning menu is missing or wrong | The endpoint did not advertise a control. Define your own levels under **Model abilities → Reasoning control**. |
+| A page only works while it is in the foreground | Turn off **Settings → Tools → Browsing → Work in the background**. |
+| "Another debugger is using this tab" | Close DevTools on that tab, or any other tool that is attached to it, and retry. |
+| Rove will not control a page | It cannot control `chrome://` pages, the Chrome Web Store or other extensions' pages. |
 
 ## Development
 
 ```sh
-npm run dev                    # Rebuild extension source in watch mode
+npm install
+npm run dev            # rebuild the extension on change
 npm run typecheck
-npm test
+npm test               # unit tests
 npx playwright install chromium
-npm run test:e2e                # Actual extension in isolated Chromium
-npm run build                  # Generate the loadable extension/ directory
+npm run test:e2e       # the real extension in isolated Chromium, with fixture servers
+npm run build          # regenerate extension/
+npm run package        # build, then write release/rove-<version>.zip
 ```
 
-After a watch rebuild, reload the extension and reopen its interface. Test fixture servers are used only by integration tests; the installed product has no backend service. Edit `extension-src/`, `extension-core/`, `src/` and `shared/`, rather than generated `extension/` files.
+Edit `extension-src/`, `extension-core/`, `src/` and `shared/`, not the generated `extension/` folder, then reload Rove on `chrome://extensions`. Every user-visible change needs a version bump in `package.json` and an entry in [CHANGELOG.md](CHANGELOG.md).
 
-Rove controls web content. Chrome internal pages, OS windows, native permissions, CAPTCHA and some sign-in challenges require direct interaction. DevTools or browser policy can detach the debugger. Stop cannot undo an action already dispatched. Browser/file permissions still apply, and site-specific or transformed frame layouts may need fresh observations or manual takeover. One run is active at a time in the shared browser session.
-## Multiple language-model providers
+```
+shared/          contracts, capability rules and defaults
+extension-src/   service worker: messages, storage, browser control (CDP)
+extension-core/  agent loop, model client, context management, model catalogue
+src/             React interface: side panel, settings, trace
+tests/           Playwright tests that run the real unpacked extension
+```
 
-In **Settings → Model → Provider**, choose **+ Add OpenRouter** or **+ Add compatible provider**. Enter its name, OpenAI-compatible base URL and separate API key, choose a model, then **Save changes**. Existing connections are retained automatically. The provider dropdown edits a saved connection; its trash button removes that connection.
+More: [architecture](docs/architecture.md), [extension messaging](docs/api.md), [browser tools](docs/browser-tools.md), [model capabilities](docs/model-capabilities.md), [verification](docs/verification.md), [interface decisions](docs/extension-design.md) and [research notes](docs/research.md). [AGENTS.md](AGENTS.md) lists the invariants to keep when changing the code.
 
-All saved providers contribute models to the same searchable model picker. Each model shows its provider when multiple catalogues are present, including duplicate model IDs. Selecting a model automatically uses that provider’s URL and key. A failed catalogue does not hide other providers. **Free** still filters paid models; turn it off to see the full combined list. There is no automatic cross-provider request fallback.
+## License
 
-Provider keys stay in trusted `chrome.storage.local.modelProviderKeys`, with the currently selected key mirrored in `modelApiKey`; they are excluded from settings responses, run history and exports. Provider selection and credential changes are committed together. Your existing provider is migrated automatically; the voice transcription key remains separate.
-
-## Voice input
-
-The microphone inserts dictation at the cursor or replaces selected text. Click again to stop; Escape cancels and restores the draft. It never auto-sends. Afterwards, Enter sends and Shift+Enter adds a newline.
-
-Settings → Model → Speech to text selects the backend; **Save changes** saves both model and voice settings:
-
-- **Web Speech** (default): no key, live text; Chrome sends audio to Google. Requires internet and a Chrome build supporting speech recognition.
-- **Groq / compatible API**: uploads WebM/Opus only to your configured endpoint on stop. Defaults: `https://api.groq.com/openai/v1`, `whisper-large-v3-turbo`. The base URL/model are editable; enter a separate voice API key. No automatic backend fallback.
-
-Dictation runs inside the composer, with a live microphone waveform and timer. On first use only, Chrome may need a small permission setup window: choose **Allow**, and it closes automatically. Subsequent recording stays in Rove. Escape or leaving the chat cancels. If blocked, check Chrome’s microphone site settings and your system’s microphone permission for Chrome.
-
-API clips stay below 25 MB and 10 minutes. Paid OpenRouter STT stops recording at 59 seconds to avoid its 60-second timeout. Groq free quotas vary (roughly 20 requests/minute, 7,200 audio-seconds/hour). Errors appear inline. Audio/key stay out of history and exports; `voiceApiKey` persists separately in trusted `chrome.storage.local`. Cancellation cannot retract audio already uploaded.
-
-After building, reload Rove on `chrome://extensions`, reopen its side panel, and refresh open workbench tabs. No manifest permission or CSP changes are needed. See [verification](docs/verification.md#voice-input-verification) for detailed checks.
-
-## Prompts, rules and attachments
-
-- **Standing instructions** (Settings, Instructions) are added to every task, after the system instructions.
-- **Saved prompts**: add them in Settings, Instructions. Type `/` in the message box to search and insert one; an optional start page is prefixed as "Start at ...". Nothing is sent until you press Send.
-- **Site rules** (Settings, Tools) set Allow, Ask or Block for a site and its subdomains. They override Auto-approve and Ask first for that site; Ask cannot be answered by switching to Auto-approve; Block never reaches the browser and the model is told why. The most specific rule wins, and a tie takes the stricter action. A rule checks the address a tool acts on, so a link that leads to a blocked site is caught on the next tool call.
-- **Attachments**: the paperclip adds up to five images (5 MB each) or text files (200,000 characters each), or a screenshot of the selected tab. Images need a vision model. File contents are treated as untrusted data.
-- **Reports**: the agent can save a `.md`, `.txt`, `.csv`, `.json` or `.html` report to Downloads/Rove with `browser_save_file`. File names are bare names; folders and other types are refused.
-- **Export**: the trace view exports a run as JSON or a readable Markdown transcript.
-- **Languages**: English, Simplified Chinese and Traditional Chinese. Settings, Language defaults to following Chrome. The system prompt and the model's answers are not translated.
-- **Shortcut**: Alt+Shift+O is registered for the toolbar action; change it at `chrome://extensions/shortcuts`.
-
-## Versions
-
-The version lives in `package.json`; `npm run build` copies it into the extension manifest and the app, which shows it in Settings with a "What's new" view. Every user-visible change is recorded in [CHANGELOG.md](CHANGELOG.md), and a test keeps the package, manifest and changelog in step. Rove was called Relay before 2.1.0; saved history, providers and keys carry over.
+[MIT](LICENSE). The Syne and Commissioner fonts bundled with the extension are under the SIL Open Font License; their licenses are in [`public/fonts`](public/fonts).

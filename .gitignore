@@ -9,3 +9,6 @@ playwright-report/
 
 # Local agent worktrees
 .claude/worktrees/
+
+# Install zips
+release/

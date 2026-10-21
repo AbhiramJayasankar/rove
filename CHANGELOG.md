@@ -2,6 +2,15 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## 2.5.2 - 2026-10-21
+
+### Added
+- `npm run package` writes `release/rove-<version>.zip`, a ready-to-load copy of the extension for anyone installing without Node.js.
+- `scripts/readme-screenshots.mjs` regenerates the README images from the real extension against a scripted demo model.
+
+### Changed
+- The README is now an install and tour page with screenshots; the detailed model, browsing, voice and storage notes moved to `docs/guide.md`. The unreferenced screenshots of older interface versions were removed.
+
 ## 2.5.1 - 2026-10-21
 
 ### Fixed

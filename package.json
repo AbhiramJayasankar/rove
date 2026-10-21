@@ -1,6 +1,6 @@
 {
   "name": "rove-browser",
-  "version": "2.5.1",
+  "version": "2.5.2",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -13,6 +13,7 @@
     "start": "node scripts/build-extension.mjs --watch",
     "build": "tsc --noEmit && node scripts/build-extension.mjs",
     "typecheck": "tsc --noEmit",
+    "package": "npm run build && node scripts/package-extension.mjs",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "check": "npm run build && npm test"
