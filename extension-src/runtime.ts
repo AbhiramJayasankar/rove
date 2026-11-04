@@ -1,5 +1,5 @@
 import { Validator } from "@cfworker/json-schema";
-import { AgentEngine, MAX_CONCURRENT_RUNS } from "../extension-core/agent";
+import { AgentEngine, MAX_CONCURRENT_RUNS, contextBaseline } from "../extension-core/agent";
 import { historyBeforeEdit } from "../extension-core/conversation";
 import { ModelCatalogue, effectiveSettings } from "../extension-core/catalogue";
 import { BUILTIN_TOOLS } from "../extension-core/tools";
@@ -334,6 +334,7 @@ function state(): AppState {
     activeRunIds: engine.activeRunIds,
     tools: BUILTIN_TOOLS,
     tabChats,
+    contextBaseline: contextBaseline(store.settings),
   };
 }
 function ownPage(sender: chrome.runtime.MessageSender) {
@@ -351,6 +352,7 @@ function settingsResult() {
     modelInfo: catalogue.peek(store.settings, apiKey),
     activeRunIds: engine.activeRunIds,
     activeRunId: engine.activeRunId,
+    contextBaseline: contextBaseline(store.settings),
   };
 }
 function reserveAdmission(runId: string) {

@@ -1002,3 +1002,42 @@ describe("tool registry", () => {
     ).rejects.toThrow("unavailable");
   });
 });
+
+describe("context calibration against provider counts", () => {
+  const sse = (message: any, usage: any) => new Response(
+    [`data: ${JSON.stringify({ choices: [{ index: 0, delta: { role: "assistant", ...message, ...(message.tool_calls ? { tool_calls: message.tool_calls.map((c: any, index: number) => ({ index, ...c })) } : {}) } }] })}\n\n`,
+     `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: message.tool_calls ? "tool_calls" : "stop" }] })}\n\n`,
+     `data: ${JSON.stringify({ choices: [], usage })}\n\n`, "data: [DONE]\n\n"].join(""),
+    { headers: { "content-type": "text/event-stream" } });
+  it("scales its estimate down when the provider counts fewer tokens, and keeps that for follow-ups", async () => {
+    let n = 0;
+    const replies = [
+      () => sse({ content: null, tool_calls: [call("s", "browser_snapshot", { tabId: 7 })] }, { prompt_tokens: 2000, completion_tokens: 20 }),
+      () => sse({ content: "Done." }, { prompt_tokens: 1500, completion_tokens: 10 }),
+      () => sse({ content: "Again." }, { prompt_tokens: 1600, completion_tokens: 10 }),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => replies[n++]()));
+    const ctx = setup({}, "", { transport: { execute: vi.fn().mockResolvedValue({ tabId: 7, text: "x".repeat(30000), elements: [], totalElements: 0 }), status: () => ({ connected: true, tabs: [{ id: 7, url: "https://a.test", title: "A" }] }) } });
+    const run = ctx.engine.start("Read it.", 7);
+    await until(() => !ctx.engine.activeRunId);
+    const usage = () => run.events.filter((e) => e.type === "context_usage").map((e) => e.data);
+    const [first, second] = usage();
+    expect(first.tokenRatio).toBe(1);
+    // The provider counted 2000 for what Rove estimated higher, so the next estimate scales down.
+    expect(first.estimatedTokens).toBeGreaterThan(2000);
+    expect(second.tokenRatio).toBeCloseTo(2000 / first.estimatedTokens, 5);
+    expect(second.tokenRatio).toBeLessThan(1);
+    const next = ctx.engine.continue(run, "And again?", 7);
+    await until(() => !ctx.engine.activeRunId);
+    const followUp = next.events.filter((e) => e.type === "context_usage").at(-1)!.data;
+    expect(followUp.tokenRatio).toBeCloseTo(Math.max(0.3, (second.tokenRatio * 1500) / second.estimatedTokens), 5);
+  });
+  it("counts the system message and every offered tool for a new chat", async () => {
+    const { contextBaseline } = await import("../agent");
+    const { DEFAULT_SETTINGS } = await import("../../shared/defaults");
+    const base = contextBaseline(DEFAULT_SETTINGS);
+    expect(base).toBeGreaterThan(2000);
+    expect(contextBaseline({ ...DEFAULT_SETTINGS, memory: "note ".repeat(600) })).toBeGreaterThan(base + 500);
+    expect(contextBaseline({ ...DEFAULT_SETTINGS, disabledTools: [...DEFAULT_SETTINGS.disabledTools, "browser_drag", "browser_select"] })).toBeLessThan(base);
+  });
+});

@@ -143,6 +143,8 @@ export interface AppState {
   tools: ToolDefinition[];
   /** Chrome tab ID -> the chat the side panel shows on that tab; "" means a fresh chat. Cleared when Chrome restarts. */
   tabChats?: Record<string, string>;
+  /** Estimated tokens a new chat starts with: the system message and the tool definitions. */
+  contextBaseline?: number;
 }
 export interface BrowserTransport {
   execute(

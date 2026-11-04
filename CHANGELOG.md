@@ -10,6 +10,7 @@ Rove follows [semantic versioning](https://semver.org). The version lives in `pa
 - Leaving Settings with unsaved changes asks whether to save, discard or keep editing. Before, Back to chat quietly dropped them, including a saved prompt kept with **Keep prompt**, and switching browser tabs closed Settings.
 
 ### Fixed
+- The context ring in the chat box is closer to the truth. A new chat shows what the system message and tools already take (about 3k tokens) instead of 0, current context includes the latest answer, and Rove's estimate now follows the provider's real counts down as well as up. With a real OpenRouter model the estimate had run 2 to 2.5 times high (tool results are JSON inside JSON), which made Rove compact history long before a small model's limit; calibrated estimates now land within about 20%, and a follow-up keeps the chat's calibration.
 - The browser preview of a tab a task is working in showed "Tab … is owned by another task" and no picture. It now shows the task's newest screenshot with a note, and refresh waits until the task finishes.
 - Starting a task on a tab another task is using explains it in plain words instead of an internal error.
 - The "Up to 3 tasks can run at once" error disappears once a task finishes or you switch chats, and other errors no longer follow you to another tab or chat.

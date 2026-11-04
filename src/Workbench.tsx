@@ -736,6 +736,7 @@ export default function Workbench({
               run={run}
               model={state.modelInfo}
               connected={streamConnected}
+              baseline={state.contextBaseline}
             />
             <AttachButton
               tabId={tabId}
