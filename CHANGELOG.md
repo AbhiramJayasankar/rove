@@ -6,6 +6,7 @@ Rove follows [semantic versioning](https://semver.org). The version lives in `pa
 
 ### Fixed
 - Block site rules now also apply where a tab ends up. Before, opening a link that redirected to a blocked site, or a click that navigated there, sent that page's text and the automatic screenshot to the model. Both are now withheld, and the model is told the site is blocked.
+- A saved API key is only sent to its own provider's server. Before, the model list in Settings refreshed as you typed a new base URL and sent the saved key to each address typed, including half-typed or mistyped ones; Test connection did the same. A different server now gets no key unless you type one for it.
 
 ## 2.5.2 - 2026-10-21
 

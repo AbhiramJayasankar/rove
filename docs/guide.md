@@ -31,7 +31,7 @@ In **Settings → Model → Provider**, choose **+ Add OpenRouter** or **+ Add c
 
 All saved providers contribute to the same searchable model picker. Each model shows its provider when several catalogues are present, including duplicate model IDs, and choosing one uses that provider's URL and key. A catalogue that fails to load does not hide the others. **Free** filters paid models. There is no automatic fallback between providers.
 
-Provider keys stay in `chrome.storage.local` (`modelProviderKeys`, with the selected key mirrored in `modelApiKey`). They are excluded from settings responses, run history and exports.
+Provider keys stay in `chrome.storage.local` (`modelProviderKeys`, with the selected key mirrored in `modelApiKey`). They are excluded from settings responses, run history and exports. While you edit a provider's base URL, the model list and **Test connection** send the saved key only to that provider's own origin; a different address gets no key until you type one for it.
 
 ## Browsing behavior
 

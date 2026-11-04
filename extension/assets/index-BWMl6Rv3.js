@@ -48,6 +48,11 @@ Observe before interacting. Use browser_snapshot to obtain current element refs,
 
 Rove follows [semantic versioning](https://semver.org). The version lives in \`package.json\`; the build copies it into the extension manifest and the app.
 
+## Unreleased
+
+### Fixed
+- Block site rules now also apply where a tab ends up. Before, opening a link that redirected to a blocked site, or a click that navigated there, sent that page's text and the automatic screenshot to the model. Both are now withheld, and the model is told the site is blocked.
+
 ## 2.5.2 - 2026-10-21
 
 ### Added
