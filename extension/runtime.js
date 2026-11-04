@@ -2560,6 +2560,11 @@ function withoutImage(result) {
     Object.entries(result).map(([k, v]) => [k, withoutImage(v)])
   );
 }
+function blockedLanding(settings, result) {
+  if (!result || typeof result !== "object" || typeof result.url !== "string") return void 0;
+  const host = hostOf(result.url);
+  return ruleFor(settings.siteRules ?? [], host)?.action === "block" ? host : void 0;
+}
 var MAX_CONCURRENT_RUNS = 3;
 var AgentEngine = class {
   constructor(options) {
@@ -2818,6 +2823,14 @@ Browser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. 
         else if (action === "browser_navigate" && Number.isInteger(result?.id))
           active.selectedTab = result.id;
         if (active.selectedTab !== void 0) active.ownedTabs.add(active.selectedTab);
+        const landed = blockedLanding(settings, result);
+        if (landed)
+          return {
+            blocked: true,
+            site: landed,
+            ...Number.isInteger(result?.tabId) ? { tabId: result.tabId } : {},
+            message: `This action ended on ${landed}, which the user's site rules block, so its content was withheld. Do not retry it or look for another way to reach this site.`
+          };
         return result;
       }
     };
