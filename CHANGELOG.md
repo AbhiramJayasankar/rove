@@ -13,9 +13,11 @@ Rove follows [semantic versioning](https://semver.org). The version lives in `pa
 - Starting a task on a tab another task is using explains it in plain words instead of an internal error.
 - The "Up to 3 tasks can run at once" error disappears once a task finishes or you switch chats, and other errors no longer follow you to another tab or chat.
 - Page script errors no longer include JavaScript stack lines.
+- Model errors say what went wrong and what to do (a rejected key, rate limiting, a server error, a missing model) with the provider's own message, instead of raw JSON or an HTML error page. A connection that drops mid-answer says so instead of "network error".
+- Images in a model's answer that point to other sites show as links. Rove never loads them, so they used to appear as broken pictures.
 - A fresh chat on a new tab targets that page once it finishes loading, instead of staying on New Tab.
 - Block site rules now also apply where a tab ends up. Before, opening a link that redirected to a blocked site, or a click that navigated there, sent that page's text and the automatic screenshot to the model. Both are now withheld, and the model is told the site is blocked.
-- A saved API key is only sent to its own provider's server. Before, the model list in Settings refreshed as you typed a new base URL and sent the saved key to each address typed, including half-typed or mistyped ones; Test connection did the same. A different server now gets no key unless you type one for it.
+- A saved API key is only sent to its own provider's server. Before, the model list in Settings refreshed as you typed a new base URL and sent the saved key to each address typed, including half-typed or mistyped ones; the connection check API did the same. A different server now gets no key unless you type one for it.
 
 ## 2.5.2 - 2026-10-21
 

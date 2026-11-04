@@ -1416,6 +1416,20 @@ function completionUrl(baseUrl) {
 function redact(value, key) {
   return key ? value.split(key).join("[REDACTED]") : value;
 }
+function describeHttpError(status, raw, details, retryAfter) {
+  const provided = [details?.error?.message, details?.message, typeof details?.error === "string" ? details.error : void 0, details?.detail].find((value) => typeof value === "string" && value.trim()) ?? (/<\/?[a-z][\s\S]*>/i.test(raw) ? raw.replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ") : raw);
+  const message = provided.replace(/\s+/g, " ").trim().slice(0, 1e3);
+  const said = message ? `: ${message}` : ".";
+  const wait = retryAfter && /^\d+$/.test(retryAfter) ? ` Try again in ${retryAfter} seconds.` : " Wait a moment and try again.";
+  if (status === 401 || status === 403)
+    return `The model provider rejected the request (HTTP ${status})${said} Check the API key for this provider in Settings.`;
+  if (status === 402) return `The model provider needs payment or credits (HTTP 402)${said}`;
+  if (status === 404)
+    return `The model provider could not find this endpoint or model (HTTP 404)${said} Check the base URL and model in Settings.`;
+  if (status === 429) return `The model provider is limiting requests (HTTP 429)${said}${/try again/i.test(message) ? "" : wait}`;
+  if (status >= 500) return `The model provider had a server error (HTTP ${status})${said} Try again in a moment.`;
+  return `Model endpoint returned HTTP ${status}${said}`;
+}
 var ModelEndpointError = class extends Error {
   constructor(message, status, code, details, requestId) {
     super(message);
@@ -1570,7 +1584,16 @@ async function streamedCompletion(response, onDelta, onActivity) {
   };
   try {
     for (; ; ) {
-      const { done, value } = await reader.read();
+      let chunk;
+      try {
+        chunk = await reader.read();
+      } catch (error62) {
+        if (error62 instanceof DOMException && error62.name === "AbortError") throw error62;
+        throw new Error(
+          `The connection to the model dropped before the answer finished (${error62 instanceof Error ? error62.message : String(error62)}). No partial tool calls were executed; try again.`
+        );
+      }
+      const { done, value } = chunk;
       if (done) break;
       onActivity?.();
       bytes += value.byteLength;
@@ -1670,10 +1693,7 @@ async function complete(settings, apiKey2, messages, tools, signal, onDelta, mod
       } catch {
       }
       throw new ModelEndpointError(
-        redact(
-          `Model endpoint returned HTTP ${response.status}: ${raw.slice(0, 3e3)}`,
-          apiKey2
-        ),
+        redact(describeHttpError(response.status, raw, details, response.headers.get("retry-after")), apiKey2),
         response.status,
         details?.error?.code || details?.error?.type || details?.code,
         details,

@@ -25,6 +25,28 @@ function redact(value: string, key: string): string {
   return key ? value.split(key).join("[REDACTED]") : value;
 }
 
+/** What a failed model request means for the user, keeping the provider's own message (which also
+ * carries context-limit details) and dropping JSON wrappers and HTML error pages. */
+export function describeHttpError(status: number, raw: string, details?: any, retryAfter?: string | null): string {
+  const provided =
+    [details?.error?.message, details?.message, typeof details?.error === "string" ? details.error : undefined, details?.detail]
+      .find((value) => typeof value === "string" && value.trim()) ??
+    (/<\/?[a-z][\s\S]*>/i.test(raw)
+      ? raw.replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ").replace(/<[^>]+>/g, " ")
+      : raw);
+  const message = provided.replace(/\s+/g, " ").trim().slice(0, 1000);
+  const said = message ? `: ${message}` : ".";
+  const wait = retryAfter && /^\d+$/.test(retryAfter) ? ` Try again in ${retryAfter} seconds.` : " Wait a moment and try again.";
+  if (status === 401 || status === 403)
+    return `The model provider rejected the request (HTTP ${status})${said} Check the API key for this provider in Settings.`;
+  if (status === 402) return `The model provider needs payment or credits (HTTP 402)${said}`;
+  if (status === 404)
+    return `The model provider could not find this endpoint or model (HTTP 404)${said} Check the base URL and model in Settings.`;
+  if (status === 429) return `The model provider is limiting requests (HTTP 429)${said}${/try again/i.test(message) ? "" : wait}`;
+  if (status >= 500) return `The model provider had a server error (HTTP ${status})${said} Try again in a moment.`;
+  return `Model endpoint returned HTTP ${status}${said}`;
+}
+
 export class ModelEndpointError extends Error {
   constructor(
     message: string,
@@ -215,7 +237,16 @@ async function streamedCompletion(
   };
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      let chunk: ReadableStreamReadResult<Uint8Array>;
+      try {
+        chunk = await reader.read();
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") throw error;
+        throw new Error(
+          `The connection to the model dropped before the answer finished (${error instanceof Error ? error.message : String(error)}). No partial tool calls were executed; try again.`,
+        );
+      }
+      const { done, value } = chunk;
       if (done) break;
       onActivity?.();
       bytes += value.byteLength;
@@ -335,10 +366,7 @@ export async function complete(
       /* Keep the bounded text error. */
     }
     throw new ModelEndpointError(
-      redact(
-        `Model endpoint returned HTTP ${response.status}: ${raw.slice(0, 3000)}`,
-        apiKey,
-      ),
+      redact(describeHttpError(response.status, raw, details, response.headers.get("retry-after")), apiKey),
       response.status,
       details?.error?.code || details?.error?.type || details?.code,
       details,

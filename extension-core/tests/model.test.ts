@@ -6,6 +6,8 @@ import {
   completionUrl,
   testModel,
   generationOptions,
+  describeHttpError,
+  ModelEndpointError,
 } from "../model";
 
 afterEach(() => vi.unstubAllGlobals());
@@ -231,7 +233,7 @@ describe("OpenAI-compatible models", () => {
         [],
         new AbortController().signal,
       ),
-    ).rejects.toThrow("HTTP 401: Bad key [REDACTED]");
+    ).rejects.toThrow("(HTTP 401): Bad key [REDACTED]");
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe(
       "Bearer secret-api-key",
     );
@@ -322,5 +324,36 @@ describe("OpenAI-compatible models", () => {
   it("reports a silent endpoint with a clear message", async () => {
     vi.stubGlobal("fetch", vi.fn((_url: string, init: RequestInit) => new Promise((_, reject) => init.signal!.addEventListener("abort", () => reject(init.signal!.reason)))));
     await expect(complete({ ...settings, modelTimeoutSeconds: 0.05 }, "", [{ role: "user", content: "x" }], [], new AbortController().signal)).rejects.toThrow("sent nothing for");
+  });
+});
+
+describe("model errors people can act on", () => {
+  it("names the problem, keeps the provider's message, and drops JSON and HTML wrappers", () => {
+    const json = (message: string) => JSON.stringify({ error: { message, type: "x" } });
+    expect(describeHttpError(401, json("Incorrect API key provided."), JSON.parse(json("Incorrect API key provided."))))
+      .toBe("The model provider rejected the request (HTTP 401): Incorrect API key provided. Check the API key for this provider in Settings.");
+    expect(describeHttpError(429, json("Slow down."), JSON.parse(json("Slow down.")), "20"))
+      .toBe("The model provider is limiting requests (HTTP 429): Slow down. Try again in 20 seconds.");
+    expect(describeHttpError(502, "<html><head><style>p{}</style></head><body><h1>502 Bad Gateway</h1><p>cloudflare</p></body></html>"))
+      .toBe("The model provider had a server error (HTTP 502): 502 Bad Gateway cloudflare Try again in a moment.");
+    expect(describeHttpError(404, "")).toBe("The model provider could not find this endpoint or model (HTTP 404). Check the base URL and model in Settings.");
+    expect(describeHttpError(418, "teapot")).toBe("Model endpoint returned HTTP 418: teapot");
+  });
+  it("still reads a context limit from the provider's message", () => {
+    const body = { error: { message: "This model's maximum context length is 8192 tokens. However, you requested 9000 tokens.", code: "context_length_exceeded" } };
+    const error = new ModelEndpointError(describeHttpError(400, JSON.stringify(body), body), 400, body.error.code, body);
+    expect(error.contextExceeded).toBe(true);
+    expect(error.contextLimit).toBe(8192);
+  });
+  it("explains a stream that drops mid-answer", async () => {
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('data: {"choices":[{"index":0,"delta":{"content":"Half"}}]}\n\n'));
+        controller.error(new TypeError("network error"));
+      },
+    });
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(stream, { headers: { "content-type": "text/event-stream" } })));
+    await expect(complete(settings, "", [{ role: "user", content: "hi" }], [], new AbortController().signal))
+      .rejects.toThrow("The connection to the model dropped before the answer finished (network error).");
   });
 });
