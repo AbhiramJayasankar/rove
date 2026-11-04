@@ -143,6 +143,16 @@ export function AssistantMessage({ content, meta }: { content: string; meta?: { 
               a: (props) => (
                 <a {...props} target="_blank" rel="noreferrer noopener" />
               ),
+              // Rove's pages never load remote images (a model could be steered into leaking data
+              // through an image URL), so show those as links rather than broken pictures.
+              img: ({ src, alt }) =>
+                typeof src === "string" && /^data:image\//.test(src) ? (
+                  <img src={src} alt={alt || ""} />
+                ) : (
+                  <a href={typeof src === "string" ? src : undefined} target="_blank" rel="noreferrer noopener">
+                    {t("Image: {name}", { name: alt || (typeof src === "string" ? src : "") })}
+                  </a>
+                ),
             }}
           >
             {content}

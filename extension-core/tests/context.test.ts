@@ -104,3 +104,41 @@ describe("large model context", () => {
     expect(ids).toContain("three");
   });
 });
+
+describe("small model context", () => {
+  const small = { ...DEFAULT_SETTINGS, contextWindow: 8192, maxOutputTokens: 16384 };
+  it("shortens a long earlier answer instead of failing a follow-up", () => {
+    const long = "Lamps come in many shapes and sizes. ".repeat(500);
+    const messages = [
+      { role: "system", content: "Instructions ".repeat(300) },
+      { role: "user", content: "First question" },
+      { role: "assistant", content: long },
+      { role: "user", content: "Second question" },
+      { role: "assistant", content: long },
+      { role: "user", content: "Third question" },
+    ];
+    const usage = compactContext(messages, small, []);
+    expect(usage.estimatedTokens).toBeLessThanOrEqual(usage.inputBudget);
+    expect(messages[1].content).toBe("First question");
+    expect(messages.at(-1)!.content).toBe("Third question");
+    const answer = messages.findLast((m: any) => m.role === "assistant")!;
+    expect(answer.content).toContain("[Earlier answer shortened to fit this model's context.]");
+    expect(answer.content.length).toBeLessThan(long.length);
+  });
+  it("names an oversized page observation and suggests a smaller snapshot", () => {
+    const messages = [
+      { role: "system", content: "Instructions" },
+      { role: "user", content: "Task" },
+      { role: "assistant", content: null, tool_calls: [{ id: "s", type: "function", function: { name: "browser_snapshot", arguments: "{}" } }] },
+      { role: "tool", tool_call_id: "s", content: "text ".repeat(20000) },
+    ];
+    expect(() => compactContext(messages, small, [])).toThrow("The latest page observation is too large for this model's context.");
+  });
+  it("says plainly when the newest step cannot fit at all", () => {
+    const messages = [
+      { role: "system", content: "Instructions" },
+      { role: "user", content: "x".repeat(40000) },
+    ];
+    expect(() => compactContext(messages, small, [])).toThrow(/This chat's newest step needs about [\d,]+ tokens, more than the [\d,]+ this model has room for/);
+  });
+});
