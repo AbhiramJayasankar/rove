@@ -445,6 +445,11 @@ async function frameContext(tabId, frameId, mainWorld = false) {
   );
   return { ...frame, contextId: result.executionContextId };
 }
+/** A page exception's message without its stack frames ("    at <anonymous>:1:121"), which mean nothing to the user or the model. */
+function withoutStack(description) {
+  if (typeof description !== "string") return description;
+  return description.split("\n").filter((line) => !/^\s+at\s/.test(line)).join("\n").replace(/^Error: /, "");
+}
 async function evaluate(tabId, frame, expression, returnByValue = true) {
   const result = await cdp(
     tabId,
@@ -460,12 +465,12 @@ async function evaluate(tabId, frame, expression, returnByValue = true) {
   );
   if (result.exceptionDetails)
     throw new Error(
-      result.exceptionDetails.exception?.description ||
+      withoutStack(result.exceptionDetails.exception?.description) ||
         result.exceptionDetails.text ||
         "Page JavaScript failed",
     );
   if (result.result.subtype === "error")
-    throw new Error(result.result.description);
+    throw new Error(withoutStack(result.result.description));
   return returnByValue ? result.result.value : result.result;
 }
 async function elementOperation(tabId, frameId, ref, body, extra = {}) {

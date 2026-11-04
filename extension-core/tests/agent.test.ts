@@ -133,6 +133,43 @@ describe("agent execution loop", () => {
       await until(() => !ctx.engine.activeRunId);
       expect(ctx.execute).toHaveBeenCalledWith("browser_navigate", expect.anything(), expect.anything());
     });
+    it("withholds a page that a redirect lands on a blocked site", async () => {
+      const fetchMock = vi.fn().mockResolvedValueOnce(navigate("https://link.example/out?to=bank")).mockResolvedValueOnce(response("Stopped."));
+      vi.stubGlobal("fetch", fetchMock);
+      const ctx = setup({ siteRules: [{ pattern: "bank.com", action: "block" }] });
+      ctx.execute.mockResolvedValueOnce({ tabId: 7, url: "https://login.bank.com/account", title: "Bank", text: "Balance 1,234.56" });
+      const run = ctx.engine.start("Follow the link.");
+      await until(() => !ctx.engine.activeRunId);
+      const sent = fetchMock.mock.calls[1][1].body as string;
+      expect(sent).not.toContain("Balance 1,234.56");
+      expect(sent).not.toContain("data:image");
+      const result = run.events.find((event) => event.type === "tool_result");
+      expect(result?.data.result).toMatchObject({ blocked: true, site: "login.bank.com" });
+      expect(JSON.stringify(run.events)).not.toContain("Balance 1,234.56");
+    });
+    it("withholds the automatic screenshot when an action ends on a blocked site", async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(navigate("https://shop.example/"))
+        .mockResolvedValueOnce(response(null, [call("c1", "browser_click", { tabId: 7, ref: "e1" })]))
+        .mockResolvedValueOnce(response("Done."));
+      vi.stubGlobal("fetch", fetchMock);
+      const ctx = setup({ siteRules: [{ pattern: "bank.com", action: "block" }] });
+      const shot = (url: string) => ({ tabId: 7, url, title: "Page", dataUrl: "data:image/jpeg;base64,QUJD" });
+      ctx.execute
+        .mockResolvedValueOnce({ tabId: 7, url: "https://shop.example/", title: "Shop", text: "Shop" })
+        .mockResolvedValueOnce(shot("https://shop.example/"))
+        .mockResolvedValueOnce({ clicked: true })
+        .mockResolvedValueOnce(shot("https://login.bank.com/account"));
+      const run = ctx.engine.start("Buy it.");
+      await until(() => !ctx.engine.activeRunId);
+      expect(fetchMock.mock.calls[1][1].body).toContain("data:image/jpeg;base64,QUJD");
+      const afterClick = fetchMock.mock.calls[2][1].body as string;
+      expect(afterClick.split("data:image/jpeg;base64,QUJD").length - 1).toBe(1);
+      const screenshots = run.events.filter((event) => event.type === "screenshot");
+      expect(screenshots.map((event) => event.data.url)).toEqual(["https://shop.example/"]);
+      const observation = run.events.findLast((event) => event.type === "browser_observation");
+      expect(observation?.data.result).toMatchObject({ blocked: true, site: "login.bank.com" });
+    });
     it("lets an allowed site skip approval in ask-first mode but still asks elsewhere", async () => {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(navigate("https://docs.ok.com/")).mockResolvedValueOnce(navigate("https://other.com/")));
       const ctx = setup({ approvalMode: "risky", siteRules: [{ pattern: "ok.com", action: "allow" }] });
@@ -963,5 +1000,44 @@ describe("tool registry", () => {
         signal,
       ),
     ).rejects.toThrow("unavailable");
+  });
+});
+
+describe("context calibration against provider counts", () => {
+  const sse = (message: any, usage: any) => new Response(
+    [`data: ${JSON.stringify({ choices: [{ index: 0, delta: { role: "assistant", ...message, ...(message.tool_calls ? { tool_calls: message.tool_calls.map((c: any, index: number) => ({ index, ...c })) } : {}) } }] })}\n\n`,
+     `data: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: message.tool_calls ? "tool_calls" : "stop" }] })}\n\n`,
+     `data: ${JSON.stringify({ choices: [], usage })}\n\n`, "data: [DONE]\n\n"].join(""),
+    { headers: { "content-type": "text/event-stream" } });
+  it("scales its estimate down when the provider counts fewer tokens, and keeps that for follow-ups", async () => {
+    let n = 0;
+    const replies = [
+      () => sse({ content: null, tool_calls: [call("s", "browser_snapshot", { tabId: 7 })] }, { prompt_tokens: 2000, completion_tokens: 20 }),
+      () => sse({ content: "Done." }, { prompt_tokens: 1500, completion_tokens: 10 }),
+      () => sse({ content: "Again." }, { prompt_tokens: 1600, completion_tokens: 10 }),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => replies[n++]()));
+    const ctx = setup({}, "", { transport: { execute: vi.fn().mockResolvedValue({ tabId: 7, text: "x".repeat(30000), elements: [], totalElements: 0 }), status: () => ({ connected: true, tabs: [{ id: 7, url: "https://a.test", title: "A" }] }) } });
+    const run = ctx.engine.start("Read it.", 7);
+    await until(() => !ctx.engine.activeRunId);
+    const usage = () => run.events.filter((e) => e.type === "context_usage").map((e) => e.data);
+    const [first, second] = usage();
+    expect(first.tokenRatio).toBe(1);
+    // The provider counted 2000 for what Rove estimated higher, so the next estimate scales down.
+    expect(first.estimatedTokens).toBeGreaterThan(2000);
+    expect(second.tokenRatio).toBeCloseTo(2000 / first.estimatedTokens, 5);
+    expect(second.tokenRatio).toBeLessThan(1);
+    const next = ctx.engine.continue(run, "And again?", 7);
+    await until(() => !ctx.engine.activeRunId);
+    const followUp = next.events.filter((e) => e.type === "context_usage").at(-1)!.data;
+    expect(followUp.tokenRatio).toBeCloseTo(Math.max(0.3, (second.tokenRatio * 1500) / second.estimatedTokens), 5);
+  });
+  it("counts the system message and every offered tool for a new chat", async () => {
+    const { contextBaseline } = await import("../agent");
+    const { DEFAULT_SETTINGS } = await import("../../shared/defaults");
+    const base = contextBaseline(DEFAULT_SETTINGS);
+    expect(base).toBeGreaterThan(2000);
+    expect(contextBaseline({ ...DEFAULT_SETTINGS, memory: "note ".repeat(600) })).toBeGreaterThan(base + 500);
+    expect(contextBaseline({ ...DEFAULT_SETTINGS, disabledTools: [...DEFAULT_SETTINGS.disabledTools, "browser_drag", "browser_select"] })).toBeLessThan(base);
   });
 });

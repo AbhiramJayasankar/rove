@@ -22,6 +22,7 @@ The workbench uses a trusted `rove-rpc` runtime port for the same operations. It
 | GET    | `/api/health`              | Version and extension runtime identity                                                           |
 | GET    | `/api/state`               | Settings, key-present flag, model metadata, tabs, run summaries, `activeRunIds`, compatibility `activeRunId` and tool catalogue |
 | GET    | `/api/tabs`                | Refresh Chrome tab inventory                                                                     |
+| PUT    | `/api/tab-chat`            | `{tabId, runId}`: the chat the side panel shows on that tab; `runId:""` for a fresh chat          |
 | GET | `/api/settings` | Normalized saved settings, key-present flag, and selected model metadata; never the key |
 | PUT    | `/api/settings`            | Full settings, optional `apiKey`; omit key to retain, empty string to clear; reject while active |
 | PUT    | `/api/approval-mode`       | `{mode,runId?}`; with a run ID changes only that active response; otherwise persists the default for new responses |

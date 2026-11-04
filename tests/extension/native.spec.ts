@@ -390,7 +390,7 @@ test("lost debugger sessions stop the task and a new task reconnects without rep
     id,
   );
   if (!capture.ok) {
-    expect(capture.error).toContain("owned by another task");
+    expect(capture.error).toContain("Rove is working in this tab right now");
   }
   // Manual access cannot probe an active lease. Let its owning run discover the
   // stale client at the approved dispatch instead; no action may be replayed.

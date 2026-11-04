@@ -4,18 +4,20 @@ import { Check, Cloud, Mic } from "lucide-react";
 import { useT } from "./i18n";
 
 export function useVoiceSettings() {
-  const [value, setValue] = useState<Options>(DEFAULT_VOICE);
+  const [value, setStored] = useState<Options>(DEFAULT_VOICE);
+  const [edited, setEdited] = useState(false);
+  const setValue = (next: Options) => { setStored(next); setEdited(true); };
   const [key, setKey] = useState("");
   const [changed, setChanged] = useState(false);
   const [savedKey, setSavedKey] = useState(false);
-  useEffect(() => { void readVoice().then(setValue); void chrome.storage.local.get("voiceApiKey").then(v => setSavedKey(!!v.voiceApiKey)); }, []);
+  useEffect(() => { void readVoice().then(setStored); void chrome.storage.local.get("voiceApiKey").then(v => setSavedKey(!!v.voiceApiKey)); }, []);
   async function save() {
       if (value.backend === "api") { transcriptionUrl(value.baseUrl); if (!value.model.trim()) throw new Error("Enter a transcription model."); }
       await chrome.storage.local.set({ voiceSettings: value, ...(changed ? { voiceApiKey: key.trim() } : {}) });
       if (changed) setSavedKey(!!key.trim());
-      setKey(""); setChanged(false);
+      setKey(""); setChanged(false); setEdited(false);
   }
-  return { value, setValue, key, setKey, setChanged, savedKey, save };
+  return { value, setValue, key, setKey, setChanged, savedKey, save, dirty: edited || changed };
 }
 const backends: { value: Options["backend"]; label: string; note: string; Icon: typeof Mic }[] = [
   { value: "web", label: "Web Speech", note: "No key. Chrome sends audio to Google.", Icon: Mic },

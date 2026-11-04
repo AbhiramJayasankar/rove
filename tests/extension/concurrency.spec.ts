@@ -176,7 +176,7 @@ test("leases reject collisions as tool errors and allow manual work only on free
   expect(listed.find((tab: any) => tab.id === secondTab).busyWithAnotherTask).toBe(false);
   expect((await rpc("/api/tabs")).find((tab: any) => tab.id === secondTab).busyWithAnotherTask).toBe(true);
   expect((await tool("lease-other", "browser_snapshot", { tabId: firstTab } as any)).error).toBe(`Tab ${firstTab} is owned by another task. Choose an unleased tab or navigate with newTab:true.`);
-  expect((await raw("/api/browser", "POST", { action: "browser_snapshot", args: { tabId: firstTab } })).error).toContain("owned by another task");
+  expect((await raw("/api/browser", "POST", { action: "browser_snapshot", args: { tabId: firstTab } })).error).toContain("Rove is working in this tab right now");
   expect(await rpc("/api/browser", "POST", { action: "browser_snapshot", args: { tabId: freeTab } })).toMatchObject({ tabId: freeTab });
   expect(await tool("lease-other", "browser_snapshot", { tabId: freeTab } as any)).toMatchObject({ tabId: freeTab });
   expect((await tool("lease-owner", "browser_snapshot", { tabId: freeTab } as any)).error).toContain("owned by another task");

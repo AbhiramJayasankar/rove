@@ -44,11 +44,13 @@ type Props = {
   setPage: (page: Page) => void;
   pending: string;
   action: Action;
-  saveSettings: (saveVoice?: () => Promise<void>) => Promise<void>;
+  saveSettings: (saveVoice?: () => Promise<void>) => Promise<unknown>;
   apiKey: string;
   setApiKey: (value: string) => void;
   keyChanged: boolean;
   notice: (value: string) => void;
+  /** Lets the app warn before leaving with unsaved prompts, voice or model-list changes, and save them. */
+  reportUnsaved: (unsaved: boolean, save: () => Promise<void>) => void;
 };
 export default function Configuration({
   providerName,
@@ -65,6 +67,7 @@ export default function Configuration({
   setApiKey,
   keyChanged,
   notice,
+  reportUnsaved,
 }: Props) {
   const t = useT();
   const { preference, setPreference } = useLanguage();
@@ -73,6 +76,10 @@ export default function Configuration({
   const visibility = useModelVisibility(state.activeProviderId);
   const shortcuts = useShortcutsEditor();
   const [listed, setListed] = useState<ModelInfo[]>([]);
+  const saveLocal = async () => { await voice.save(); await visibility.save(); await shortcuts.save(); };
+  const localUnsaved = voice.dirty || visibility.touched || shortcuts.touched;
+  useEffect(() => reportUnsaved(localUnsaved, saveLocal));
+  useEffect(() => () => reportUnsaved(false, async () => {}), []);
   const [toolSearch, setToolSearch] = useState("");
   const whatsNew = useRef<HTMLDialogElement>(null);
   const tabs: [Page, string, typeof Cpu][] = [
@@ -453,7 +460,7 @@ export default function Configuration({
         <button
           className="button primary"
           disabled={!!pending || !!state.activeRunId}
-          onClick={() => saveSettings(async () => { await voice.save(); await visibility.save(); await shortcuts.save(); })}
+          onClick={() => saveSettings(saveLocal)}
         >
           {pending === "save" ? (
             <LoaderCircle className="spin" size={15} />

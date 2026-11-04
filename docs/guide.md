@@ -6,9 +6,9 @@ The details behind the [README](../README.md): models, local servers, providers,
 
 Rove uses OpenAI-compatible **Chat Completions function calling**. Set a base URL such as `https://api.openai.com/v1`, a compatible gateway, or a local model server. A full URL ending in `/chat/completions` also works. Local endpoints may omit the key. The model must support tools. Streaming is always requested.
 
-The picker uses endpoint labels, prices, modalities, supported parameters and limits. Endpoint metadata takes precedence. Exact provider/model fallbacks from primary documentation fill missing capabilities for a few known free models. Unknown capabilities stay automatic; Rove does not invent effort levels. Context and output limits use the model maxima, reserving enough room for the actual input. The trace shows provider reasoning when the endpoint returns it. The context ring separates current context from cumulative input and output tokens and estimates cost from provider usage or model pricing; missing usage or pricing stays marked unknown.
+The picker uses endpoint labels, prices, modalities, supported parameters and limits. Endpoint metadata takes precedence. Exact provider/model fallbacks from primary documentation fill missing capabilities for a few known free models. Unknown capabilities stay automatic; Rove does not invent effort levels. Context and output limits use the model maxima, reserving enough room for the actual input. The trace shows provider reasoning when the endpoint returns it. The context ring separates current context from cumulative input and output tokens and estimates cost from provider usage or model pricing; missing usage or pricing stays marked unknown. Current context is the provider's count of the last request plus the answer it produced, which the next request carries; while a newer request is being prepared it shows Rove's estimate, marked `~`. A new chat starts at the system message and the offered tools, not at zero.
 
-Before each request, Rove keeps complete tool-call groups within the model's budget and limits older screenshots independently. Provider usage calibrates its token estimates. A structured context rejection triggers a bounded retry of the model request, dropping older images before older text. Browser actions are never replayed. Learned input and image limits are isolated by endpoint, credential hash and model.
+Before each request, Rove keeps complete tool-call groups within the model's budget and limits older screenshots independently. Provider usage calibrates its token estimates in both directions (from 0.3× to 4× Rove's byte-based estimate), and a follow-up starts with the chat's latest calibration, so compaction starts near the model's real limit instead of early. Every request carries the system message, the offered tools, earlier reasoning (including encrypted `reasoning_details`), tool calls and their results; some models' own templates drop older reasoning, which shows as a smaller provider count. A structured context rejection triggers a bounded retry of the model request, dropping older images before older text. Browser actions are never replayed. Learned input and image limits are isolated by endpoint, credential hash and model.
 
 ### What the endpoint reports
 
@@ -31,7 +31,7 @@ In **Settings → Model → Provider**, choose **+ Add OpenRouter** or **+ Add c
 
 All saved providers contribute to the same searchable model picker. Each model shows its provider when several catalogues are present, including duplicate model IDs, and choosing one uses that provider's URL and key. A catalogue that fails to load does not hide the others. **Free** filters paid models. There is no automatic fallback between providers.
 
-Provider keys stay in `chrome.storage.local` (`modelProviderKeys`, with the selected key mirrored in `modelApiKey`). They are excluded from settings responses, run history and exports.
+Provider keys stay in `chrome.storage.local` (`modelProviderKeys`, with the selected key mirrored in `modelApiKey`). They are excluded from settings responses, run history and exports. While you edit a provider's base URL, the model list (and the `POST /api/model/test` connection check) send the saved key only to that provider's own origin; a different address gets no key until you type one for it.
 
 ## Browsing behavior
 
@@ -43,11 +43,23 @@ Settings → Tools → **Browsing** has three switches, all on by default and ap
 
 Up to three tasks run at once, each leasing its own tabs. Stop (or Escape) prevents further actions; an action already sent cannot be undone.
 
+### Which chat the side panel shows
+
+Chrome keeps one Rove side panel per window, and it follows the tab you are on:
+
+- A tab Rove has worked in shows that chat, including tabs Rove opened for it and the tab you started it from. Switching tabs switches chats; a running task keeps going while you look elsewhere, and the strip at the top lists every running task (one that needs you says so).
+- A tab with no chat shows a fresh one that works on that tab. **New task** does the same for the tab you are on. Unsent text stays with the tab you typed it beside.
+- Choosing a chat from History or the running-task strip shows it on the current tab from then on.
+- A task started in another tab or window never takes over the panel. Closing a tab forgets its chat, and these choices reset when Chrome restarts; History keeps every chat.
+- A full-page Rove tab opens with a fresh chat, follows tasks you start, and keeps its chat when you reload that tab.
+
+If another task is working in the tab, Rove says so instead of starting a second task there; wait for it, stop it, or pick **New Tab**. The preview of that tab shows the task's newest screenshot (one arrives after every action) rather than taking its own.
+
 ## Prompts, rules and attachments
 
 - **Standing instructions** (Settings → Instructions) are added to every task after the system instructions.
 - **Saved prompts**: add them in Settings → Instructions. Type `/` in the message box to search and insert one; an optional start page is prefixed as "Start at ...". Nothing is sent until you press Send.
-- **Site rules** (Settings → Tools) set Allow, Ask or Block for a site and its subdomains. They override Auto-approve and Ask first for that site; Ask cannot be answered by switching to Auto-approve; Block never reaches the browser and the model is told why. The most specific rule wins and a tie takes the stricter action. A rule checks the address a tool acts on, so a link that leads to a blocked site is caught on the next tool call.
+- **Site rules** (Settings → Tools) set Allow, Ask or Block for a site and its subdomains. They override Auto-approve and Ask first for that site; Ask cannot be answered by switching to Auto-approve; Block never reaches the browser and the model is told why. The most specific rule wins and a tie takes the stricter action. A rule checks the address a tool acts on, and again where the tab ends up: if a redirect or a click lands on a blocked site, the page text and screenshot from that action are withheld from the model, and the next tool call on that tab is blocked.
 - **Attachments**: the paperclip adds up to five images (5 MB each) or text files (200,000 characters each), or a screenshot of the selected tab. Images need a vision model. File contents are treated as untrusted data.
 - **Reports**: the agent can save a `.md`, `.txt`, `.csv`, `.json` or `.html` report to Downloads/Rove with `browser_save_file`. File names are bare names; folders and other types are refused.
 - **Export**: the trace view exports a run as JSON or a readable Markdown transcript.

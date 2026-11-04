@@ -22,9 +22,20 @@ import HistoryDialog from "./HistoryDialog";
 import { applyTheme, readTheme } from "./theme";
 import { readVisibleModels } from "./modelVisibility";
 import ActiveTasks from "./ActiveTasks";
+import { useHomeTab } from "./homeTab";
 import { useT } from "./i18n";
 
 const MAX_TASKS = 3;
+/** JSON with sorted keys, to compare a settings draft with the saved settings. */
+function stableJson(value: unknown): string {
+  return JSON.stringify(value, (_key, item) =>
+    item && typeof item === "object" && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b)))
+      : item,
+  );
+}
+/** A full-page Rove tab keeps its chat across reloads of that tab only. */
+const PAGE_CHAT_KEY = "rove.pageChat";
 const activeIdsOf = (state: Pick<AppState, "activeRunId"> & Partial<Pick<AppState, "activeRunIds">> | null | undefined): string[] =>
   state ? state.activeRunIds ?? (state.activeRunId ? [state.activeRunId] : []) : [];
 /** Add or remove one task from the active set, keeping the single-id alias in step. */
@@ -52,6 +63,9 @@ export default function App() {
   const [apiKey, setApiKey] = useState("");
   const [keyChanged, setKeyChanged] = useState(false);
   const [streamConnected, setStreamConnected] = useState(false);
+  const home = useHomeTab();
+  const homeRef = useRef(home);
+  homeRef.current = home;
   const stateRef = useRef<AppState | null>(null);
   const selectedRef = useRef<string | null>(null);
   const reconciling = useRef(false);
@@ -176,7 +190,6 @@ export default function App() {
         providerRef.current = initial.activeProviderId;
         setDraft(initial.settings);
         setProviderName(initial.providers.find(provider => provider.id === initial.activeProviderId)?.name || "Provider");
-        setSelectedId(initial.activeRunId || initial.runs[0]?.id || null);
         source = new EventSource("/api/events");
         source.onopen = () => setStreamConnected(true);
         source.onerror = () => setStreamConnected(false);
@@ -213,7 +226,13 @@ export default function App() {
         source.addEventListener("run", (event) => {
           const record: RunRecord = JSON.parse((event as MessageEvent).data);
           mergeRun(record);
-          if (record.events.length === 1) setSelectedId(record.id);
+          // A full-page Rove tab follows newly started tasks, as a workbench. The side panel follows
+          // its tab's chat instead, so a task started in another tab or window never replaces what
+          // this panel shows.
+          if (record.events.length === 1 && homeRef.current.ready && !homeRef.current.panel) {
+            setSelectedId(record.id);
+            try { sessionStorage.setItem(PAGE_CHAT_KEY, record.id); } catch {}
+          }
         });
         source.addEventListener("settings", (event) => {
           const settings = JSON.parse((event as MessageEvent).data);
@@ -231,6 +250,10 @@ export default function App() {
             reasoningEffort: settings.settings.reasoningEffort,
             contextWindow: settings.settings.contextWindow,
           }));
+        });
+        source.addEventListener("tab_chats", (event) => {
+          const tabChats = JSON.parse((event as MessageEvent).data);
+          setState((old) => (old ? { ...old, tabChats } : old));
         });
         source.addEventListener("model_info", (event) =>
           setState((old) =>
@@ -319,6 +342,45 @@ export default function App() {
       cancelled = true;
     };
   }, [selectedId]);
+  // Which chat to show. The side panel shows the chat bound to the tab beside it, or a fresh chat for
+  // that tab; switching tabs switches chats. A full-page Rove tab starts fresh and restores only its
+  // own chat after a reload.
+  const boundRaw = home.panel && home.tabId !== undefined ? state?.tabChats?.[String(home.tabId)] : undefined;
+  const boundId = boundRaw && state?.runs.some((r) => r.id === boundRaw) ? boundRaw : null;
+  const pagePlaced = useRef(false);
+  useEffect(() => {
+    if (!state || !home.ready) return;
+    if (home.panel) {
+      if (boundId !== selectedRef.current) {
+        setSelectedId(boundId);
+        if (!boundId) setNewChatVersion((value) => value + 1);
+      }
+    } else if (!pagePlaced.current) {
+      pagePlaced.current = true;
+      let saved: string | null = null;
+      try { saved = sessionStorage.getItem(PAGE_CHAT_KEY); } catch {}
+      setSelectedId(saved && state.runs.some((r) => r.id === saved) ? saved : null);
+    }
+  }, [!!state, home.ready, home.panel, home.tabId, boundId]);
+  // An error belongs to what was on screen when it happened: drop it when the chat or tab changes,
+  // and drop the task-limit error as soon as a slot frees up.
+  useEffect(() => setError(""), [selectedId, home.tabId]);
+  useEffect(() => {
+    if (activeIds.length < MAX_TASKS) setError((old) => (/tasks can run at once/.test(old) ? "" : old));
+  }, [activeIds.length]);
+  function chooseChat(id: string | null) {
+    setSelectedId(id);
+    if (home.panel && home.tabId !== undefined) {
+      const tabId = home.tabId;
+      setState((old) => (old ? { ...old, tabChats: { ...old.tabChats, [String(tabId)]: id ?? "" } } : old));
+      void api("/api/tab-chat", { method: "PUT", body: json({ tabId, runId: id ?? "" }) }).catch(() => {});
+    } else if (home.ready && !home.panel) {
+      try {
+        if (id) sessionStorage.setItem(PAGE_CHAT_KEY, id);
+        else sessionStorage.removeItem(PAGE_CHAT_KEY);
+      } catch {}
+    }
+  }
   useEffect(() => {
     if (!notice) return;
     const timer = setTimeout(() => setNotice(""), 3000);
@@ -338,7 +400,8 @@ export default function App() {
   function update<K extends keyof Settings>(key: K, value: Settings[K]) {
     setDraft((old) => ({ ...old, [key]: value }));
   }
-  async function saveSettings(saveVoice?: () => Promise<void>) {
+  async function saveSettings(saveVoice?: () => Promise<void>): Promise<boolean> {
+    let saved = false;
     await action("save", async () => {
       await saveVoice?.();
       const result = await api<{ settings: Settings; hasApiKey: boolean }>(
@@ -359,7 +422,43 @@ export default function App() {
       setApiKey("");
       setKeyChanged(false);
       setNotice("Saved");
+      saved = true;
     });
+    return saved;
+  }
+  // Settings edits are drafts until Save. Leaving with unsaved edits asks first instead of dropping them.
+  const localUnsaved = useRef<{ unsaved: boolean; save: () => Promise<void> }>({ unsaved: false, save: async () => {} });
+  const leaveDialog = useRef<HTMLDialogElement>(null);
+  const pendingLeave = useRef<(() => void) | null>(null);
+  const savedProviderName = state?.providers.find((provider) => provider.id === state.activeProviderId)?.name;
+  function settingsUnsaved() {
+    if (page === "workbench" || !state) return false;
+    return (
+      keyChanged ||
+      localUnsaved.current.unsaved ||
+      (savedProviderName !== undefined && providerName !== savedProviderName) ||
+      stableJson(draft) !== stableJson(state.settings)
+    );
+  }
+  function leaveSettings(next: () => void) {
+    if (!settingsUnsaved()) return next();
+    pendingLeave.current = next;
+    leaveDialog.current?.showModal();
+  }
+  function discardSettings() {
+    if (state) setDraft(state.settings);
+    setApiKey("");
+    setKeyChanged(false);
+    if (savedProviderName !== undefined) setProviderName(savedProviderName);
+    localUnsaved.current = { unsaved: false, save: async () => {} };
+  }
+  async function finishLeave(choice: "save" | "discard") {
+    leaveDialog.current?.close();
+    if (choice === "save" && !(await saveSettings(localUnsaved.current.save))) return;
+    if (choice === "discard") discardSettings();
+    const next = pendingLeave.current;
+    pendingLeave.current = null;
+    next?.();
   }
   async function changeApprovalMode(mode: Settings["approvalMode"]) {
     const runId = busy && run ? run.id : undefined;
@@ -424,7 +523,7 @@ export default function App() {
         <button
           className={page === "workbench" ? "brand" : "back-to-chat"}
           aria-label={page === "workbench" ? t("Rove workbench") : t("Back to chat")}
-          onClick={() => setPage("workbench")}
+          onClick={() => leaveSettings(() => setPage("workbench"))}
         >
           {page === "workbench" ? (
             <>
@@ -460,11 +559,13 @@ export default function App() {
               className="icon-button"
               aria-label={t("New task")}
               title={atCapacity ? t("Up to {n} tasks can run at once.", { n: MAX_TASKS }) : t("New task")}
-              onClick={() => {
-                setSelectedId(null);
-                setNewChatVersion((value) => value + 1);
-                setPage("workbench");
-              }}
+              onClick={() =>
+                leaveSettings(() => {
+                  chooseChat(null);
+                  setNewChatVersion((value) => value + 1);
+                  setPage("workbench");
+                })
+              }
             >
               <Plus size={20} />
             </button>
@@ -475,7 +576,7 @@ export default function App() {
             title={t("Settings")}
             aria-pressed={page !== "workbench"}
             onClick={() =>
-              setPage(page === "workbench" ? "settings" : "workbench")
+              page === "workbench" ? setPage("settings") : leaveSettings(() => setPage("workbench"))
             }
           >
             <Settings2 size={18} />
@@ -487,10 +588,12 @@ export default function App() {
           runs={state.runs}
           activeIds={activeIds}
           selectedId={selectedId}
-          onOpen={(id) => {
-            setSelectedId(id);
-            setPage("workbench");
-          }}
+          onOpen={(id) =>
+            leaveSettings(() => {
+              chooseChat(id);
+              setPage("workbench");
+            })
+          }
         />
       )}
       <main className="main-shell">
@@ -531,7 +634,8 @@ export default function App() {
                 pending={pending}
                 action={action}
                 setPage={setPage}
-                selectRun={setSelectedId}
+                selectRun={chooseChat}
+                homeTab={home.panel ? home.tabId ?? null : undefined}
                 mergeRun={mergeRun}
                 streamConnected={streamConnected}
                 changeApprovalMode={changeApprovalMode}
@@ -559,19 +663,43 @@ export default function App() {
                 }}
                 keyChanged={keyChanged}
                 notice={setNotice}
+                reportUnsaved={(unsaved, save) => {
+                  localUnsaved.current = { unsaved, save };
+                }}
               />
             )}
           </>
         )}
       </main>
+      <dialog
+        ref={leaveDialog}
+        className="history-dialog leave-dialog"
+        aria-labelledby="leave-title"
+      >
+        <h2 id="leave-title">{t("Unsaved changes")}</h2>
+        <p>{t("Your settings changes are not saved yet.")}</p>
+        <div className="leave-actions">
+          <button type="button" className="button secondary" onClick={() => leaveDialog.current?.close()}>
+            {t("Keep editing")}
+          </button>
+          <button type="button" className="button secondary" onClick={() => void finishLeave("discard")}>
+            {t("Discard")}
+          </button>
+          <button type="button" className="button primary" onClick={() => void finishLeave("save")}>
+            {t("Save")}
+          </button>
+        </div>
+      </dialog>
       <HistoryDialog
         dialogRef={historyDialog}
         runs={state?.runs || []}
         selectedId={selectedId}
-        onSelect={(id) => {
-          setSelectedId(id);
-          setPage("workbench");
-        }}
+        onSelect={(id) =>
+          leaveSettings(() => {
+            chooseChat(id);
+            setPage("workbench");
+          })
+        }
       />
     </div>
   );

@@ -107,8 +107,8 @@ test("two live tasks isolate collisions, manual access and terminal debugger rel
   expect(paused.events.find((event: any) => event.type === "tool_result" && event.data.error)?.data.error).toContain("owned by another task");
   expect(paused.events.find((event: any) => event.type === "tool_result" && event.data.name === "browser_tabs").data.result)
     .toEqual(expect.arrayContaining([expect.objectContaining({ id: firstTab, busyWithAnotherTask: true }), expect.objectContaining({ id: secondTab, busyWithAnotherTask: false })]));
-  await expect(rpc("/api/browser", "POST", { action: "browser_snapshot", args: { tabId: firstTab } })).rejects.toThrow("owned by another task");
-  await expect(rpc("/api/runs", "POST", { prompt: "hold collision admission", tabId: secondTab })).rejects.toThrow("owned by another task");
+  await expect(rpc("/api/browser", "POST", { action: "browser_snapshot", args: { tabId: firstTab } })).rejects.toThrow("Rove is working in this tab right now");
+  await expect(rpc("/api/runs", "POST", { prompt: "hold collision admission", tabId: secondTab })).rejects.toThrow("Another Rove task is working in this tab");
   expect(await attached(firstTab)).toBe(true);
   expect(await attached(secondTab)).toBe(true);
   expect((await rpc("/api/model/test", "POST", {})).ok).toBe(true);
@@ -160,7 +160,7 @@ test("navigation leases new tabs and first explicit use leases an existing tab",
   const first = await rpc("/api/runs", "POST", { prompt: "navigate", tabId: null });
   const paused = await status(first.id, "awaiting_approval");
   const tabId = paused.events.find((event: any) => event.type === "tool_result" && event.data.name === "browser_navigate").data.result.tabId;
-  await expect(rpc("/api/browser", "POST", { action: "browser_screenshot", args: { tabId } })).rejects.toThrow("owned by another task");
+  await expect(rpc("/api/browser", "POST", { action: "browser_screenshot", args: { tabId } })).rejects.toThrow("Rove is working in this tab right now");
   await rpc(`/api/runs/${first.id}/stop`, "POST");
   await expect.poll(() => attached(tabId)).toBe(false);
   // Start in New Tab mode, then explicitly address an existing unleased tab.
@@ -168,7 +168,7 @@ test("navigation leases new tabs and first explicit use leases an existing tab",
   const second = await rpc("/api/runs", "POST", { prompt: "collision explicit", tabId: null });
   const owned = await status(second.id, "awaiting_approval");
   expect(owned.events.find((event: any) => event.type === "tool_result" && event.data.name === "browser_snapshot" && !event.data.error).data.result.tabId).toBe(tabId);
-  await expect(rpc("/api/browser", "POST", { action: "browser_snapshot", args: { tabId } })).rejects.toThrow("owned by another task");
+  await expect(rpc("/api/browser", "POST", { action: "browser_snapshot", args: { tabId } })).rejects.toThrow("Rove is working in this tab right now");
 });
 
 test("closing a leased tab stops only its task and restart recovers every remaining run", async () => {

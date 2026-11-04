@@ -2,6 +2,27 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## Unreleased
+
+### Changed
+- The side panel follows the tab you are on. Each tab shows the chat Rove worked on there, or a fresh chat for that tab, and switching tabs switches chats. Before, every tab showed the same chat, and a new task started anywhere took over every open panel. A full-page Rove tab now opens fresh and keeps its own chat across reloads. **New task** works on the tab beside the panel instead of opening a new tab.
+- While Rove waits on a question, the main message box answers it (Enter or the send button), so an answer typed there is not lost.
+- Leaving Settings with unsaved changes asks whether to save, discard or keep editing. Before, Back to chat quietly dropped them, including a saved prompt kept with **Keep prompt**, and switching browser tabs closed Settings.
+
+### Fixed
+- The context ring in the chat box is closer to the truth. A new chat shows what the system message and tools already take (about 3k tokens) instead of 0, current context includes the latest answer, and Rove's estimate now follows the provider's real counts down as well as up. With a real OpenRouter model the estimate had run 2 to 2.5 times high (tool results are JSON inside JSON), which made Rove compact history long before a small model's limit; calibrated estimates now land within about 20%, and a follow-up keeps the chat's calibration.
+- The browser preview of a tab a task is working in showed "Tab … is owned by another task" and no picture. It now shows the task's newest screenshot with a note, and refresh waits until the task finishes.
+- Starting a task on a tab another task is using explains it in plain words instead of an internal error.
+- The "Up to 3 tasks can run at once" error disappears once a task finishes or you switch chats, and other errors no longer follow you to another tab or chat.
+- Page script errors no longer include JavaScript stack lines.
+- Model errors say what went wrong and what to do (a rejected key, rate limiting, a server error, a missing model) with the provider's own message, instead of raw JSON or an HTML error page. A connection that drops mid-answer says so instead of "network error".
+- A follow-up on a model with a small context window no longer fails after a long answer ("The latest observation exceeds…"). The earlier answer is shortened to fit, and when a step truly cannot fit the message says whether a page observation or the chat is too large.
+- A task that stops because its tab was closed, or because Chrome's debugging bar was closed, says why under the Stopped notice.
+- Images in a model's answer that point to other sites show as links. Rove never loads them, so they used to appear as broken pictures.
+- A fresh chat on a new tab targets that page once it finishes loading, instead of staying on New Tab.
+- Block site rules now also apply where a tab ends up. Before, opening a link that redirected to a blocked site, or a click that navigated there, sent that page's text and the automatic screenshot to the model. Both are now withheld, and the model is told the site is blocked.
+- A saved API key is only sent to its own provider's server. Before, the model list in Settings refreshed as you typed a new base URL and sent the saved key to each address typed, including half-typed or mistyped ones; the connection check API did the same. A different server now gets no key unless you type one for it.
+
 ## 2.5.2 - 2026-10-21
 
 ### Added
