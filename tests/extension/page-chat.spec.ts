@@ -125,7 +125,8 @@ test("leaving Settings with unsaved changes asks to save, discard or keep editin
   await back.click();
   await dialog.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByRole("textbox", { name: "Task prompt" })).toBeVisible();
-  expect((await page.evaluate(() => chrome.storage.local.get("shortcuts"))).shortcuts.map((item: any) => item.name)).toEqual(["cart"]);
+  const stored = await page.evaluate(async () => ((await chrome.storage.local.get("shortcuts")) as { shortcuts?: { name: string }[] }).shortcuts?.map((item) => item.name));
+  expect(stored).toEqual(["cart"]);
 
   await settings.click();
   await page.getByRole("button", { name: "Instructions", exact: true }).click();
