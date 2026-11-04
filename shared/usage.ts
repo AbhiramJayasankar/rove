@@ -52,7 +52,7 @@ function requestCost(usage: any, model?: ModelInfo | null): number | undefined {
     output * completion
   );
 }
-export function chatUsage(events: RunEvent[], fallback?: ModelInfo | null) {
+export function chatUsage(events: RunEvent[], fallback?: ModelInfo | null, baseline?: number) {
   let model = fallback,
     input = 0,
     output = 0,
@@ -94,23 +94,20 @@ export function chatUsage(events: RunEvent[], fallback?: ModelInfo | null) {
       costReports++;
     }
   }
-  const context = events.findLast(
-    (event) => event.type === "context_usage",
-  )?.data;
+  const contextEvent = events.findLast((event) => event.type === "context_usage");
+  const context = contextEvent?.data;
   const lastResponse = events.findLast(
-    (event) => event.type === "model_response",
+    (event) => event.type === "model_response" && number(event.data.usage?.prompt_tokens ?? event.data.usage?.input_tokens) != null,
   );
-  const current =
-    lastResponse &&
-    (!context ||
-      lastResponse.id >
-        events.findLast((event) => event.type === "context_usage")!.id)
-      ? number(
-          lastResponse.data.usage?.prompt_tokens ??
-            lastResponse.data.usage?.input_tokens,
-        )
+  // What the chat holds now. After a response, the provider's own count of that request plus the
+  // answer it produced (which the next request carries). Before a response, Rove's calibrated
+  // estimate of the request it is sending. A new chat already holds its system message and tools.
+  const reported =
+    lastResponse && (!contextEvent || lastResponse.id > contextEvent.id)
+      ? number(lastResponse.data.usage?.prompt_tokens ?? lastResponse.data.usage?.input_tokens)! +
+        (number(lastResponse.data.usage?.completion_tokens ?? lastResponse.data.usage?.output_tokens) ?? 0)
       : undefined;
-  const used = current ?? number(context?.estimatedTokens) ?? 0;
+  const used = reported ?? number(context?.estimatedTokens) ?? (events.length ? 0 : number(baseline) ?? 0);
   const requests = Math.max(
     responses,
     events.filter((event) => event.type === "model_request").length,
@@ -126,7 +123,7 @@ export function chatUsage(events: RunEvent[], fallback?: ModelInfo | null) {
     inputReports,
     outputReports,
     current: used,
-    estimated: current == null,
+    estimated: reported == null,
     contextWindow:
       number(context?.contextWindow) ??
       model?.contextWindow ??

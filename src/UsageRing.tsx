@@ -11,10 +11,13 @@ export default function UsageRing({
   run,
   model,
   connected,
+  baseline,
 }: {
   run?: RunRecord;
   model?: ModelInfo | null;
   connected: boolean;
+  /** Tokens a new chat starts with (system message and tools). */
+  baseline?: number;
 }) {
   const id = useId();
   const t = useT();
@@ -22,7 +25,7 @@ export default function UsageRing({
   useEffect(() => {
     if (popup.open) popup.panel.current?.focus();
   }, [popup.open]);
-  const usage = chatUsage(run?.events || [], model);
+  const usage = chatUsage(run?.events || [], model, baseline);
   const responses = (run?.events || []).filter((event) => event.type === "model_response");
   const outTokens = responses.reduce((sum, event) => sum + (Number(event.data.usage?.completion_tokens) || 0), 0);
   const outSeconds = responses.reduce((sum, event) => sum + (Number(event.data.usage?.completion_tokens) > 0 ? Number(event.data.durationMs) || 0 : 0), 0) / 1000;

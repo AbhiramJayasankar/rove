@@ -15,6 +15,11 @@ export function estimateTokens(value: unknown): number {
   return Math.ceil(new TextEncoder().encode(text).byteLength / 3) + imageTokens;
 }
 
+/** Rove's estimate is a byte heuristic; providers' real counts can be well below it (tool results
+ * are JSON inside JSON) or above it. The learned ratio scales it toward the provider's count. */
+export const MIN_TOKEN_RATIO = 0.3;
+const ratioOf = (policy: { tokenRatio?: number }) => Math.max(MIN_TOKEN_RATIO, policy.tokenRatio || 1);
+
 export function compactContext(
   messages: any[],
   settings: Settings,
@@ -60,7 +65,7 @@ export function compactContext(
         ]
       : messages;
   const minimumInput = Math.ceil(
-    estimateTokens([essential, tools]) * Math.max(1, policy.tokenRatio || 1),
+    estimateTokens([essential, tools]) * ratioOf(policy),
   );
   const reservedOutputTokens = Math.min(
     settings.maxOutputTokens,
@@ -76,7 +81,7 @@ export function compactContext(
   );
   const estimate = () =>
     Math.ceil(
-      estimateTokens([messages, tools]) * Math.max(1, policy.tokenRatio || 1),
+      estimateTokens([messages, tools]) * ratioOf(policy),
     );
   let droppedMessages = 0;
   const marker = "[Rove context checkpoint]";
@@ -144,7 +149,7 @@ export function compactContext(
   const answer = newest >= 2 ? messages[newest] : undefined;
   if (estimate() > budget && answer && typeof answer.content === "string" && answer.content.length > 400) {
     const note = "\n[Earlier answer shortened to fit this model's context.]";
-    const excessChars = Math.ceil(((estimate() - budget) / Math.max(1, policy.tokenRatio || 1)) * 3) + note.length + 200;
+    const excessChars = Math.ceil(((estimate() - budget) / ratioOf(policy)) * 3) + note.length + 200;
     const keep = Math.max(200, answer.content.length - excessChars);
     if (keep < answer.content.length) {
       messages[newest] = { ...answer, content: answer.content.slice(0, keep) + note };
@@ -166,6 +171,6 @@ export function compactContext(
     droppedMessages,
     removedImages,
     inputBudget: budget,
-    tokenRatio: Math.max(1, policy.tokenRatio || 1),
+    tokenRatio: ratioOf(policy),
   };
 }

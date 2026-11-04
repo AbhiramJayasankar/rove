@@ -52,7 +52,8 @@ describe("chat usage accounting", () => {
       cached: 400,
       reasoning: 50,
       responses: 2,
-      current: 2000,
+      // The provider's count of the last request plus the answer the next request will carry.
+      current: 2200,
       estimated: false,
       contextWindow: 131072,
       inputBudget: 120000,
@@ -108,5 +109,29 @@ describe("chat usage accounting", () => {
       output: 30,
       reasoning: 20,
     });
+  });
+});
+
+describe("context shown in the chat box", () => {
+  it("starts a new chat at its system message and tools, not zero", () => {
+    expect(chatUsage([], null, 3100)).toMatchObject({ current: 3100, estimated: true });
+  });
+  it("uses Rove's estimate while a newer request is under way, then the provider's count", () => {
+    const events = [
+      event(1, "context_usage", { estimatedTokens: 3000, contextWindow: 100000 }),
+      event(2, "model_response", { usage: { prompt_tokens: 3200, completion_tokens: 150 } }),
+      event(3, "context_usage", { estimatedTokens: 4100, contextWindow: 100000 }),
+    ];
+    expect(chatUsage(events.slice(0, 2))).toMatchObject({ current: 3350, estimated: false });
+    expect(chatUsage(events)).toMatchObject({ current: 4100, estimated: true, contextWindow: 100000 });
+  });
+  it("ignores responses that reported no usage", () => {
+    const events = [
+      event(1, "context_usage", { estimatedTokens: 3000, contextWindow: 100000 }),
+      event(2, "model_response", { usage: { prompt_tokens: 3200, completion_tokens: 100 } }),
+      event(3, "context_usage", { estimatedTokens: 4100, contextWindow: 100000 }),
+      event(4, "model_response", {}),
+    ];
+    expect(chatUsage(events)).toMatchObject({ current: 4100, estimated: true });
   });
 });

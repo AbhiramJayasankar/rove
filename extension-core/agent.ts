@@ -7,7 +7,7 @@ import type {
   MessageAttachment,
 } from "../shared/types";
 import { complete, generationOptions, ModelEndpointError } from "./model";
-import { compactContext } from "./context";
+import { compactContext, estimateTokens, MIN_TOKEN_RATIO } from "./context";
 import { effectiveSettings } from "./catalogue";
 import { attachmentParts, conversationHistory } from "./conversation";
 import { BUILTIN_TOOLS, executeTool, getTools, isToolRisky } from "./tools";
@@ -245,6 +245,37 @@ function blockedLanding(settings: Settings, result: any): string | undefined {
   if (!result || typeof result !== "object" || typeof result.url !== "string") return undefined;
   const host = hostOf(result.url);
   return ruleFor(settings.siteRules ?? [], host)?.action === "block" ? host : undefined;
+}
+
+/** The system message every request starts with. */
+export function systemMessage(settings: Settings) {
+  return {
+    role: "system",
+    content: `${SAFETY_PROMPT}\n\nUser-configured agent instructions:\n${settings.systemPrompt}${settings.memory?.trim() ? `\n\nStanding notes from the user, which apply to every task:\n${settings.memory.trim()}` : ""}`,
+  };
+}
+/** What a new chat already uses before its first message: the system message and the tool definitions. */
+export function contextBaseline(settings: Settings): number {
+  return estimateTokens([[systemMessage(settings)], getTools(settings)]);
+}
+/** Provider token count / Rove's estimate, learned from the newest response that reported usage.
+ * Lets a follow-up start with the calibration the chat already earned. */
+export function learnedTokenRatio(events: RunEvent[]): number | undefined {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const response = events[i];
+    if (response.type !== "model_response") continue;
+    const actual = Number(response.data.usage?.prompt_tokens);
+    if (!(actual > 0)) continue;
+    const context = events.slice(0, i).findLast((event) => event.type === "context_usage")?.data;
+    const estimated = Number(context?.estimatedTokens), ratio = Number(context?.tokenRatio) || 1;
+    return estimated > 0 ? clampRatio((ratio * actual) / estimated) : undefined;
+  }
+  return undefined;
+}
+/** Calibration follows the provider both ways, within limits that keep one odd report from
+ * making Rove wildly over- or under-fill a model's context. */
+export function clampRatio(ratio: number): number {
+  return Math.min(4, Math.max(MIN_TOKEN_RATIO, ratio));
 }
 
 export const MAX_CONCURRENT_RUNS = 3;
@@ -505,10 +536,7 @@ export class AgentEngine {
     const scrub = (text: string) =>
       key ? text.split(key).join("[REDACTED]") : text;
     const messages: any[] = [
-      {
-        role: "system",
-        content: `${SAFETY_PROMPT}\n\nUser-configured agent instructions:\n${settings.systemPrompt}${settings.memory?.trim() ? `\n\nStanding notes from the user, which apply to every task:\n${settings.memory.trim()}` : ""}`,
-      },
+      systemMessage(settings),
       ...active.history.filter((message) => message.role !== "system"),
       {
         role: "user",
@@ -607,7 +635,7 @@ export class AgentEngine {
         Math.min(200, Math.trunc(settings.maxSteps)),
       );
       let workingInputBudget = modelInfo?.workingInputBudget || Infinity;
-      let tokenRatio = 1;
+      let tokenRatio = learnedTokenRatio(active.run.events) ?? 1;
       let recovered = false;
       let learnedImageLimit: number | undefined;
       let emptyAnswers = 0;
@@ -696,11 +724,9 @@ export class AgentEngine {
             );
             signal.throwIfAborted();
             const actual = Number(response.usage?.prompt_tokens);
+            // Calibrate against what the provider actually counted, up or down.
             if (actual > 0)
-              tokenRatio = Math.max(
-                tokenRatio,
-                (tokenRatio * actual) / context.estimatedTokens,
-              );
+              tokenRatio = clampRatio((context.tokenRatio * actual) / context.estimatedTokens);
             this.event(active, "model_response", {
               message: traceValue(response.message),
               usage: response.usage,
