@@ -175,6 +175,11 @@ export default function Workbench({
   // arrive after every action, so the preview shows the newest one instead of failing.
   const workingRun = tabId !== undefined ? state.tabChats?.[String(tabId)] : undefined;
   const tabBusy = !!workingRun && state.activeRunIds.includes(workingRun);
+  // Why a chat stopped, when it was not the person's own Stop.
+  const stopMessage = run?.status === "stopped"
+    ? [...run.events].reverse().find((e) => e.type === "status" && e.data.status === "stopped")?.data.message
+    : undefined;
+  const stopReason = typeof stopMessage === "string" && stopMessage !== "Stopped by the user." ? stopMessage : "";
   const pause = [...(run?.events || [])]
     .reverse()
     .find((e) =>
@@ -562,6 +567,9 @@ export default function Workbench({
                     {t("Edit & retry")}
                   </button>
                 </div>
+              )}
+              {run.status === "stopped" && stopReason && (
+                <p className="stopped-reason">{stopReason}</p>
               )}
               <div ref={bottomRef} />
             </>

@@ -275,10 +275,12 @@ setNotifier((type: string, data: any) => {
       // when the bar closed reports an ordinary tool error instead of being replayed.
       const stopped = data.reason === "canceled_by_user" ? (store.settings.keepGoingOnBarClose ? [] : engine.activeRunIds)
         : ["target_closed", "connection_lost"].includes(data.reason) && owner && engine.isActive(owner) ? [owner] : [];
-      for (const runId of stopped) engine.stop(
-        runId,
-        "Chrome disconnected the browser debugger. Check the page, then start a new task to reconnect. No browser action was replayed.",
-      );
+      const reason = data.reason === "target_closed"
+        ? "The tab this task was working in was closed, so the task stopped. No browser action was replayed."
+        : data.reason === "canceled_by_user"
+          ? "Chrome's debugging bar was closed, so the task stopped. Start it again to reconnect. No browser action was replayed."
+          : "Chrome disconnected the browser debugger. Check the page, then start a new task to reconnect. No browser action was replayed.";
+      for (const runId of stopped) engine.stop(runId, reason);
     }
     if (type === "browser_notice" && data.event === "dialog_closed")
       void enqueue(async () => {

@@ -98,3 +98,43 @@ test("the preview of a tab a task is working in shows the task's screenshot inst
   await expect(ui.getByRole("status").filter({ hasText: "Rove is working in this tab." })).toHaveCount(0);
   await expect(ui.getByRole("button", { name: "Take browser screenshot" })).toBeEnabled();
 });
+
+test("leaving Settings with unsaved changes asks to save, discard or keep editing", async () => {
+  const page = await context.newPage();
+  await page.goto(app);
+  const settings = page.getByRole("button", { name: "Settings", exact: true });
+  const back = page.getByRole("button", { name: "Back to chat", exact: true });
+  const dialog = page.getByRole("dialog", { name: "Unsaved changes" });
+  // Looking around without changing anything leaves straight away.
+  await settings.click();
+  await page.getByRole("button", { name: "Instructions", exact: true }).click();
+  await back.click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByRole("textbox", { name: "Task prompt" })).toBeVisible();
+
+  await settings.click();
+  await page.getByRole("button", { name: "Instructions", exact: true }).click();
+  await page.getByRole("button", { name: "Add saved prompt" }).click();
+  await page.getByRole("textbox", { name: "Name", exact: true }).fill("cart");
+  await page.getByRole("textbox", { name: "Prompt", exact: true }).fill("Go to the shop.");
+  await page.getByRole("button", { name: "Keep prompt" }).click();
+  await back.click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Keep editing" }).click();
+  await expect(page.getByText("/cart")).toBeVisible();
+  await back.click();
+  await dialog.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Task prompt" })).toBeVisible();
+  expect((await page.evaluate(() => chrome.storage.local.get("shortcuts"))).shortcuts.map((item: any) => item.name)).toEqual(["cart"]);
+
+  await settings.click();
+  await page.getByRole("button", { name: "Instructions", exact: true }).click();
+  await page.getByRole("textbox", { name: "Standing instructions" }).fill("Always be brief.");
+  await back.click();
+  await dialog.getByRole("button", { name: "Discard" }).click();
+  await settings.click();
+  await page.getByRole("button", { name: "Instructions", exact: true }).click();
+  await expect(page.getByRole("textbox", { name: "Standing instructions" })).toHaveValue("");
+  expect((await rpc("/api/state")).settings.memory).toBe("");
+  await page.close();
+});
