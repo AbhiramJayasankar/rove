@@ -7,6 +7,7 @@ Rove follows [semantic versioning](https://semver.org). The version lives in `pa
 ### Changed
 - The side panel follows the tab you are on. Each tab shows the chat Rove worked on there, or a fresh chat for that tab, and switching tabs switches chats. Before, every tab showed the same chat, and a new task started anywhere took over every open panel. A full-page Rove tab now opens fresh and keeps its own chat across reloads. **New task** works on the tab beside the panel instead of opening a new tab.
 - While Rove waits on a question, the main message box answers it (Enter or the send button), so an answer typed there is not lost.
+- Leaving Settings with unsaved changes asks whether to save, discard or keep editing. Before, Back to chat quietly dropped them, including a saved prompt kept with **Keep prompt**, and switching browser tabs closed Settings.
 
 ### Fixed
 - The browser preview of a tab a task is working in showed "Tab … is owned by another task" and no picture. It now shows the task's newest screenshot with a note, and refresh waits until the task finishes.
@@ -14,6 +15,8 @@ Rove follows [semantic versioning](https://semver.org). The version lives in `pa
 - The "Up to 3 tasks can run at once" error disappears once a task finishes or you switch chats, and other errors no longer follow you to another tab or chat.
 - Page script errors no longer include JavaScript stack lines.
 - Model errors say what went wrong and what to do (a rejected key, rate limiting, a server error, a missing model) with the provider's own message, instead of raw JSON or an HTML error page. A connection that drops mid-answer says so instead of "network error".
+- A follow-up on a model with a small context window no longer fails after a long answer ("The latest observation exceeds…"). The earlier answer is shortened to fit, and when a step truly cannot fit the message says whether a page observation or the chat is too large.
+- A task that stops because its tab was closed, or because Chrome's debugging bar was closed, says why under the Stopped notice.
 - Images in a model's answer that point to other sites show as links. Rove never loads them, so they used to appear as broken pictures.
 - A fresh chat on a new tab targets that page once it finishes loading, instead of staying on New Tab.
 - Block site rules now also apply where a tab ends up. Before, opening a link that redirected to a blocked site, or a click that navigated there, sent that page's text and the automatic screenshot to the model. Both are now withheld, and the model is told the site is blocked.

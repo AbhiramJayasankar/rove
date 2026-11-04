@@ -165,6 +165,12 @@
   background: var(--panel);
   line-height: 1.2;
 }
+.app-shell .stopped-reason {
+  margin: 6px 4px 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
 .app-shell .stopped-message .text-button {
   padding: 0;
   font-weight: 600;
@@ -542,6 +548,24 @@
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--ink) 7%, transparent),
     0 24px 70px var(--shadow);
+}
+.leave-dialog {
+  width: 340px;
+  padding: 22px 22px 18px;
+}
+.leave-dialog h2 {
+  margin: 0 0 6px;
+  font-size: 20px;
+}
+.leave-dialog p {
+  margin: 0 0 18px;
+  color: var(--muted);
+}
+.leave-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 .history-dialog .dialog-heading h2 {
   font-size: 24px;
