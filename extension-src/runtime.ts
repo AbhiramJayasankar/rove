@@ -133,6 +133,16 @@ function broadcast(type: string, data: unknown) {
     }
   }
 }
+/** The saved key belongs to the saved provider's server. Discovery and tests run while another
+ * address is being typed get no key unless one is typed for it, so a half-typed or mistyped
+ * address never receives the credential. */
+function savedKeyFor(baseUrl: string) {
+  try {
+    return new URL(baseUrl).origin === new URL(store.settings.baseUrl).origin ? apiKey : "";
+  } catch {
+    return "";
+  }
+}
 function redact(message: string) {
   return apiKey ? message.split(apiKey).join("[redacted]") : message;
 }
@@ -430,7 +440,7 @@ async function route(path: string, method: string, body: any, settingsLocked = f
       ...store.settings,
       baseUrl: input.baseUrl,
     }) as Settings;
-    const key = input.apiKey === undefined ? apiKey : input.apiKey;
+    const key = input.apiKey === undefined ? savedKeyFor(candidate.baseUrl) : input.apiKey;
     try {
       const { models, warnings } = await listProviderModels(input.refresh ?? url.searchParams.has("refresh"), { settings: candidate, key });
       return { models, modelInfo: catalogue.peek(candidate, key), warnings };
@@ -482,7 +492,7 @@ async function route(path: string, method: string, body: any, settingsLocked = f
     }) as Settings;
     const key =
       body.apiKey === undefined
-        ? apiKey
+        ? savedKeyFor(candidate.baseUrl)
         : z.string().max(10000).parse(body.apiKey);
     admissions++;
     try {

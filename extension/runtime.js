@@ -24517,6 +24517,13 @@ function broadcast(type, data) {
     }
   }
 }
+function savedKeyFor(baseUrl) {
+  try {
+    return new URL(baseUrl).origin === new URL(store.settings.baseUrl).origin ? apiKey : "";
+  } catch {
+    return "";
+  }
+}
 function redact2(message) {
   return apiKey ? message.split(apiKey).join("[redacted]") : message;
 }
@@ -24795,7 +24802,7 @@ async function route(path, method, body, settingsLocked = false) {
       ...store.settings,
       baseUrl: input2.baseUrl
     });
-    const key = input2.apiKey === void 0 ? apiKey : input2.apiKey;
+    const key = input2.apiKey === void 0 ? savedKeyFor(candidate.baseUrl) : input2.apiKey;
     try {
       const { models, warnings } = await listProviderModels(input2.refresh ?? url2.searchParams.has("refresh"), { settings: candidate, key });
       return { models, modelInfo: catalogue.peek(candidate, key), warnings };
@@ -24836,7 +24843,7 @@ async function route(path, method, body, settingsLocked = false) {
       ...store.settings,
       ...body
     });
-    const key = body.apiKey === void 0 ? apiKey : external_exports.string().max(1e4).parse(body.apiKey);
+    const key = body.apiKey === void 0 ? savedKeyFor(candidate.baseUrl) : external_exports.string().max(1e4).parse(body.apiKey);
     admissions++;
     try {
       await enqueue(async () => {
