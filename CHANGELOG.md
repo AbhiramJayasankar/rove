@@ -4,7 +4,16 @@ Rove follows [semantic versioning](https://semver.org). The version lives in `pa
 
 ## Unreleased
 
+### Changed
+- The side panel follows the tab you are on. Each tab shows the chat Rove worked on there, or a fresh chat for that tab, and switching tabs switches chats. Before, every tab showed the same chat, and a new task started anywhere took over every open panel. A full-page Rove tab now opens fresh and keeps its own chat across reloads. **New task** works on the tab beside the panel instead of opening a new tab.
+- While Rove waits on a question, the main message box answers it (Enter or the send button), so an answer typed there is not lost.
+
 ### Fixed
+- The browser preview of a tab a task is working in showed "Tab … is owned by another task" and no picture. It now shows the task's newest screenshot with a note, and refresh waits until the task finishes.
+- Starting a task on a tab another task is using explains it in plain words instead of an internal error.
+- The "Up to 3 tasks can run at once" error disappears once a task finishes or you switch chats, and other errors no longer follow you to another tab or chat.
+- Page script errors no longer include JavaScript stack lines.
+- A fresh chat on a new tab targets that page once it finishes loading, instead of staying on New Tab.
 - Block site rules now also apply where a tab ends up. Before, opening a link that redirected to a blocked site, or a click that navigated there, sent that page's text and the automatic screenshot to the model. Both are now withheld, and the model is told the site is blocked.
 - A saved API key is only sent to its own provider's server. Before, the model list in Settings refreshed as you typed a new base URL and sent the saved key to each address typed, including half-typed or mistyped ones; Test connection did the same. A different server now gets no key unless you type one for it.
 

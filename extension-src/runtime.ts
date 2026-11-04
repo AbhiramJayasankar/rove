@@ -103,8 +103,42 @@ function leaseFor(runId?: string, signal?: AbortSignal) {
 function claimTab(tabId: number, runId?: string) {
   const owner = tabLeases.get(tabId);
   if (owner && owner !== runId && (engine.isActive(owner) || admitting.has(owner)))
-    throw new Error(`Tab ${tabId} is owned by another task. Choose an unleased tab or navigate with newTab:true.`);
-  if (runId) tabLeases.set(tabId, runId);
+    throw new Error(runId
+      ? `Tab ${tabId} is owned by another task. Choose an unleased tab or navigate with newTab:true.`
+      : "Rove is working in this tab right now. Its screenshots appear in the task's activity; try again when it finishes.");
+  if (runId) {
+    tabLeases.set(tabId, runId);
+    bindTabChat(tabId, runId);
+  }
+}
+// Which chat the side panel shows on each tab. A task binds every tab it works in; the panel binds
+// the tab a chat was started or opened from. Session storage clears when Chrome restarts, so a
+// reused tab ID never brings back an unrelated old chat.
+const TAB_CHATS_KEY = "tabChats";
+let tabChats: Record<string, string> = {};
+let tabChatsWrite = Promise.resolve();
+function bindTabChat(tabId: number, runId: string | null) {
+  const key = String(tabId);
+  if (runId === null ? !(key in tabChats) : tabChats[key] === runId) return;
+  tabChats = { ...tabChats };
+  if (runId === null) delete tabChats[key];
+  else tabChats[key] = runId;
+  const snapshot = tabChats;
+  tabChatsWrite = tabChatsWrite
+    .then(() => chrome.storage.session.set({ [TAB_CHATS_KEY]: snapshot }))
+    .catch(() => {});
+  broadcast("tab_chats", snapshot);
+}
+chrome.tabs.onRemoved.addListener((tabId) => bindTabChat(tabId, null));
+/** Starting or continuing a chat on a tab another task is using: say so in the user's terms. */
+async function prepareChat(tabId: number | undefined, runId: string) {
+  try {
+    return await enqueue(() => prepareRun(tabId, leaseFor(runId)));
+  } catch (error) {
+    if (error instanceof Error && /is owned by another task/.test(error.message))
+      throw new Error("Another Rove task is working in this tab. Wait for it to finish or stop it, or choose New Tab in the tab picker.");
+    throw error;
+  }
 }
 async function releaseRun(runId: string) {
   forgetGroup(runId);
@@ -271,6 +305,13 @@ const ready = (async () => {
     await chrome.storage.local.set({ [API_KEY_STORAGE_KEY]: apiKey });
   }
   await chrome.storage.session.remove("apiKey");
+  const savedTabChats = (await chrome.storage.session.get(TAB_CHATS_KEY))[TAB_CHATS_KEY];
+  if (savedTabChats && typeof savedTabChats === "object") {
+    const open = new Set((await chrome.tabs.query({})).map((tab) => String(tab.id)));
+    tabChats = Object.fromEntries(
+      Object.entries(savedTabChats).filter(([tabId, runId]) => open.has(tabId) && typeof runId === "string"),
+    ) as Record<string, string>;
+  }
   await store.init();
   await providers.init(store.settings, apiKey);
   await catalogue.init();
@@ -290,6 +331,7 @@ function state(): AppState {
     activeRunId: engine.activeRunId,
     activeRunIds: engine.activeRunIds,
     tools: BUILTIN_TOOLS,
+    tabChats,
   };
 }
 function ownPage(sender: chrome.runtime.MessageSender) {
@@ -355,6 +397,16 @@ async function route(path: string, method: string, body: any, settingsLocked = f
     return tabsFor();
   }
   if (method === "GET" && path === "/api/settings") return settingsResult();
+  if (method === "PUT" && path === "/api/tab-chat") {
+    const input = z
+      .object({ tabId: z.number().int().nonnegative(), runId: z.string().max(100) })
+      .strict()
+      .parse(body);
+    if (input.runId && !store.hasRun(input.runId)) throw new Error("Chat not found.");
+    await chrome.tabs.get(input.tabId);
+    bindTabChat(input.tabId, input.runId);
+    return { tabChats };
+  }
   if (method === "PUT" && path === "/api/settings") {
     if (engine.activeRunIds.length || admissions)
       throw new Error("Stop the active tasks before changing settings.");
@@ -546,7 +598,7 @@ async function route(path: string, method: string, body: any, settingsLocked = f
       if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
       const selected = input.tabId === null
         ? {tabId:undefined}
-        : await enqueue(() => prepareRun(input.tabId, leaseFor(runId)));
+        : await prepareChat(input.tabId ?? undefined, runId);
       await refreshTabs();
       // Snapshot settings and key only after any concurrent picker commit finishes.
       const run = await changeSettings(async () => {
@@ -592,7 +644,7 @@ async function route(path: string, method: string, body: any, settingsLocked = f
           previous = historyBeforeEdit(previous, input.editMessageId, input.message);
         const selected = input.tabId === null
           ? {tabId:undefined}
-          : await enqueue(() => prepareRun(input.tabId, leaseFor(id)));
+          : await prepareChat(input.tabId ?? undefined, id);
         await refreshTabs();
         if (input.editMessageId !== undefined) {
           await store.replaceRun(previous);

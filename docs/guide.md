@@ -43,6 +43,18 @@ Settings → Tools → **Browsing** has three switches, all on by default and ap
 
 Up to three tasks run at once, each leasing its own tabs. Stop (or Escape) prevents further actions; an action already sent cannot be undone.
 
+### Which chat the side panel shows
+
+Chrome keeps one Rove side panel per window, and it follows the tab you are on:
+
+- A tab Rove has worked in shows that chat, including tabs Rove opened for it and the tab you started it from. Switching tabs switches chats; a running task keeps going while you look elsewhere, and the strip at the top lists every running task (one that needs you says so).
+- A tab with no chat shows a fresh one that works on that tab. **New task** does the same for the tab you are on. Unsent text stays with the tab you typed it beside.
+- Choosing a chat from History or the running-task strip shows it on the current tab from then on.
+- A task started in another tab or window never takes over the panel. Closing a tab forgets its chat, and these choices reset when Chrome restarts; History keeps every chat.
+- A full-page Rove tab opens with a fresh chat, follows tasks you start, and keeps its chat when you reload that tab.
+
+If another task is working in the tab, Rove says so instead of starting a second task there; wait for it, stop it, or pick **New Tab**. The preview of that tab shows the task's newest screenshot (one arrives after every action) rather than taking its own.
+
 ## Prompts, rules and attachments
 
 - **Standing instructions** (Settings → Instructions) are added to every task after the system instructions.

@@ -45,6 +45,7 @@ import { runToMarkdown } from "../shared/markdown";
 import type { AppState, RunRecord, Settings } from "../shared/types";
 import { api, json, toolTitle, type Action, type Page, type Shot } from "./ui";
 import { useT } from "./i18n";
+import { lastTabOf } from "./homeTab";
 type Props = {
   newChatVersion: number;
   state: AppState;
@@ -61,6 +62,8 @@ type Props = {
   changeApprovalMode: (mode: Settings["approvalMode"]) => Promise<void>;
   approvalMode: Settings["approvalMode"];
   visible: boolean;
+  /** In the side panel: the tab beside it (null when none). Undefined in a full-page Rove tab. */
+  homeTab?: number | null;
 };
 export default function Workbench({
   newChatVersion,
@@ -78,12 +81,14 @@ export default function Workbench({
   changeApprovalMode,
   approvalMode,
   visible,
+  homeTab,
 }: Props) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const t = useT();
   const [attachDrafts, setAttachDrafts] = useState<Record<string, Attachment[]>>({});
   const [attachError, setAttachError] = useState("");
-  const draftId = run?.id || "new";
+  // An unsent message for a new chat belongs to the tab it was typed beside.
+  const draftId = run?.id || (homeTab === undefined ? "new" : `new:${homeTab}`);
   const prompt = drafts[draftId] || "";
   const setPrompt = (value: string) =>
     setDrafts((previous) => ({ ...previous, [draftId]: value }));
@@ -98,17 +103,37 @@ export default function Workbench({
       return false;
     }
   });
+  const isOpen = (id: number | null | undefined): id is number =>
+    typeof id === "number" && tabs.some((tab) => tab.id === id);
   const [tabId, setTabId] = useState<number | undefined>(
-    tabs.find((t) => t.active)?.id || tabs[0]?.id,
+    isOpen(homeTab) ? homeTab : tabs.find((t) => t.active)?.id || tabs[0]?.id,
   );
   const [manualShot, setManualShot] = useState<Shot | null>(null);
   useEffect(() => {
     if (newChatVersion) {
-      setTabId(undefined);
+      // A new chat in the side panel works on the tab beside it; elsewhere it opens a new tab.
+      setTabId(isOpen(homeTab) ? homeTab : undefined);
       setManualShot(null);
       followsBrowser.current = false;
+      pickedTab.current = false;
     }
   }, [newChatVersion]);
+  useEffect(() => {
+    // The side panel moved to another tab, or shows another chat: target the tab that chat works in,
+    // or the tab beside the panel.
+    if (homeTab === undefined) return;
+    const worked = lastTabOf(run?.events);
+    setTabId(isOpen(worked) ? worked : isOpen(homeTab) ? homeTab : undefined);
+    setManualShot(null);
+    pickedTab.current = false;
+  }, [run?.id, homeTab]);
+  // A new tab becomes usable only once it leaves the New Tab page. Until the user picks a tab
+  // themselves, a fresh chat then targets the page beside the panel.
+  const pickedTab = useRef(false);
+  const homeOpen = isOpen(homeTab);
+  useEffect(() => {
+    if (homeOpen && !run && tabId === undefined && !pickedTab.current) setTabId(homeTab!);
+  }, [homeOpen]);
   const [snapshot, setSnapshot] = useState<unknown>(null);
   const [activityView, setActivityView] = useState<"activity" | "trace">(
     "activity",
@@ -146,6 +171,10 @@ export default function Workbench({
     (runShot && (!tabId || !runShot.tabId || runShot.tabId === tabId)
       ? runShot
       : previousShot);
+  // A tab a running task is working in cannot be captured by hand (the task holds it). Its screenshots
+  // arrive after every action, so the preview shows the newest one instead of failing.
+  const workingRun = tabId !== undefined ? state.tabChats?.[String(tabId)] : undefined;
+  const tabBusy = !!workingRun && state.activeRunIds.includes(workingRun);
   const pause = [...(run?.events || [])]
     .reverse()
     .find((e) =>
@@ -221,7 +250,7 @@ export default function Workbench({
   }, [activeRun?.id]);
   useEffect(() => {
     if (tabId !== undefined && !tabs.some((t) => t.id === tabId))
-      setTabId(tabs.find((t) => t.active)?.id || tabs[0]?.id);
+      setTabId(isOpen(homeTab) ? homeTab : homeTab === undefined ? tabs.find((t) => t.active)?.id || tabs[0]?.id : undefined);
   }, [state.bridge.tabs, tabId]);
   useEffect(() => {
     setManualShot(null);
@@ -275,6 +304,7 @@ export default function Workbench({
     return saved;
   }
   async function capture(inspect = false) {
+    if (tabBusy) return;
     await action(inspect ? "snapshot" : "screenshot", async () => {
       const result = await api<any>("/api/browser", {
         method: "POST",
@@ -288,6 +318,15 @@ export default function Workbench({
         if (!result.dataUrl) throw new Error("No screenshot returned.");
         setManualShot(result);
       }
+    });
+  }
+  // While Rove waits on a question, the main box answers it too, so a reply typed there is not lost.
+  async function answerQuestion() {
+    if (!run || !question) return;
+    const message = prompt.trim();
+    await action("reply", async () => {
+      await api(`/api/runs/${run.id}/reply`, { method: "POST", body: json({ message }) });
+      setPrompt("");
     });
   }
   const canRun =
@@ -314,6 +353,7 @@ export default function Workbench({
           ]}
           onChange={(value) => {
             followsBrowser.current = false;
+            pickedTab.current = true;
             setTabId(value ? Number(value) : undefined);
             setManualShot(null);
           }}
@@ -563,7 +603,8 @@ export default function Workbench({
           className="task-composer"
           onSubmit={(e) => {
             e.preventDefault();
-            if (canRun) startRun();
+            if (question && prompt.trim() && !pending) void answerQuestion();
+            else if (canRun) startRun();
           }}
         >
           {attachments.length > 0 && (
@@ -599,7 +640,7 @@ export default function Workbench({
           <textarea
             ref={promptRef}
             aria-label={t("Task prompt")}
-            placeholder={run ? t("Reply to Rove…") : t("Ask Rove…")}
+            placeholder={question ? t("Answer Rove’s question…") : run ? t("Reply to Rove…") : t("Ask Rove…")}
             rows={1}
             readOnly={voiceBusy}
             value={prompt}
@@ -629,7 +670,8 @@ export default function Workbench({
                 !e.nativeEvent.isComposing
               ) {
                 e.preventDefault();
-                if (canRun) startRun();
+                if (question && prompt.trim() && !pending) void answerQuestion();
+                else if (canRun) startRun();
               }
             }}
           />
@@ -698,7 +740,17 @@ export default function Workbench({
               onError={setAttachError}
             />
             <VoiceInput input={promptRef} value={prompt} onChange={setPrompt} context={`${draftId}:${newChatVersion}`} visible={visible} onBusy={setVoiceBusy} />
-            {busy ? (
+            {question && prompt.trim() ? (
+              <button
+                className="run-button"
+                type="submit"
+                aria-label={t("Send answer")}
+                title={t("Send answer (Enter)")}
+                disabled={!!pending}
+              >
+                <ArrowUp size={18} />
+              </button>
+            ) : busy ? (
               <button
                 className="run-button stop-generation"
                 type="button"
@@ -742,7 +794,7 @@ export default function Workbench({
               title={
                 busy ? t("Stop the task before inspecting refs") : t("Inspect page")
               }
-              disabled={!tabId || !!pending || busy}
+              disabled={!tabId || !!pending || busy || tabBusy}
               onClick={() => capture(true)}
             >
               <ScanSearch size={16} />
@@ -750,8 +802,8 @@ export default function Workbench({
             <button
               className="icon-button"
               aria-label={t("Take browser screenshot")}
-              title={t("Refresh screenshot")}
-              disabled={!tabId || !!pending}
+              title={tabBusy ? t("Rove is working in this tab. A new screenshot arrives after each action.") : t("Refresh screenshot")}
+              disabled={!tabId || !!pending || tabBusy}
               onClick={() => capture()}
             >
               <RefreshCw
@@ -773,6 +825,11 @@ export default function Workbench({
             </button>
           </div>
         </div>
+        {tabBusy && (
+          <p className="browser-note" role="status">
+            {t("Rove is working in this tab. A new screenshot arrives after each action.")}
+          </p>
+        )}
         {shot?.url && (
           <div className="browser-url" title={shot.url}>
             {shot.url}
@@ -790,7 +847,7 @@ export default function Workbench({
               <p>{tabId ? t("No screenshot yet") : t("Choose a tab to preview it")}</p>
               <button
                 className="button secondary"
-                disabled={!tabId || !!pending}
+                disabled={!tabId || !!pending || tabBusy}
                 onClick={() => capture()}
               >
                 <RefreshCw size={14} />

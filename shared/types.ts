@@ -141,6 +141,8 @@ export interface AppState {
   activeRunId: string | null;
   activeRunIds: string[];
   tools: ToolDefinition[];
+  /** Chrome tab ID -> the chat the side panel shows on that tab; "" means a fresh chat. Cleared when Chrome restarts. */
+  tabChats?: Record<string, string>;
 }
 export interface BrowserTransport {
   execute(

@@ -23683,6 +23683,10 @@ async function frameContext(tabId, frameId, mainWorld = false) {
   );
   return { ...frame2, contextId: result.executionContextId };
 }
+function withoutStack(description) {
+  if (typeof description !== "string") return description;
+  return description.split("\n").filter((line) => !/^\s+at\s/.test(line)).join("\n").replace(/^Error: /, "");
+}
 async function evaluate(tabId, frame2, expression, returnByValue = true) {
   const result = await cdp(
     tabId,
@@ -23698,10 +23702,10 @@ async function evaluate(tabId, frame2, expression, returnByValue = true) {
   );
   if (result.exceptionDetails)
     throw new Error(
-      result.exceptionDetails.exception?.description || result.exceptionDetails.text || "Page JavaScript failed"
+      withoutStack(result.exceptionDetails.exception?.description) || result.exceptionDetails.text || "Page JavaScript failed"
     );
   if (result.result.subtype === "error")
-    throw new Error(result.result.description);
+    throw new Error(withoutStack(result.result.description));
   return returnByValue ? result.result.value : result.result;
 }
 async function elementOperation(tabId, frameId, ref, body, extra = {}) {
@@ -24487,8 +24491,35 @@ function leaseFor(runId, signal) {
 function claimTab(tabId, runId) {
   const owner = tabLeases.get(tabId);
   if (owner && owner !== runId && (engine.isActive(owner) || admitting.has(owner)))
-    throw new Error(`Tab ${tabId} is owned by another task. Choose an unleased tab or navigate with newTab:true.`);
-  if (runId) tabLeases.set(tabId, runId);
+    throw new Error(runId ? `Tab ${tabId} is owned by another task. Choose an unleased tab or navigate with newTab:true.` : "Rove is working in this tab right now. Its screenshots appear in the task's activity; try again when it finishes.");
+  if (runId) {
+    tabLeases.set(tabId, runId);
+    bindTabChat(tabId, runId);
+  }
+}
+var TAB_CHATS_KEY = "tabChats";
+var tabChats = {};
+var tabChatsWrite = Promise.resolve();
+function bindTabChat(tabId, runId) {
+  const key = String(tabId);
+  if (runId === null ? !(key in tabChats) : tabChats[key] === runId) return;
+  tabChats = { ...tabChats };
+  if (runId === null) delete tabChats[key];
+  else tabChats[key] = runId;
+  const snapshot2 = tabChats;
+  tabChatsWrite = tabChatsWrite.then(() => chrome.storage.session.set({ [TAB_CHATS_KEY]: snapshot2 })).catch(() => {
+  });
+  broadcast("tab_chats", snapshot2);
+}
+chrome.tabs.onRemoved.addListener((tabId) => bindTabChat(tabId, null));
+async function prepareChat(tabId, runId) {
+  try {
+    return await enqueue(() => prepareRun(tabId, leaseFor(runId)));
+  } catch (error62) {
+    if (error62 instanceof Error && /is owned by another task/.test(error62.message))
+      throw new Error("Another Rove task is working in this tab. Wait for it to finish or stop it, or choose New Tab in the tab picker.");
+    throw error62;
+  }
 }
 async function releaseRun(runId) {
   forgetGroup(runId);
@@ -24644,6 +24675,13 @@ var ready = (async () => {
     await chrome.storage.local.set({ [API_KEY_STORAGE_KEY]: apiKey });
   }
   await chrome.storage.session.remove("apiKey");
+  const savedTabChats = (await chrome.storage.session.get(TAB_CHATS_KEY))[TAB_CHATS_KEY];
+  if (savedTabChats && typeof savedTabChats === "object") {
+    const open2 = new Set((await chrome.tabs.query({})).map((tab2) => String(tab2.id)));
+    tabChats = Object.fromEntries(
+      Object.entries(savedTabChats).filter(([tabId, runId]) => open2.has(tabId) && typeof runId === "string")
+    );
+  }
   await store.init();
   await providers.init(store.settings, apiKey);
   await catalogue.init();
@@ -24663,7 +24701,8 @@ function state() {
     runs: store.summaries(),
     activeRunId: engine.activeRunId,
     activeRunIds: engine.activeRunIds,
-    tools: BUILTIN_TOOLS
+    tools: BUILTIN_TOOLS,
+    tabChats
   };
 }
 function ownPage(sender) {
@@ -24726,6 +24765,13 @@ async function route(path, method, body, settingsLocked = false) {
     return tabsFor();
   }
   if (method === "GET" && path === "/api/settings") return settingsResult();
+  if (method === "PUT" && path === "/api/tab-chat") {
+    const input2 = external_exports.object({ tabId: external_exports.number().int().nonnegative(), runId: external_exports.string().max(100) }).strict().parse(body);
+    if (input2.runId && !store.hasRun(input2.runId)) throw new Error("Chat not found.");
+    await chrome.tabs.get(input2.tabId);
+    bindTabChat(input2.tabId, input2.runId);
+    return { tabChats };
+  }
   if (method === "PUT" && path === "/api/settings") {
     if (engine.activeRunIds.length || admissions)
       throw new Error("Stop the active tasks before changing settings.");
@@ -24890,7 +24936,7 @@ async function route(path, method, body, settingsLocked = false) {
     try {
       await settingsQueue;
       if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
-      const selected = input2.tabId === null ? { tabId: void 0 } : await enqueue(() => prepareRun(input2.tabId, leaseFor(runId)));
+      const selected = input2.tabId === null ? { tabId: void 0 } : await prepareChat(input2.tabId ?? void 0, runId);
       await refreshTabs();
       const run = await changeSettings(async () => {
         if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
@@ -24933,7 +24979,7 @@ async function route(path, method, body, settingsLocked = false) {
         if (!previous) throw new Error("Chat not found.");
         if (input2.editMessageId !== void 0)
           previous = historyBeforeEdit(previous, input2.editMessageId, input2.message);
-        const selected = input2.tabId === null ? { tabId: void 0 } : await enqueue(() => prepareRun(input2.tabId, leaseFor(id)));
+        const selected = input2.tabId === null ? { tabId: void 0 } : await prepareChat(input2.tabId ?? void 0, id);
         await refreshTabs();
         if (input2.editMessageId !== void 0) {
           await store.replaceRun(previous);

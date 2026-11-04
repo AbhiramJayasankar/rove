@@ -570,6 +570,12 @@
   border-radius: 999px;
   background: var(--panel);
 }
+.app-shell .browser-note {
+  margin: 0 16px 10px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+}
 .app-shell .browser-viewport > img {
   border: 0;
   border-radius: 16px;
