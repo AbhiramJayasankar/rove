@@ -61,7 +61,10 @@ async function start(prompt: string, tabId: number | null) {
   await vi.waitFor(async () => expect((await rpc(`/api/runs/${run.id}`)).status).toBe("awaiting_approval"));
   return run;
 }
+let tabRemoved: (tabId: number) => void = () => {};
+let openTabs: number[] = [];
 beforeEach(async () => {
+  openTabs = [7, 8, 9];
   vi.resetModules();
   vi.clearAllMocks();
   fixture.flush.mockImplementation(async () => {});
@@ -76,6 +79,11 @@ beforeEach(async () => {
   vi.stubGlobal("chrome", {
     storage: { local: area, session: area },
     sidePanel: { setPanelBehavior: async () => {} },
+    tabs: {
+      onRemoved: { addListener: (listener: (tabId: number) => void) => { tabRemoved = listener; } },
+      query: async () => openTabs.map((id) => ({ id })),
+      get: async (id: number) => { if (!openTabs.includes(id)) throw new Error(`No tab with id: ${id}.`); return { id }; },
+    },
     runtime: {
       id: "rove", getURL: (path: string) => "chrome-extension://rove/" + path,
       getPlatformInfo: vi.fn(async () => ({})),
@@ -223,5 +231,27 @@ describe("concurrent runtime lifecycle", () => {
     } finally { prepare(); }
     await Promise.all([pending, second, third]);
     expect((await rpc("/api/state")).activeRunIds).toHaveLength(3);
+  });
+});
+
+describe("chat shown per tab", () => {
+  it("binds the tab a task works in, accepts explicit choices, and forgets closed tabs", async () => {
+    const run = await start("on tab seven", 7);
+    expect((await rpc("/api/state")).tabChats).toEqual({ "7": run.id });
+    await rpc("/api/tab-chat", "PUT", { tabId: 8, runId: run.id });
+    await rpc("/api/tab-chat", "PUT", { tabId: 9, runId: "" });
+    expect((await rpc("/api/state")).tabChats).toEqual({ "7": run.id, "8": run.id, "9": "" });
+    tabRemoved(7);
+    expect((await rpc("/api/state")).tabChats).toEqual({ "8": run.id, "9": "" });
+    expect((await raw("/api/tab-chat", "PUT", { tabId: 8, runId: "missing" })).error).toBe("Chat not found.");
+    expect((await raw("/api/tab-chat", "PUT", { tabId: 70, runId: "" })).ok).toBe(false);
+    expect((await raw("/api/tab-chat", "PUT", { tabId: 8, runId: "", extra: 1 })).ok).toBe(false);
+  });
+  it("explains a busy tab in plain words when another chat starts on it", async () => {
+    fixture.prepare.mockImplementation(async (id, claim) => { claim(id); return { tabId: id }; });
+    await start("first", 7);
+    const second = await raw("/api/runs", "POST", { prompt: "second", tabId: 7 });
+    expect(second.ok).toBe(false);
+    expect(second.error).toBe("Another Rove task is working in this tab. Wait for it to finish or stop it, or choose New Tab in the tab picker.");
   });
 });
