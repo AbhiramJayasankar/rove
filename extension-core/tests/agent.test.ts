@@ -133,6 +133,43 @@ describe("agent execution loop", () => {
       await until(() => !ctx.engine.activeRunId);
       expect(ctx.execute).toHaveBeenCalledWith("browser_navigate", expect.anything(), expect.anything());
     });
+    it("withholds a page that a redirect lands on a blocked site", async () => {
+      const fetchMock = vi.fn().mockResolvedValueOnce(navigate("https://link.example/out?to=bank")).mockResolvedValueOnce(response("Stopped."));
+      vi.stubGlobal("fetch", fetchMock);
+      const ctx = setup({ siteRules: [{ pattern: "bank.com", action: "block" }] });
+      ctx.execute.mockResolvedValueOnce({ tabId: 7, url: "https://login.bank.com/account", title: "Bank", text: "Balance 1,234.56" });
+      const run = ctx.engine.start("Follow the link.");
+      await until(() => !ctx.engine.activeRunId);
+      const sent = fetchMock.mock.calls[1][1].body as string;
+      expect(sent).not.toContain("Balance 1,234.56");
+      expect(sent).not.toContain("data:image");
+      const result = run.events.find((event) => event.type === "tool_result");
+      expect(result?.data.result).toMatchObject({ blocked: true, site: "login.bank.com" });
+      expect(JSON.stringify(run.events)).not.toContain("Balance 1,234.56");
+    });
+    it("withholds the automatic screenshot when an action ends on a blocked site", async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(navigate("https://shop.example/"))
+        .mockResolvedValueOnce(response(null, [call("c1", "browser_click", { tabId: 7, ref: "e1" })]))
+        .mockResolvedValueOnce(response("Done."));
+      vi.stubGlobal("fetch", fetchMock);
+      const ctx = setup({ siteRules: [{ pattern: "bank.com", action: "block" }] });
+      const shot = (url: string) => ({ tabId: 7, url, title: "Page", dataUrl: "data:image/jpeg;base64,QUJD" });
+      ctx.execute
+        .mockResolvedValueOnce({ tabId: 7, url: "https://shop.example/", title: "Shop", text: "Shop" })
+        .mockResolvedValueOnce(shot("https://shop.example/"))
+        .mockResolvedValueOnce({ clicked: true })
+        .mockResolvedValueOnce(shot("https://login.bank.com/account"));
+      const run = ctx.engine.start("Buy it.");
+      await until(() => !ctx.engine.activeRunId);
+      expect(fetchMock.mock.calls[1][1].body).toContain("data:image/jpeg;base64,QUJD");
+      const afterClick = fetchMock.mock.calls[2][1].body as string;
+      expect(afterClick.split("data:image/jpeg;base64,QUJD").length - 1).toBe(1);
+      const screenshots = run.events.filter((event) => event.type === "screenshot");
+      expect(screenshots.map((event) => event.data.url)).toEqual(["https://shop.example/"]);
+      const observation = run.events.findLast((event) => event.type === "browser_observation");
+      expect(observation?.data.result).toMatchObject({ blocked: true, site: "login.bank.com" });
+    });
     it("lets an allowed site skip approval in ask-first mode but still asks elsewhere", async () => {
       vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(navigate("https://docs.ok.com/")).mockResolvedValueOnce(navigate("https://other.com/")));
       const ctx = setup({ approvalMode: "risky", siteRules: [{ pattern: "ok.com", action: "allow" }] });

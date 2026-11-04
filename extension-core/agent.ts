@@ -240,6 +240,13 @@ function withoutImage(result: any): any {
   );
 }
 
+/** The blocked host a browser result reports being on, if any. */
+function blockedLanding(settings: Settings, result: any): string | undefined {
+  if (!result || typeof result !== "object" || typeof result.url !== "string") return undefined;
+  const host = hostOf(result.url);
+  return ruleFor(settings.siteRules ?? [], host)?.action === "block" ? host : undefined;
+}
+
 export const MAX_CONCURRENT_RUNS = 3;
 
 export class AgentEngine {
@@ -535,6 +542,16 @@ export class AgentEngine {
         else if (action === "browser_navigate" && Number.isInteger(result?.id))
           active.selectedTab = result.id;
         if (active.selectedTab !== undefined) active.ownedTabs.add(active.selectedTab);
+        // Rules are checked against the requested destination, but a redirect or a click can land
+        // elsewhere. Withhold anything observed on a blocked site, including automatic screenshots.
+        const landed = blockedLanding(settings, result);
+        if (landed)
+          return {
+            blocked: true,
+            site: landed,
+            ...(Number.isInteger(result?.tabId) ? { tabId: result.tabId } : {}),
+            message: `This action ended on ${landed}, which the user's site rules block, so its content was withheld. Do not retry it or look for another way to reach this site.`,
+          };
         return result;
       },
     };
