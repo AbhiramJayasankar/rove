@@ -257,6 +257,7 @@ const zhCN: Record<string, string> = {
   "Reply to Rove": "回复 Rove",
   "Reply to Rove…": "回复 Rove…",
   "Rove is working in this tab. A new screenshot arrives after each action.": "Rove 正在此标签页中工作。每次操作后都会更新截图。",
+  "Image: {name}": "图片：{name}",
   "Answer Rove’s question…": "回答 Rove 的问题…",
   "Send answer (Enter)": "发送回答（Enter）",
   "Reset instructions": "恢复默认指令",
