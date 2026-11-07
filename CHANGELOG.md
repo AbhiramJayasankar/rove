@@ -2,7 +2,7 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
-## Unreleased
+## 2.6.0 - 2026-11-08
 
 ### Changed
 - The side panel follows the tab you are on. Each tab shows the chat Rove worked on there, or a fresh chat for that tab, and switching tabs switches chats. Before, every tab showed the same chat, and a new task started anywhere took over every open panel. A full-page Rove tab now opens fresh and keeps its own chat across reloads. **New task** works on the tab beside the panel instead of opening a new tab.
