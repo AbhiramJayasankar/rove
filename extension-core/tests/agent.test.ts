@@ -951,6 +951,21 @@ describe("concurrent chats", () => {
     expect(fetchMock.mock.calls.map(([, init]) => init.headers.Authorization)).toEqual(["Bearer first-secret", "Bearer second-secret"]);
     for (const run of [first, second]) expect(JSON.stringify(run.events)).not.toMatch(/first-secret|second-secret|later-secret/);
   });
+
+  it("sends OpenCode one session ID per chat, follow-ups included", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => response("Done"));
+    vi.stubGlobal("fetch", fetchMock);
+    const ctx = setup({ baseUrl: "https://opencode.ai/inference/go/openai/v1" });
+    const first = ctx.engine.start("first");
+    await until(() => !ctx.engine.activeRunIds.length);
+    const followUp = ctx.engine.continue(first, "again");
+    await until(() => !ctx.engine.activeRunIds.length);
+    const other = ctx.engine.start("other");
+    await until(() => !ctx.engine.activeRunIds.length);
+    expect(followUp.id).toBe(first.id);
+    expect(fetchMock.mock.calls.map(([, init]) => init.headers["x-opencode-session"])).toEqual([first.id, first.id, other.id]);
+    expect(other.id).not.toBe(first.id);
+  });
 });
 
 describe("tool registry", () => {

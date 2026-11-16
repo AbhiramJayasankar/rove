@@ -21,6 +21,15 @@ export function completionUrl(baseUrl: string): string {
     : `${url.pathname.replace(/\/$/, "")}/chat/completions`;
   return url.href;
 }
+
+/** OpenCode Go and Zen reject requests without a per-conversation session ID, which they use to
+ * route and cache prompts. Other providers never receive it. */
+export function sessionHeaders(endpoint: string, session?: string): Record<string, string> {
+  const host = new URL(endpoint).hostname;
+  return session && (host === "opencode.ai" || host.endsWith(".opencode.ai"))
+    ? { "x-opencode-session": session }
+    : {};
+}
 function redact(value: string, key: string): string {
   return key ? value.split(key).join("[REDACTED]") : value;
 }
@@ -283,6 +292,7 @@ export async function complete(
   signal: AbortSignal,
   onDelta?: (delta: ModelDelta) => void,
   model?: ModelInfo | null,
+  session?: string,
 ): Promise<{ message: any; usage?: any; requestId?: string }> {
   if (!settings.model.trim())
     throw new Error("Choose a model in Settings before starting a run.");
@@ -315,6 +325,7 @@ export async function complete(
       headers: {
         "Content-Type": "application/json",
         ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        ...sessionHeaders(endpoint, session),
       },
       body: JSON.stringify({
         model: settings.model,
@@ -479,6 +490,7 @@ export async function testModel(
     AbortSignal.timeout(30000),
     undefined,
     model,
+    crypto.randomUUID(),
   );
   const check = message.tool_calls?.find(
     (t: any) => t.function.name === "rove_connection_check",

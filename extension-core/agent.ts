@@ -721,6 +721,8 @@ export class AgentEngine {
                 if (Date.now() - lastFlush >= 250) flush();
               },
               modelInfo,
+              // A follow-up keeps its chat's run ID, so one conversation is one session.
+              active.run.id,
             );
             signal.throwIfAborted();
             const actual = Number(response.usage?.prompt_tokens);

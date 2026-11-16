@@ -90,6 +90,22 @@ describe("OpenAI-compatible models", () => {
     expect(result.usage.total_tokens).toBe(12);
   });
 
+  it("sends OpenCode's session header only to opencode.ai", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => answer());
+    vi.stubGlobal("fetch", fetchMock);
+    for (const baseUrl of [
+      "https://opencode.ai/inference/go/openai/v1",
+      "https://api.opencode.ai/v1",
+      "https://openrouter.ai/api/v1",
+      "https://opencode.ai.evil.test/v1",
+    ])
+      await complete({ ...settings, baseUrl }, "", [], [], new AbortController().signal, undefined, null, "chat-1");
+    await complete({ ...settings, baseUrl: "https://opencode.ai/zen/go/v1" }, "", [], [], new AbortController().signal);
+    expect(fetchMock.mock.calls.map(([, init]) => init.headers["x-opencode-session"])).toEqual([
+      "chat-1", "chat-1", undefined, undefined, undefined,
+    ]);
+  });
+
   it("uses the reasoning protocol declared by model metadata", () => {
     const binary = normalizeModel(
       { id: "binary", supported_parameters: ["thinking"] },

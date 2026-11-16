@@ -2,6 +2,11 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## 2.6.1 - 2026-11-16
+
+### Fixed
+- OpenCode Go works as a provider. Go rejected every request with "Request is missing x-opencode-session", so a chat failed even though the model list loaded. Rove now sends the chat's ID in the `x-opencode-session` header to `opencode.ai`, one session per chat, follow-ups included. Other providers never receive it.
+
 ## 2.6.0 - 2026-11-08
 
 ### Changed

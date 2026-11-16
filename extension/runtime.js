@@ -1413,6 +1413,10 @@ function completionUrl(baseUrl) {
   url2.pathname = /\/chat\/completions\/?$/.test(url2.pathname) ? url2.pathname.replace(/\/$/, "") : `${url2.pathname.replace(/\/$/, "")}/chat/completions`;
   return url2.href;
 }
+function sessionHeaders(endpoint, session) {
+  const host = new URL(endpoint).hostname;
+  return session && (host === "opencode.ai" || host.endsWith(".opencode.ai")) ? { "x-opencode-session": session } : {};
+}
 function redact(value, key) {
   return key ? value.split(key).join("[REDACTED]") : value;
 }
@@ -1620,7 +1624,7 @@ async function streamedCompletion(response, onDelta, onActivity) {
     message.tool_calls = [...calls.entries()].sort((a, b) => a[0] - b[0]).map(([, call]) => call);
   return { id, choices: [{ message }], usage };
 }
-async function complete(settings, apiKey2, messages, tools, signal, onDelta, model) {
+async function complete(settings, apiKey2, messages, tools, signal, onDelta, model, session) {
   if (!settings.model.trim())
     throw new Error("Choose a model in Settings before starting a run.");
   const endpoint = completionUrl(settings.baseUrl);
@@ -1648,7 +1652,8 @@ async function complete(settings, apiKey2, messages, tools, signal, onDelta, mod
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...apiKey2 ? { Authorization: `Bearer ${apiKey2}` } : {}
+          ...apiKey2 ? { Authorization: `Bearer ${apiKey2}` } : {},
+          ...sessionHeaders(endpoint, session)
         },
         body: JSON.stringify({
           model: settings.model,
@@ -1779,7 +1784,8 @@ async function testModel(settings, apiKey2, model) {
     tools,
     AbortSignal.timeout(3e4),
     void 0,
-    model
+    model,
+    crypto.randomUUID()
   );
   const check2 = message.tool_calls?.find(
     (t) => t.function.name === "rove_connection_check"
@@ -3011,7 +3017,9 @@ Browser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. 
                 reasoningBuffer += delta.reasoning || "";
                 if (Date.now() - lastFlush >= 250) flush();
               },
-              modelInfo
+              modelInfo,
+              // A follow-up keeps its chat's run ID, so one conversation is one session.
+              active.run.id
             );
             signal.throwIfAborted();
             const actual = Number(response.usage?.prompt_tokens);
