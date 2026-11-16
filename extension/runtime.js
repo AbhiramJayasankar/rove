@@ -2018,7 +2018,8 @@ function normalizeModel(raw, source) {
   const nested = raw.reasoning && typeof raw.reasoning === "object" && !Array.isArray(raw.reasoning) ? raw.reasoning : void 0;
   const nestedEfforts = strings(nested?.supported_efforts)?.filter(Boolean);
   const efforts = (nestedEfforts?.length ? nestedEfforts : void 0) ?? strings(
-    raw.reasoning_efforts ?? raw.supported_reasoning_efforts ?? raw.effort?.supported_levels ?? raw.capabilities?.reasoning?.efforts ?? raw.capabilities?.reasoning?.levels ?? raw.parameters?.reasoning_effort?.enum ?? raw.parameters?.reasoning?.properties?.effort?.enum
+    raw.reasoning_efforts ?? raw.supported_reasoning_efforts ?? raw.effort?.supported_levels ?? raw.capabilities?.reasoning?.efforts ?? raw.capabilities?.reasoning?.levels ?? // OpenCode's catalogue: capabilities.reasoning: { supported, toggle?, effort: ["low", "high"] }.
+    raw.capabilities?.reasoning?.effort ?? raw.parameters?.reasoning_effort?.enum ?? raw.parameters?.reasoning?.properties?.effort?.enum
   );
   const parameters = strings(
     raw.supported_parameters ?? raw.supportedParameters ?? raw.capabilities?.supported_parameters
@@ -2029,7 +2030,10 @@ function normalizeModel(raw, source) {
   const output2 = strings(
     raw.architecture?.output_modalities ?? raw.output_modalities ?? raw.modalities?.output
   );
-  const reasoningFormat = nested ? "reasoning" : parameters?.includes("reasoning") && !parameters?.includes("reasoning_effort") ? "reasoning" : parameters?.includes("reasoning_effort") || efforts ? "reasoning_effort" : parameters?.some((p) => p === "thinking" || p === "thinking.type") ? "thinking" : parameters?.includes("enable_thinking") ? "enable_thinking" : parameters?.includes("reasoning") ? "reasoning" : void 0;
+  const reasoningFormat = nested ? "reasoning" : parameters?.includes("reasoning") && !parameters?.includes("reasoning_effort") ? "reasoning" : parameters?.includes("reasoning_effort") || efforts ? "reasoning_effort" : parameters?.some((p) => p === "thinking" || p === "thinking.type") ? "thinking" : parameters?.includes("enable_thinking") ? "enable_thinking" : parameters?.includes("reasoning") ? "reasoning" : (
+    // A switch with no effort tiers is turned off with thinking: { type: "disabled" }.
+    raw.capabilities?.reasoning?.toggle === true ? "thinking" : void 0
+  );
   const pricing = raw.pricing && typeof raw.pricing === "object" ? raw.pricing : void 0;
   const inputPrice = pricing?.prompt ?? pricing?.input_usd_per_1m ?? pricing?.input;
   const outputPrice = pricing?.completion ?? pricing?.output_usd_per_1m ?? pricing?.output;

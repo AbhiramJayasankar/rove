@@ -29,7 +29,7 @@ A llama.cpp server reports `owned_by: "llamacpp"`. Rove then also reads the serv
 
 In **Settings → Model → Provider**, choose **+ Add OpenRouter** or **+ Add compatible provider**. Enter its name, OpenAI-compatible base URL and a separate API key, choose a model, then **Save changes**. The provider dropdown edits a saved connection; its trash button removes it.
 
-For an [OpenCode Go](https://opencode.ai/docs/console/go/) subscription, use `https://opencode.ai/inference/go/openai/v1` and a key from the OpenCode Console. Go requires a session ID on every request, so Rove sends the chat's ID in an `x-opencode-session` header to `opencode.ai` addresses only. A follow-up stays in the same session.
+For an [OpenCode Go](https://opencode.ai/docs/console/go/) subscription, use `https://opencode.ai/inference/go/openai/v1` and a key from the OpenCode Console. Go requires a session ID on every request, so Rove sends the chat's ID in an `x-opencode-session` header to `opencode.ai` addresses only. A follow-up stays in the same session. The reasoning menu shows the levels Go lists for each model, plus Thinking off where Go marks the model as switchable. Models Go lists with neither, such as Kimi K2.7 Code, always reason and show no menu.
 
 All saved providers contribute to the same searchable model picker. Each model shows its provider when several catalogues are present, including duplicate model IDs, and choosing one uses that provider's URL and key. A catalogue that fails to load does not hide the others. **Free** filters paid models. There is no automatic fallback between providers.
 

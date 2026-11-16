@@ -30,6 +30,8 @@ export function normalizeModel(
       raw.effort?.supported_levels ??
       raw.capabilities?.reasoning?.efforts ??
       raw.capabilities?.reasoning?.levels ??
+      // OpenCode's catalogue: capabilities.reasoning: { supported, toggle?, effort: ["low", "high"] }.
+      raw.capabilities?.reasoning?.effort ??
       raw.parameters?.reasoning_effort?.enum ??
       raw.parameters?.reasoning?.properties?.effort?.enum,
   );
@@ -61,7 +63,10 @@ export function normalizeModel(
             ? "enable_thinking"
             : parameters?.includes("reasoning")
               ? "reasoning"
-              : undefined;
+              : // A switch with no effort tiers is turned off with thinking: { type: "disabled" }.
+                raw.capabilities?.reasoning?.toggle === true
+                ? "thinking"
+                : undefined;
   const pricing =
     raw.pricing && typeof raw.pricing === "object" ? raw.pricing : undefined;
   const inputPrice =

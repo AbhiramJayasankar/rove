@@ -90,6 +90,23 @@ describe("endpoint model metadata", () => {
     const none = normalizeModel({ id: "vendor/plain", supported_parameters: ["tools"] }, "https://openrouter.ai/api/v1/models");
     expect(reasoningOptions(DEFAULT_SETTINGS, none)).toHaveLength(1);
   });
+  it("reads OpenCode's reasoning levels and on/off switches", () => {
+    const source = "https://opencode.ai/inference/go/openai/v1/models";
+    const settings = (reasoningEffort: string) => ({ ...DEFAULT_SETTINGS, reasoningEffort });
+    const levels = normalizeModel({ id: "glm-5.3-flash", capabilities: { tools: { supported: true }, reasoning: { supported: true, effort: ["low", "high", "max"] } } }, source);
+    expect(reasoningOptions(DEFAULT_SETTINGS, levels).map(option => option.value)).toEqual(["low", "high", "max"]);
+    expect(resolvedReasoningEffort(DEFAULT_SETTINGS, levels)).toBe("max");
+    expect(generationOptions(settings("low"), levels)).toMatchObject({ reasoning_effort: "low" });
+    // Go ignores reasoning_effort "none" for a switch; thinking: { type: "disabled" } turns it off.
+    const toggle = normalizeModel({ id: "longcat-2.0", capabilities: { reasoning: { supported: true, toggle: true } } }, source);
+    expect(reasoningOptions(DEFAULT_SETTINGS, toggle).map(option => option.value)).toEqual(["none", "high"]);
+    expect(generationOptions(settings("none"), toggle)).toMatchObject({ thinking: { type: "disabled" } });
+    const both = normalizeModel({ id: "qwen4-max", capabilities: { reasoning: { supported: true, toggle: true, effort: ["low", "high", "xhigh"] } } }, source);
+    expect(reasoningOptions(DEFAULT_SETTINGS, both).map(option => option.value)).toEqual(["none", "low", "high", "xhigh"]);
+    expect(generationOptions(settings("none"), both)).toEqual({ max_tokens: DEFAULT_SETTINGS.maxOutputTokens, thinking: { type: "disabled" } });
+    const always = normalizeModel({ id: "kimi-k2.7-code", capabilities: { reasoning: { supported: true } } }, source);
+    expect(reasoningOptions(DEFAULT_SETTINGS, always)).toEqual([{ value: "default", label: "Automatic" }]);
+  });
   it("does not invent capabilities from an unknown model ID", () => {
     const info = normalizeModel(
       { id: "mimo-future:free", context_length: 1000000, tool_call: true },

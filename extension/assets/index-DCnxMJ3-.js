@@ -52,6 +52,7 @@ Rove follows [semantic versioning](https://semver.org). The version lives in \`p
 
 ### Fixed
 - OpenCode Go works as a provider. Go rejected every request with "Request is missing x-opencode-session", so a chat failed even though the model list loaded. Rove now sends the chat's ID in the \`x-opencode-session\` header to \`opencode.ai\`, one session per chat, follow-ups included. Other providers never receive it.
+- OpenCode models show their reasoning menu. OpenCode lists levels as \`capabilities.reasoning.effort\` (for example Low, High, Max for GLM-5.3-Flash), which Rove did not read, so no model had a reasoning control. Models that OpenCode marks as switchable (LongCat-2.0, MiniMax M3, Qwen3.7 Plus) now get Thinking off/on, sent as \`thinking: { type }\`, because Go ignores \`reasoning_effort: "none"\`.
 
 ## 2.6.0 - 2026-11-08
 
