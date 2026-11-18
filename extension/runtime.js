@@ -23362,6 +23362,29 @@ var sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milli
 async function createTab(url2) {
   return chrome.tabs.create({ url: url2, active: !option("backgroundTabs") });
 }
+var BLANK_PAGES = /* @__PURE__ */ new Set([
+  "about:blank",
+  "chrome://newtab/",
+  "chrome://new-tab-page/",
+  "chrome://new-tab-page-third-party/",
+  "chrome-search://local-ntp/local-ntp.html",
+  "edge://newtab/",
+  "brave://newtab/"
+]);
+function isBlankPage(url2) {
+  return BLANK_PAGES.has(String(url2 || ""));
+}
+async function reuseBlankTab(tabId) {
+  let tab2 = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab2 || tab2.discarded || !isBlankPage(tab2.pendingUrl || tab2.url)) return null;
+  starterTabs.add(tab2.id);
+  if ((tab2.pendingUrl || tab2.url) !== "about:blank") {
+    await chrome.tabs.update(tab2.id, { url: "about:blank" });
+    await waitForLoad(tab2.id);
+    tab2 = await chrome.tabs.get(tab2.id);
+  }
+  return tab2.url === "about:blank" ? tab2 : null;
+}
 function hasPendingDialogs() {
   return [...attached.values()].some((state2) => !!state2.dialog);
 }
@@ -24083,10 +24106,12 @@ async function perform(action, args = {}, claimTab2 = (_tabId, _info) => {
     let tab3;
     if (requireTab && !args.newTab && args.tabId == null)
       throw new Error("Agent browser actions require an explicit tabId or newTab:true.");
-    if (args.newTab)
+    const reused = args.newTab && Number.isInteger(args.reuseTabId) ? await reuseBlankTab(args.reuseTabId) : null;
+    if (reused) tab3 = reused;
+    else if (args.newTab)
       tab3 = await createTab("about:blank");
     else tab3 = await ensureTab(args.tabId);
-    claimTab2(tab3.id, args.newTab ? { created: true } : void 0);
+    claimTab2(tab3.id, args.newTab && !reused ? { created: true } : void 0);
     await attach(tab3.id, true);
     const navigation = await cdp(tab3.id, "Page.navigate", { url: args.url });
     if (navigation?.errorText)
@@ -24114,12 +24139,13 @@ async function perform(action, args = {}, claimTab2 = (_tabId, _info) => {
         rootFrame,
         "({width:innerWidth,height:innerHeight,devicePixelRatio,scrollX,scrollY,coordinateSpace:'CSS pixels'})"
       );
+      const hidden = !tab2.active;
       const image = await capture(tabId, {
         format: "jpeg",
         quality: 75,
         captureBeyondViewport: false,
-        clip: { x: viewport.scrollX, y: viewport.scrollY, width: viewport.width, height: viewport.height, scale: 1 }
-      }, background, !tab2.active);
+        ...background && hidden ? {} : { clip: { x: viewport.scrollX, y: viewport.scrollY, width: viewport.width, height: viewport.height, scale: 1 } }
+      }, background, hidden);
       return {
         tabId,
         url: tab2.url,
@@ -24376,7 +24402,7 @@ async function perform(action, args = {}, claimTab2 = (_tabId, _info) => {
 async function capture(tabId, params, background, hidden) {
   if (!background) return cdp(tabId, "Page.captureScreenshot", params);
   const poke = () => {
-    chrome.debugger.sendCommand({ tabId }, "Page.captureScreenshot", { format: "jpeg", quality: 10, clip: { x: 0, y: 0, width: 4, height: 4, scale: 1 } }).catch(() => {
+    chrome.debugger.sendCommand({ tabId }, "Page.captureScreenshot", { format: "jpeg", quality: 1 }).catch(() => {
     });
   };
   let failure2;
@@ -24575,7 +24601,11 @@ function bindTabChat(tabId, runId) {
   });
   broadcast("tab_chats", snapshot2);
 }
-chrome.tabs.onRemoved.addListener((tabId) => bindTabChat(tabId, null));
+chrome.tabs.onRemoved.addListener((tabId) => {
+  bindTabChat(tabId, null);
+  recentActions.delete(tabId);
+  openedTabs.delete(tabId);
+});
 async function prepareChat(tabId, runId) {
   try {
     return await enqueue(() => prepareRun(tabId, leaseFor(runId)));
@@ -24585,9 +24615,51 @@ async function prepareChat(tabId, runId) {
     throw error62;
   }
 }
+var blankTabs = /* @__PURE__ */ new Map();
+function busyWithAnotherRun(tabId, runId) {
+  const owner = tabLeases.get(tabId);
+  return !!owner && owner !== runId && (engine.isActive(owner) || admitting.has(owner));
+}
+function rememberBlankTab(runId, tabId) {
+  blankTabs.delete(runId);
+  if (tabId === void 0) return;
+  const tab2 = tabs.find((item) => item.id === tabId);
+  if (tab2 && isBlankPage(tab2.url) && !busyWithAnotherRun(tabId, runId)) blankTabs.set(runId, tabId);
+}
+var recentActions = /* @__PURE__ */ new Map();
+var OPENED_TAB_WINDOW_MS = 2e3;
+var OPENS_TABS = /* @__PURE__ */ new Set(["browser_click", "browser_press_key", "browser_type", "browser_select", "browser_drag", "browser_evaluate", "browser_cdp", "browser_dialog", "browser_upload"]);
+var openedTabs = /* @__PURE__ */ new Map();
+function openerOf(tab2) {
+  const now = Date.now();
+  const live = (recent) => !!recent && recent.until >= now && engine.isActive(recent.runId);
+  if (typeof tab2.openerTabId === "number" && live(recentActions.get(tab2.openerTabId))) return tab2.openerTabId;
+  if (isBlankPage(tab2.pendingUrl || tab2.url)) return void 0;
+  let best;
+  for (const [tabId, recent] of recentActions)
+    if (live(recent) && recent.windowId === tab2.windowId && (best === void 0 || recent.started > recentActions.get(best).started))
+      best = tabId;
+  return best;
+}
+chrome.tabs.onCreated.addListener((tab2) => {
+  if (typeof tab2.id !== "number") return;
+  const opener = openerOf(tab2);
+  const recent = opener === void 0 ? void 0 : recentActions.get(opener);
+  if (opener === void 0 || !recent) return;
+  if (tabLeases.get(opener) !== recent.runId || busyWithAnotherRun(tab2.id, recent.runId)) return;
+  try {
+    claimTab(tab2.id, recent.runId);
+    if ((tab2.groupId ?? -1) === -1) void groupTab(recent.runId, tab2.id);
+    openedTabs.set(opener, [...openedTabs.get(opener) ?? [], tab2.id]);
+  } catch {
+  }
+});
 async function releaseRun(runId) {
+  blankTabs.delete(runId);
+  for (const [tabId, recent] of recentActions) if (recent.runId === runId) recentActions.delete(tabId);
   forgetGroup(runId);
   for (const [tabId, owner] of tabLeases) {
+    if (owner === runId) openedTabs.delete(tabId);
     if (owner === runId && await releaseTab(tabId)) tabLeases.delete(tabId);
   }
 }
@@ -24631,8 +24703,29 @@ function transportForRun(runId) {
         await store.flush();
         signal?.throwIfAborted();
         if (runId && !engine.isActive(runId)) throw new Error("Run is not active.");
-        const result = await perform(action, args, leaseFor(runId, signal), !!runId);
+        let actual = args;
+        if (runId && action === "browser_navigate" && args.newTab && blankTabs.has(runId)) {
+          const blank = blankTabs.get(runId);
+          blankTabs.delete(runId);
+          if (!busyWithAnotherRun(blank, runId)) actual = { ...args, reuseTabId: blank };
+        }
+        const target3 = Number.isInteger(args.tabId) ? Number(args.tabId) : void 0;
+        const tracks = !!runId && target3 !== void 0 && OPENS_TABS.has(action);
+        const windowId = !tracks ? void 0 : tabs.find((tab2) => tab2.id === target3)?.windowId ?? (await chrome.tabs.get(target3).catch(() => void 0))?.windowId;
+        const tracked = tracks ? { runId, windowId, started: Date.now(), until: Infinity } : void 0;
+        if (tracked) recentActions.set(target3, tracked);
+        let result;
+        try {
+          result = await perform(action, actual, leaseFor(runId, signal), !!runId);
+        } finally {
+          if (tracked && recentActions.get(target3) === tracked) tracked.until = Date.now() + OPENED_TAB_WINDOW_MS;
+        }
         signal?.throwIfAborted();
+        const opened = target3 !== void 0 ? openedTabs.get(target3) : void 0;
+        if (opened?.length && result && typeof result === "object" && !Array.isArray(result)) {
+          openedTabs.delete(target3);
+          result = { ...result, openedTabs: opened };
+        }
         if (action === "browser_tabs") {
           tabs = result;
           return tabsFor(runId);
@@ -24992,6 +25085,7 @@ async function route(path, method, body, settingsLocked = false) {
     const input2 = external_exports.object({
       prompt: external_exports.string().trim().min(1).max(5e4),
       tabId: external_exports.number().int().positive().nullable().optional(),
+      reuseTabId: external_exports.number().int().positive().optional(),
       attachments: attachmentsSchema
     }).parse(body);
     const runId = crypto.randomUUID();
@@ -25002,6 +25096,7 @@ async function route(path, method, body, settingsLocked = false) {
       if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
       const selected = input2.tabId === null ? { tabId: void 0 } : await prepareChat(input2.tabId ?? void 0, runId);
       await refreshTabs();
+      if (input2.tabId === null) rememberBlankTab(runId, input2.reuseTabId);
       const run = await changeSettings(async () => {
         if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
         const run2 = engine.start(input2.prompt, selected.tabId, runId, input2.attachments);
@@ -25029,6 +25124,7 @@ async function route(path, method, body, settingsLocked = false) {
         message: external_exports.string().trim().min(1).max(5e4),
         editMessageId: external_exports.number().int().nonnegative().optional(),
         tabId: external_exports.number().int().positive().nullable().optional(),
+        reuseTabId: external_exports.number().int().positive().optional(),
         attachments: attachmentsSchema
       }).refine(
         (input3) => input3.editMessageId === void 0 || input3.attachments === void 0,
@@ -25045,6 +25141,8 @@ async function route(path, method, body, settingsLocked = false) {
           previous = historyBeforeEdit(previous, input2.editMessageId, input2.message);
         const selected = input2.tabId === null ? { tabId: void 0 } : await prepareChat(input2.tabId ?? void 0, id);
         await refreshTabs();
+        if (input2.tabId === null) rememberBlankTab(id, input2.reuseTabId);
+        else blankTabs.delete(id);
         if (input2.editMessageId !== void 0) {
           await store.replaceRun(previous);
           broadcast("run", previous);

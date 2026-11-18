@@ -27,6 +27,7 @@ import {
   setNotifier,
   hasPendingDialogs,
   recoverSessions,
+  isBlankPage,
 } from "./browser.js";
 
 const store = new ExtensionStore();
@@ -129,7 +130,11 @@ function bindTabChat(tabId: number, runId: string | null) {
     .catch(() => {});
   broadcast("tab_chats", snapshot);
 }
-chrome.tabs.onRemoved.addListener((tabId) => bindTabChat(tabId, null));
+chrome.tabs.onRemoved.addListener((tabId) => {
+  bindTabChat(tabId, null);
+  recentActions.delete(tabId);
+  openedTabs.delete(tabId);
+});
 /** Starting or continuing a chat on a tab another task is using: say so in the user's terms. */
 async function prepareChat(tabId: number | undefined, runId: string) {
   try {
@@ -140,9 +145,64 @@ async function prepareChat(tabId: number | undefined, runId: string) {
     throw error;
   }
 }
+// New Tab mode started beside an empty tab (Chrome's New Tab page): the task's first new tab is
+// that tab instead of another one. Used once per message; browser.js checks it is still empty.
+const blankTabs = new Map<string, number>();
+function busyWithAnotherRun(tabId: number, runId?: string) {
+  const owner = tabLeases.get(tabId);
+  return !!owner && owner !== runId && (engine.isActive(owner) || admitting.has(owner));
+}
+function rememberBlankTab(runId: string, tabId: number | undefined) {
+  blankTabs.delete(runId);
+  if (tabId === undefined) return;
+  const tab = tabs.find((item) => item.id === tabId);
+  if (tab && isBlankPage(tab.url) && !busyWithAnotherRun(tabId, runId)) blankTabs.set(runId, tabId);
+}
+// Tabs a page opens from a tab a task is driving (a link with target=_blank, window.open) belong to
+// that task straight away, so the side panel there shows the task instead of an empty chat.
+// target=_blank links are noopener, so Chrome may report no opener or another one: a tab created in the same
+// window while the task's action runs, or just after it, counts too. A blank tab is the user's own
+// (Ctrl+T), never the page's.
+type RecentAction = { runId: string; windowId?: number; started: number; until: number };
+const recentActions = new Map<number, RecentAction>();
+const OPENED_TAB_WINDOW_MS = 2000;
+// Actions through which a page can open a tab. Reads, screenshots and navigation of the tab itself cannot.
+const OPENS_TABS = new Set(["browser_click", "browser_press_key", "browser_type", "browser_select", "browser_drag", "browser_evaluate", "browser_cdp", "browser_dialog", "browser_upload"]);
+const openedTabs = new Map<number, number[]>();
+function openerOf(tab: chrome.tabs.Tab): number | undefined {
+  const now = Date.now();
+  const live = (recent?: RecentAction) => !!recent && recent.until >= now && engine.isActive(recent.runId);
+  // Chrome's opener is not always the page that opened the tab (a tab Rove created reports the tab
+  // that was active then), so a mismatch falls through to the timing rule.
+  if (typeof tab.openerTabId === "number" && live(recentActions.get(tab.openerTabId))) return tab.openerTabId;
+  if (isBlankPage(tab.pendingUrl || tab.url)) return undefined;
+  let best: number | undefined;
+  for (const [tabId, recent] of recentActions)
+    if (live(recent) && recent.windowId === tab.windowId && (best === undefined || recent.started > recentActions.get(best)!.started))
+      best = tabId;
+  return best;
+}
+chrome.tabs.onCreated.addListener((tab) => {
+  if (typeof tab.id !== "number") return;
+  const opener = openerOf(tab);
+  const recent = opener === undefined ? undefined : recentActions.get(opener);
+  if (opener === undefined || !recent) return;
+  if (tabLeases.get(opener) !== recent.runId || busyWithAnotherRun(tab.id, recent.runId)) return;
+  try {
+    claimTab(tab.id, recent.runId);
+    // A tab opened from one of the user's own groups stays in that group.
+    if ((tab.groupId ?? -1) === -1) void groupTab(recent.runId, tab.id);
+    openedTabs.set(opener, [...(openedTabs.get(opener) ?? []), tab.id]);
+  } catch {
+    // Claiming is a convenience; the task can still pick the tab with browser_tabs.
+  }
+});
 async function releaseRun(runId: string) {
+  blankTabs.delete(runId);
+  for (const [tabId, recent] of recentActions) if (recent.runId === runId) recentActions.delete(tabId);
   forgetGroup(runId);
   for (const [tabId, owner] of tabLeases) {
+    if (owner === runId) openedTabs.delete(tabId);
     if (owner === runId && await releaseTab(tabId)) tabLeases.delete(tabId);
   }
 }
@@ -189,8 +249,32 @@ function transportForRun(runId?: string): BrowserTransport {
         await store.flush();
         signal?.throwIfAborted();
         if (runId && !engine.isActive(runId)) throw new Error("Run is not active.");
-        const result = await perform(action, args, leaseFor(runId, signal), !!runId);
+        let actual = args;
+        if (runId && action === "browser_navigate" && args.newTab && blankTabs.has(runId)) {
+          const blank = blankTabs.get(runId)!;
+          blankTabs.delete(runId);
+          if (!busyWithAnotherRun(blank, runId)) actual = { ...args, reuseTabId: blank };
+        }
+        const target = Number.isInteger(args.tabId) ? Number(args.tabId) : undefined;
+        const tracks = !!runId && target !== undefined && OPENS_TABS.has(action);
+        // The tab list can lag behind a tab Rove has just opened, so ask Chrome when it has no window.
+        const windowId = !tracks ? undefined
+          : tabs.find((tab) => tab.id === target)?.windowId ?? (await chrome.tabs.get(target!).catch(() => undefined))?.windowId;
+        const tracked = tracks ? { runId: runId!, windowId, started: Date.now(), until: Infinity } : undefined;
+        if (tracked) recentActions.set(target!, tracked);
+        let result;
+        try {
+          result = await perform(action, actual, leaseFor(runId, signal), !!runId);
+        } finally {
+          if (tracked && recentActions.get(target!) === tracked) tracked.until = Date.now() + OPENED_TAB_WINDOW_MS;
+        }
         signal?.throwIfAborted();
+        const opened = target !== undefined ? openedTabs.get(target) : undefined;
+        if (opened?.length && result && typeof result === "object" && !Array.isArray(result)) {
+          openedTabs.delete(target!);
+          // Tell the model where the click went: the page opened a new tab, which this task now owns.
+          result = { ...result, openedTabs: opened };
+        }
         if (action === "browser_tabs") {
           tabs = result;
           return tabsFor(runId);
@@ -591,6 +675,7 @@ async function route(path: string, method: string, body: any, settingsLocked = f
       .object({
         prompt: z.string().trim().min(1).max(50000),
         tabId: z.number().int().positive().nullable().optional(),
+        reuseTabId: z.number().int().positive().optional(),
         attachments: attachmentsSchema,
       })
       .parse(body);
@@ -604,6 +689,7 @@ async function route(path: string, method: string, body: any, settingsLocked = f
         ? {tabId:undefined}
         : await prepareChat(input.tabId ?? undefined, runId);
       await refreshTabs();
+      if (input.tabId === null) rememberBlankTab(runId, input.reuseTabId);
       // Snapshot settings and key only after any concurrent picker commit finishes.
       const run = await changeSettings(async () => {
         if (!store.settings.model.trim()) throw new Error("Choose a model in settings first.");
@@ -632,6 +718,7 @@ async function route(path: string, method: string, body: any, settingsLocked = f
           message: z.string().trim().min(1).max(50000),
           editMessageId: z.number().int().nonnegative().optional(),
           tabId: z.number().int().positive().nullable().optional(),
+          reuseTabId: z.number().int().positive().optional(),
           attachments: attachmentsSchema,
         })
         .refine(input => input.editMessageId === undefined || input.attachments === undefined,
@@ -650,6 +737,8 @@ async function route(path: string, method: string, body: any, settingsLocked = f
           ? {tabId:undefined}
           : await prepareChat(input.tabId ?? undefined, id);
         await refreshTabs();
+        if (input.tabId === null) rememberBlankTab(id, input.reuseTabId);
+        else blankTabs.delete(id);
         if (input.editMessageId !== undefined) {
           await store.replaceRun(previous);
           broadcast("run", previous);

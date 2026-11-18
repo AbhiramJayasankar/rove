@@ -25,6 +25,25 @@ const sleep = milliseconds => new Promise(resolve => setTimeout(resolve, millise
 async function createTab(url) {
   return chrome.tabs.create({ url, active: !option('backgroundTabs') });
 }
+/** Chrome's own empty tab: the New Tab page or a blank page. Nothing on it can be lost by navigating it. */
+const BLANK_PAGES = new Set([
+  'about:blank', 'chrome://newtab/', 'chrome://new-tab-page/', 'chrome://new-tab-page-third-party/',
+  'chrome-search://local-ntp/local-ntp.html', 'edge://newtab/', 'brave://newtab/',
+]);
+export function isBlankPage(url) { return BLANK_PAGES.has(String(url || '')); }
+/** New Tab mode started from an empty tab uses that tab instead of opening another one.
+ * Chrome lets no debugger into its New Tab page, so the tab first goes to about:blank. */
+async function reuseBlankTab(tabId) {
+  let tab = await chrome.tabs.get(tabId).catch(() => null);
+  if (!tab || tab.discarded || !isBlankPage(tab.pendingUrl || tab.url)) return null;
+  starterTabs.add(tab.id);
+  if ((tab.pendingUrl || tab.url) !== 'about:blank') {
+    await chrome.tabs.update(tab.id, { url: 'about:blank' });
+    await waitForLoad(tab.id);
+    tab = await chrome.tabs.get(tab.id);
+  }
+  return tab.url === 'about:blank' ? tab : null;
+}
 
 /** Manual tool calls retain their debugger while a user-visible modal is open. */
 export function hasPendingDialogs() {
@@ -879,10 +898,13 @@ export async function perform(action, args = {}, claimTab = (_tabId, _info) => {
     let tab;
     if (requireTab && !args.newTab && args.tabId == null)
       throw new Error('Agent browser actions require an explicit tabId or newTab:true.');
-    if (args.newTab)
+    // A reused empty tab is the user's own, so it is not moved into Rove's tab group.
+    const reused = args.newTab && Number.isInteger(args.reuseTabId) ? await reuseBlankTab(args.reuseTabId) : null;
+    if (reused) tab = reused;
+    else if (args.newTab)
       tab = await createTab("about:blank");
     else tab = await ensureTab(args.tabId);
-    claimTab(tab.id, args.newTab ? { created: true } : undefined);
+    claimTab(tab.id, args.newTab && !reused ? { created: true } : undefined);
     // Attach before navigating so on-load dialogs are observable, including
     // when the destination is the first page in a newly created tab.
     await attach(tab.id, true);
@@ -915,12 +937,19 @@ export async function perform(action, args = {}, claimTab = (_tabId, _info) => {
         rootFrame,
         "({width:innerWidth,height:innerHeight,devicePixelRatio,scrollX,scrollY,coordinateSpace:'CSS pixels'})",
       );
+      // A hidden tab is captured as it is, with no clip. Chrome applies a clip by briefly changing the
+      // page's emulated viewport; on a scrolled hidden tab that left Chrome showing no picture of the
+      // tab (black or blank) once the user switched to it, until the debugger detached (measured in
+      // Chrome 157; docs/verification.md). Without another debugger's emulation the unclipped image
+      // is the same viewport at the same device scale. A tab in front keeps the clip, which follows
+      // any viewport emulation exactly.
+      const hidden = !tab.active;
       const image = await capture(tabId, {
         format: "jpeg",
         quality: 75,
         captureBeyondViewport: false,
-        clip: {x:viewport.scrollX,y:viewport.scrollY,width:viewport.width,height:viewport.height,scale:1},
-      }, background, !tab.active);
+        ...(background && hidden ? {} : {clip: {x:viewport.scrollX,y:viewport.scrollY,width:viewport.width,height:viewport.height,scale:1}}),
+      }, background, hidden);
       return {
         tabId,
         url: tab.url,
@@ -1195,7 +1224,8 @@ export async function perform(action, args = {}, claimTab = (_tabId, _info) => {
  */
 async function capture(tabId, params, background, hidden) {
   if (!background) return cdp(tabId, "Page.captureScreenshot", params);
-  const poke = () => { chrome.debugger.sendCommand({tabId}, "Page.captureScreenshot", {format:'jpeg', quality:10, clip:{x:0,y:0,width:4,height:4,scale:1}}).catch(() => {}); };
+  // No clip here either: a clip on a scrolled hidden tab breaks its picture (see browser_screenshot).
+  const poke = () => { chrome.debugger.sendCommand({tabId}, "Page.captureScreenshot", {format:'jpeg', quality:1}).catch(() => {}); };
   let failure;
   for (let attempt = 0; attempt < 3; attempt++) {
     // A tab that looks foreground may still be covered or minimized, so it gets one plain try first.

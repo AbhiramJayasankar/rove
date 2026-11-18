@@ -8,10 +8,13 @@ const fixture = vi.hoisted(() => ({
   detachAll: vi.fn(async () => {}),
   releaseTab: vi.fn(async (_id: number) => true),
   prepare: vi.fn(async (id: number, claim: (id: number) => void) => { claim(id); return { tabId: id }; }),
+  perform: vi.fn(async (_action: string, args: any, claim: (id: number) => void) => { claim(args.tabId); return { tabId: args.tabId }; }),
+  tabs: [] as { id: number; url: string; title: string; windowId: number }[],
 }));
 vi.mock("../../extension-src/browser.js", () => ({
   setNotifier: (notify: typeof fixture.notify) => { fixture.notify = notify; },
-  listTabs: async () => [7, 8, 9].map(id => ({ id, url: "https://example.com", title: "Page" })),
+  listTabs: async () => structuredClone(fixture.tabs),
+  isBlankPage: (url: string) => ["about:blank", "chrome://newtab/"].includes(url),
   prepareRun: fixture.prepare,
   configureBrowser: () => {},
   groupTab: async () => {},
@@ -20,7 +23,7 @@ vi.mock("../../extension-src/browser.js", () => ({
   detachAll: fixture.detachAll,
   hasPendingDialogs: () => false,
   recoverSessions: async () => {},
-  perform: async (_action: string, args: any, claim: (id: number) => void) => { claim(args.tabId); return { tabId: args.tabId }; },
+  perform: (...args: [string, any, (id: number) => void]) => fixture.perform(...args),
 }));
 vi.mock("../../extension-src/store", () => ({
   ExtensionStore: class {
@@ -62,11 +65,14 @@ async function start(prompt: string, tabId: number | null) {
   return run;
 }
 let tabRemoved: (tabId: number) => void = () => {};
+let tabCreated: (tab: Partial<chrome.tabs.Tab>) => void = () => {};
 let openTabs: number[] = [];
 beforeEach(async () => {
   openTabs = [7, 8, 9];
+  fixture.tabs = [7, 8, 9].map(id => ({ id, url: "https://example.com", title: "Page", windowId: 1 }));
   vi.resetModules();
   vi.clearAllMocks();
+  fixture.perform.mockImplementation(async (_action, args, claim) => { claim(args.tabId); return { tabId: args.tabId }; });
   fixture.flush.mockImplementation(async () => {});
   fixture.prepare.mockImplementation(async (id, claim) => { claim(id); return { tabId: id }; });
   const storage: Record<string, any> = {};
@@ -81,6 +87,7 @@ beforeEach(async () => {
     sidePanel: { setPanelBehavior: async () => {} },
     tabs: {
       onRemoved: { addListener: (listener: (tabId: number) => void) => { tabRemoved = listener; } },
+      onCreated: { addListener: (listener: typeof tabCreated) => { tabCreated = listener; } },
       query: async () => openTabs.map((id) => ({ id })),
       get: async (id: number) => { if (!openTabs.includes(id)) throw new Error(`No tab with id: ${id}.`); return { id }; },
     },
@@ -253,5 +260,85 @@ describe("chat shown per tab", () => {
     const second = await raw("/api/runs", "POST", { prompt: "second", tabId: 7 });
     expect(second.ok).toBe(false);
     expect(second.error).toBe("Another Rove task is working in this tab. Wait for it to finish or stop it, or choose New Tab in the tab picker.");
+  });
+});
+
+describe("which tab a task works in", () => {
+  const reply = (calls: { name: string; args: unknown }[]) => new Response(JSON.stringify({ choices: [{ message: {
+    role: "assistant", content: null,
+    tool_calls: calls.map((call, index) => ({ id: `call-${index}-${Math.random()}`, type: "function", function: { name: call.name, arguments: JSON.stringify(call.args) } })),
+  } }] }));
+  /** The model makes these tool calls in its first turn, then waits on a question. */
+  function script(calls: { name: string; args: unknown }[]) {
+    let turn = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => turn++ === 0 ? reply(calls) : reply([{ name: "ask_user", args: { question: "Wait?" } }])));
+  }
+  const navigations = () => fixture.perform.mock.calls.filter(([action]) => action === "browser_navigate").map(([, args]) => args);
+
+  it("New Tab mode beside an empty tab hands that tab to the first new-tab navigation only", async () => {
+    fixture.tabs.push({ id: 10, url: "chrome://newtab/", title: "New Tab", windowId: 1 });
+    fixture.perform.mockImplementation(async (action, args, claim) => {
+      const tabId = args.reuseTabId ?? (args.newTab ? 20 : args.tabId);
+      claim(tabId);
+      return { tabId };
+    });
+    script([{ name: "browser_navigate", args: { url: "https://example.com/a", newTab: true } }, { name: "browser_navigate", args: { url: "https://example.com/b", newTab: true } }]);
+    const run = await rpc("/api/runs", "POST", { prompt: "go", tabId: null, reuseTabId: 10 });
+    await vi.waitFor(async () => expect((await rpc(`/api/runs/${run.id}`)).status).toBe("awaiting_approval"));
+    expect(navigations()).toEqual([
+      { url: "https://example.com/a", newTab: true, reuseTabId: 10 },
+      { url: "https://example.com/b", newTab: true },
+    ]);
+    expect((await rpc("/api/state")).tabChats["10"]).toBe(run.id);
+  });
+  it.each([
+    ["an ordinary page", 7],
+    ["a tab that is not open", 99],
+  ])("New Tab mode beside %s opens a new tab as before", async (_label, reuseTabId) => {
+    script([{ name: "browser_navigate", args: { url: "https://example.com/a", newTab: true } }]);
+    const run = await rpc("/api/runs", "POST", { prompt: "go", tabId: null, reuseTabId });
+    await vi.waitFor(async () => expect((await rpc(`/api/runs/${run.id}`)).status).toBe("awaiting_approval"));
+    expect(navigations()).toEqual([{ url: "https://example.com/a", newTab: true }]);
+  });
+  it("a chosen tab ignores the empty-tab hint", async () => {
+    fixture.tabs.push({ id: 10, url: "chrome://newtab/", title: "New Tab", windowId: 1 });
+    script([{ name: "browser_navigate", args: { url: "https://example.com/a", newTab: true } }]);
+    const run = await rpc("/api/runs", "POST", { prompt: "go", tabId: 7, reuseTabId: 10 });
+    await vi.waitFor(async () => expect((await rpc(`/api/runs/${run.id}`)).status).toBe("awaiting_approval"));
+    expect(navigations()).toEqual([{ url: "https://example.com/a", newTab: true }]);
+  });
+  it("a tab a click opens belongs to the task at once and the click reports it; the user's own new tab does not", async () => {
+    fixture.perform.mockImplementation(async (action, args, claim) => {
+      claim(args.tabId);
+      if (action === "browser_click") {
+        tabCreated({ id: 11, windowId: 1, pendingUrl: "https://example.com/opened", groupId: -1 });
+        tabCreated({ id: 12, windowId: 1, pendingUrl: "chrome://newtab/", groupId: -1 });
+        tabCreated({ id: 13, windowId: 2, pendingUrl: "https://example.com/elsewhere", groupId: -1 });
+      }
+      return { clicked: true, tabId: args.tabId };
+    });
+    script([{ name: "browser_click", args: { tabId: 7, x: 5, y: 5 } }]);
+    const run = await rpc("/api/runs", "POST", { prompt: "click", tabId: 7 });
+    await vi.waitFor(async () => expect((await rpc(`/api/runs/${run.id}`)).status).toBe("awaiting_approval"));
+    const chats = (await rpc("/api/state")).tabChats;
+    expect(chats["11"]).toBe(run.id);
+    expect(chats["12"]).toBeUndefined();
+    expect(chats["13"]).toBeUndefined();
+    const result = (await rpc(`/api/runs/${run.id}`)).events.find((event: any) => event.type === "tool_result" && event.data.name === "browser_click");
+    expect(result.data.result).toMatchObject({ clicked: true, tabId: 7, openedTabs: [11] });
+  });
+  it("tabs opened while no task acts, or by reads, stay the user's", async () => {
+    fixture.perform.mockImplementation(async (action, args, claim) => {
+      claim(args.tabId);
+      if (action === "browser_snapshot") tabCreated({ id: 11, windowId: 1, pendingUrl: "https://example.com/opened", groupId: -1 });
+      return { tabId: args.tabId };
+    });
+    script([{ name: "browser_snapshot", args: { tabId: 7 } }]);
+    const run = await rpc("/api/runs", "POST", { prompt: "read", tabId: 7 });
+    await vi.waitFor(async () => expect((await rpc(`/api/runs/${run.id}`)).status).toBe("awaiting_approval"));
+    tabCreated({ id: 14, windowId: 1, pendingUrl: "https://example.com/later", groupId: -1 });
+    const chats = (await rpc("/api/state")).tabChats;
+    expect(chats["11"]).toBeUndefined();
+    expect(chats["14"]).toBeUndefined();
   });
 });

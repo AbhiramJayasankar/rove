@@ -2,6 +2,13 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## 2.6.2 - 2026-11-19
+
+### Fixed
+- A tab Rove worked in no longer goes black (or blank) when you switch to it. Rove's screenshots of a background tab used a clip at the page's scroll position, and once the tab had been scrolled, Chrome then showed no picture of it until the task ended. Screenshots of a background tab now capture the viewport without a clip (a tab in front is captured as before); what the model sees is unchanged. Measured in Chrome 157 from the real screen: the old capture left the page area blank in every run, the new one never did.
+- **New Tab** beside Chrome's empty New Tab page now uses that tab instead of opening another one next to it. A New Tab chat started beside an ordinary page still opens a new tab and leaves your page alone, and your tab is not moved into Rove's tab group.
+- A tab that a page opens while Rove works (a link that opens in a new tab) belongs to the task straight away. The side panel there shows the running task instead of an empty "What's the task?", the tab joins the task's tab group, and the model is told which tab opened. Before, this only happened once the model happened to use that tab.
+
 ## 2.6.1 - 2026-11-16
 
 ### Fixed

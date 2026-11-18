@@ -80,6 +80,7 @@ export interface TabInfo {
   title: string;
   url: string;
   active?: boolean;
+  windowId?: number;
   /** Relative to the requesting task; manual callers see any active lease as busy. */
   busyWithAnotherTask?: boolean;
 }

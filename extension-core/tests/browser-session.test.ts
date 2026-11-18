@@ -129,6 +129,34 @@ describe("debugger lifecycle", () => {
     expect(chrome.tabs.create).toHaveBeenLastCalledWith({ url: "about:blank", active });
     expect(claim).toHaveBeenCalledWith(9, { created: true });
   });
+  it("New Tab mode uses the empty tab it was started from instead of opening another", async () => {
+    let url = "chrome://newtab/";
+    vi.mocked(chrome.tabs.get).mockImplementation((async () => ({ id: 12, url, status: "complete", windowId: 1 })) as unknown as typeof chrome.tabs.get);
+    vi.mocked(chrome.tabs.update).mockImplementation((async (_id: number, props: { url?: string }) => { if (props.url) url = props.url; return { id: 12, url }; }) as unknown as typeof chrome.tabs.update);
+    const claim = vi.fn();
+    await browser.perform("browser_navigate", { url: "https://example.com/", newTab: true, reuseTabId: 12 }, claim, true).catch(() => {});
+    expect(chrome.tabs.create).not.toHaveBeenCalled();
+    // Chrome's New Tab page refuses debuggers: the tab goes to about:blank first, without switching to it.
+    expect(chrome.tabs.update).toHaveBeenCalledWith(12, { url: "about:blank" });
+    expect(attach).toHaveBeenCalledWith({ tabId: 12 }, "1.3");
+    expect(send).toHaveBeenCalledWith({ tabId: 12 }, "Page.navigate", { url: "https://example.com/" });
+    // The user's own tab is claimed but not moved into Rove's tab group.
+    expect(claim).toHaveBeenCalledWith(12, undefined);
+  });
+  it.each(["https://example.com/page", "chrome://settings/"])("a tab that is no longer empty (%s) is left alone and a new tab opens", async (current) => {
+    vi.mocked(chrome.tabs.get).mockImplementation((async (id: number) => ({ id, url: id === 12 ? current : "about:blank", status: "complete", windowId: 1 })) as unknown as typeof chrome.tabs.get);
+    const claim = vi.fn();
+    await browser.perform("browser_navigate", { url: "https://example.com/", newTab: true, reuseTabId: 12 }, claim, true).catch(() => {});
+    expect(chrome.tabs.update).not.toHaveBeenCalled();
+    expect(chrome.tabs.create).toHaveBeenCalledWith({ url: "about:blank", active: false });
+    expect(claim).toHaveBeenCalledWith(9, { created: true });
+  });
+  it("recognises Chrome's empty pages only", () => {
+    for (const url of ["chrome://newtab/", "chrome://new-tab-page/", "about:blank", "edge://newtab/"])
+      expect(browser.isBlankPage(url)).toBe(true);
+    for (const url of ["https://example.com/", "chrome://settings/", "chrome-extension://abc/newtab.html", "", undefined])
+      expect(browser.isBlankPage(url)).toBe(false);
+  });
   it.each([
     [true, "reloads it in place"],
     [false, "switches to it"],
@@ -186,7 +214,7 @@ describe("debugger lifecycle", () => {
     }
     it("wakes the tab's rendering instead of switching to it", async () => {
       pageAnswers((params, state) => {
-        if (params.clip?.width === 4) { state.poked = true; return new Promise(() => {}); } // Chrome never answers the wake-up capture
+        if (params.quality === 1) { state.poked = true; return new Promise(() => {}); } // Chrome never answers the wake-up capture
         return state.poked ? { data: jpeg } : new Promise(() => {});
       });
       const result = await browser.perform("browser_screenshot", { tabId: 7 }, () => {}, true);
@@ -209,6 +237,26 @@ describe("debugger lifecycle", () => {
       pageAnswers(() => ({ data: jpeg }));
       await browser.perform("browser_screenshot", { tabId: 7 }, () => {}, true);
       expect(chrome.tabs.update).toHaveBeenCalledWith(7, { active: true });
+      // The opt-out keeps the clipped capture of the visible tab.
+      expect(send.mock.calls.filter((call) => call[1] === "Page.captureScreenshot").map((call) => call[2].clip)).toEqual([
+        { x: 0, y: 0, width: 100, height: 80, scale: 1 },
+      ]);
+    });
+    it.each([[false, false], [true, true]])("a background capture of a tab in front (%s) clips: %s; a hidden tab gets no clip", async (active, clipped) => {
+      pageAnswers((params, state) => {
+        if (params.quality === 1) { state.poked = true; return new Promise(() => {}); }
+        return { data: jpeg };
+      });
+      vi.mocked(chrome.tabs.get).mockImplementation(async (id: number) => ({ id, url: "https://example.com", title: "Fixture", active, windowId: 1 }) as chrome.tabs.Tab);
+      const result = await browser.perform("browser_screenshot", { tabId: 7 }, () => {}, true);
+      const captures = send.mock.calls.filter((call) => call[1] === "Page.captureScreenshot").map((call) => call[2]);
+      expect(captures.length).toBeGreaterThan(0);
+      const real = captures.filter((params) => params.quality === 75);
+      expect(real.length).toBeGreaterThan(0);
+      for (const params of real) expect("clip" in params).toBe(clipped);
+      // The wake-up capture never clips.
+      for (const params of captures.filter((params) => params.quality === 1)) expect(params).not.toHaveProperty("clip");
+      expect(result).toMatchObject({ imageSize: { width: 1, height: 1 }, captureBounds: { x: 0, y: 0, width: 100, height: 80, pageX: 0, pageY: 0 } });
     });
   });
   it("preserves the Page.enable timeout instead of masking it with a later missing session", async () => {

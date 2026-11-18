@@ -274,6 +274,9 @@ export default function Workbench({
   async function startRun(message = prompt, editMessageId?: number) {
     if (!message.trim()) return false;
     let saved = false;
+    // New Tab beside Chrome's empty New Tab page: Rove may use that tab rather than open another.
+    // The worker checks the tab is still empty before using it.
+    const reuse = tabId === undefined && typeof homeTab === "number" ? { reuseTabId: homeTab } : {};
     await action("run", async () => {
       const created = await api<RunRecord>(
         run ? `/api/runs/${run.id}/messages` : "/api/runs",
@@ -284,12 +287,14 @@ export default function Workbench({
               ? {
                   message: message.trim(),
                   tabId: tabId ?? null,
+                  ...reuse,
                   editMessageId,
                   ...(editMessageId === undefined && attachments.length ? { attachments: attachmentPayload(attachments) } : {}),
                 }
               : {
                   prompt: message.trim(),
                   tabId: tabId ?? null,
+                  ...reuse,
                   ...(attachments.length ? { attachments: attachmentPayload(attachments) } : {}),
                 },
           ),
