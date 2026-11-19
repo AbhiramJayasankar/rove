@@ -26,7 +26,24 @@ Rove is not in the Chrome Web Store, so you load it as an unpacked extension. It
 2. Move that folder somewhere permanent. Chrome reads the extension from it every time it starts, so do not delete or rename it later.
 3. Open `chrome://extensions` in Chrome and switch on **Developer mode** (top right).
 4. Click **Load unpacked** and choose the `rove-<version>` folder (the one that contains `manifest.json`).
-5. Click the puzzle-piece icon in Chrome's toolbar and **pin Rove**. Click its icon, or press `Alt+Shift+O`, to open the side panel.
+5. Click the puzzle-piece icon in Chrome's toolbar and **pin Rove**. Click its icon, or press `Alt+Shift+O`, to open the side panel on the current tab. The panel stays with the tabs you open it on.
+
+**To update**, unzip the new release anywhere, then either load the new folder with **Load unpacked** or copy its files over the old folder and click the reload icon on Rove's card. Rove has a fixed extension ID, so both routes update the Rove you have and keep your settings and chats. (Updating from 2.6.x or older is the exception; see below.) **Settings > Model > Backup** saves everything to a file if you want a copy first.
+
+### Updating from 2.6.x or older
+
+Rove now has a fixed extension ID, so from 2.7.0 on, loading a new release from any folder updates the Rove you have and keeps your endpoints, keys, instructions and chats.
+
+The ID changes once in 2.7.0, so **this one update arrives as a separate Rove**. You can enter your settings in it again, or carry them over:
+
+1. In the **old** Rove, open Settings, right-click anywhere in the panel, choose **Inspect**, open the **Console** tab and paste this line. It saves `rove-old-settings.json` to Downloads (API keys included, so keep the file private):
+
+```js
+chrome.storage.local.get(null).then((all) => { const keep = ["settings", "modelProviders", "activeModelProviderId", "visibleModels", "shortcuts", "voiceSettings", "relay.modelProfiles.v1", "rove.modelOverrides.v1", "modelApiKey", "modelProviderKeys", "voiceApiKey"]; const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify({ format: "rove-settings-backup", version: 1, storage: Object.fromEntries(Object.entries(all).filter(([key]) => keep.includes(key))) })], { type: "application/json" })); a.download = "rove-old-settings.json"; a.click(); });
+```
+
+2. In the **new** Rove, go to **Settings > Model > Backup > Restore from file** and choose that file. Rove reloads with your settings.
+3. Remove the old Rove in `chrome://extensions`.
 
 ### Option 2: clone the repository
 
@@ -56,7 +73,7 @@ Load `extension` as in steps 3 to 5. `npm run package` also produces `release/ro
 ### First run
 
 1. Open Rove's side panel and go to **Settings** (the sliders icon, top right).
-2. Under **Language model**, enter your endpoint's base URL and API key. For example `https://api.openai.com/v1`, `https://openrouter.ai/api/v1`, or `http://127.0.0.1:8080/v1` for a local server. Local servers can leave the key empty.
+2. Under **Language model**, enter your endpoint's base URL and API key. For example `https://api.openai.com/v1`, `https://openrouter.ai/api/v1`, or `http://127.0.0.1:8080/v1` for a local server. Local servers can leave the key empty. For Gemini, pick **+ Add Google AI Studio (Gemini)** or **+ Add Vertex AI (Gemini)** (an express-mode API key) in the provider menu.
 3. Choose a model from the list. It must support tool calling. Press **Save changes**.
 4. Open an ordinary web page, pick its tab at the top of the panel and type a task.
 
@@ -98,6 +115,7 @@ Rove cannot control Chrome's own pages (`chrome://…`), the Chrome Web Store or
 
 - **Drive real pages.** Frame-aware page reading, native clicks and typing, forms and selects, hover and drag, scrolling, screenshots, dialogs, tabs and downloads. Generic JavaScript, raw DevTools commands and file upload exist but start switched off.
 - **Run up to three tasks at once,** each with its own tabs, while you keep browsing.
+- **Search the web** through Exa, Tavily or Parallel with your own key (**Settings > Tools > Web search**).
 - **Reuse prompts.** Standing instructions apply to every task, and a `/` menu inserts saved prompts.
 - **Attach context.** Add images, text files or a screenshot of the current tab.
 - **Dictate.** Speak your task with Chrome's built-in speech recognition, or with a Whisper-compatible endpoint of your choice.
@@ -121,7 +139,8 @@ Web pages are untrusted. Rove tells the model so, but the settings below are wha
 | Problem | What to do |
 | --- | --- |
 | The extension does not load | Check that you chose the folder that contains `manifest.json`, and that Chrome is version 125 or newer (`chrome://version`). |
-| It stopped working after I moved or deleted the folder | Chrome reads an unpacked extension from its folder. Put it back, or remove Rove and load the new location. |
+| It stopped working after I moved or deleted the folder | Chrome reads an unpacked extension from its folder. Put it back, or load the new location (Rove keeps its settings). |
+| Loading a new release added a second Rove | That happens once, when updating from 2.6.x or older to 2.7.0 or later. Enter your settings in the new one and remove the old one. |
 | "Choose a model in settings first" | Open Settings, enter your endpoint and key, pick a model and press Save changes. |
 | The model list is empty | The endpoint must expose `GET /models`. Check the URL ends at the API root (for example `…/v1`) and the key is right. Press the refresh button beside the search box. |
 | "This model's endpoint metadata explicitly reports no tool support" | Rove needs tool calling. Choose a model that supports it. |

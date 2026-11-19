@@ -62,11 +62,22 @@ The UI renders turns chronologically and keeps the chat mounted while settings i
 | Normalized settings | `chrome.storage.local` | Persistent extension data; automatic context/reasoning format, streaming and vision |
 | Learned model limits                 | `chrome.storage.local`           | Persistent, indexed by endpoint/credential SHA-256 and model                          |
 | Model API key | Dedicated trusted `chrome.storage.local.modelApiKey` | Persists across worker/browser/extension restarts until explicitly cleared or the extension is uninstalled |
+| Web search keys | `chrome.storage.local.searchApiKeys`, one per search API | Saved with **PUT /api/search-key**; each is sent only to its own API's fixed endpoint (`extension-core/search.ts`) |
 | Run metadata and events              | IndexedDB                        | Persistent history; event records append by run/event ID                              |
 
 Run metadata and new events commit in one IndexedDB transaction. `save` queues writes; `checkpoint`/`flush` awaits completion before requests or actions. Storage failures stop dispatch. The UI loads run summaries first and retrieves complete history when needed. Chunked `rove-rpc` transfers avoid Chrome's per-message size limit for large histories. Event IDs reconcile live updates; a reconnected `rove-events` port receives fresh state.
 
-Credentials never enter settings, history, run exports or API responses. Startup restricts local/session storage to trusted extension contexts, migrates a retained legacy session credential only if no persistent credential exists, then removes the old session entry. Saving an empty key clears the persistent credential; omitting it retains the existing one. Individual runs remain exportable; whole-history backup/import is removed.
+Credentials never enter settings, history, run exports or API responses. Startup restricts local/session storage to trusted extension contexts, migrates a retained legacy session credential only if no persistent credential exists, then removes the old session entry. Saving an empty key clears the persistent credential; omitting it retains the existing one. Individual runs remain exportable; whole-history backup/import is removed. **Settings > Model > Backup** saves and restores settings only (`GET`/`POST /api/backup`): a whitelist of `chrome.storage.local` keys, with the API keys only when asked for; a restore is validated before anything is written, keeps saved keys the file lacks, and then reloads settings, keys, providers and model choices in the running worker (the page reloads itself for voice, saved prompts and display preferences).
+
+The manifest carries a fixed public `key`, so the extension ID is `mklgbmacaelcomgamkccjncffojpfekb` whatever folder it is loaded from, and storage survives loading a new release from a new folder. The matching private key is not in the repository; it is only needed to pack a `.crx` or to keep this ID in the Chrome Web Store. Remove the `key` field from a Web Store upload.
+
+## Model endpoints
+
+Every provider speaks OpenAI Chat Completions except **Vertex AI in express mode** (`aiplatform.googleapis.com`), which accepts an API key only on Gemini's own `streamGenerateContent`. `extension-core/gemini.ts` translates the conversation (system message to `systemInstruction`, tool results to `functionResponse` parts, images to `inlineData`, tools to `parametersJsonSchema`) and folds the answer back into a Chat Completions message, so the agent loop is unchanged. Gemini 3 and later reject a function-call history without its thought signature: Rove keeps the signature in the tool call's `extra_content.google.thought_signature` (the same place Google's OpenAI-compatible endpoint uses, which `model.ts` also preserves for AI Studio) and sends a documented placeholder for calls that came from another provider. Express mode cannot list models, so Rove offers the Gemini models Vertex documents; AI Studio's model list comes from its native `/v1beta/models` for real token limits.
+
+## Side panel
+
+The manifest's side panel is disabled globally at start-up and enabled per tab when the toolbar button (or `Alt+Shift+O`) is clicked on it: `chrome.sidePanel.setOptions({tabId, enabled: true})` then `open({tabId})`, both inside the click. Chrome then hides the panel on other tabs and shows it again on that tab.
 
 ## Trust and permissions
 

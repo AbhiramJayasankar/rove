@@ -13,7 +13,7 @@ import {
   X,
 } from "lucide-react";
 import type { AppState, RunEvent, RunRecord, Settings, TabInfo } from "../shared/types";
-import { DEFAULT_SETTINGS } from "../shared/defaults";
+import { DEFAULT_SETTINGS, GEMINI_STUDIO_BASE_URL, VERTEX_EXPRESS_BASE_URL } from "../shared/defaults";
 import { api, json, type Action, type Page } from "./ui";
 import { RuntimeEventSource as EventSource } from "./transport";
 import Workbench from "./Workbench";
@@ -493,14 +493,18 @@ export default function App() {
     });
   }
   async function changeProvider(id: string, model?: string) {
+    // Each "+ Add" entry in the provider menu starts from one of these.
+    const PROVIDER_PRESETS: Record<string, { name: string; baseUrl: string }> = {
+      "add:openrouter": { name: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
+      "add:gemini": { name: "Google AI Studio", baseUrl: GEMINI_STUDIO_BASE_URL },
+      "add:vertex": { name: "Vertex AI", baseUrl: VERTEX_EXPRESS_BASE_URL },
+      "add:custom": { name: "New provider", baseUrl: "https://api.openai.com/v1" },
+    };
     await action("provider", async () => {
       const add = id.startsWith("add:");
       const result = await api<Pick<AppState, "settings" | "providers" | "activeProviderId" | "hasApiKey" | "modelInfo">>("/api/providers", {
         method: id === "remove" ? "DELETE" : add ? "POST" : "PUT",
-        body: json(id === "remove" ? { id: state?.activeProviderId } : add ? {
-          name: id === "add:openrouter" ? "OpenRouter" : "New provider",
-          baseUrl: id === "add:openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1",
-        } : { id, model }),
+        body: json(id === "remove" ? { id: state?.activeProviderId } : add ? (PROVIDER_PRESETS[id] ?? PROVIDER_PRESETS["add:custom"]) : { id, model }),
       });
       if (id === "remove" && state?.activeProviderId) {
         // Drop the removed provider's saved "models in chat" choice with it.

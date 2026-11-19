@@ -1,5 +1,6 @@
 import type { ModelInfo, ModelOverride, Settings } from "../shared/types";
 import { completionUrl } from "./model";
+import { geminiModelEntries } from "./gemini";
 import { readBounded } from "./tools";
 import { documentedCapabilities } from "./provider-capabilities";
 import { resolvedReasoningEffort } from "../shared/capabilities";
@@ -227,6 +228,14 @@ export class ModelCatalogue {
   ) {
     this.storage = storage ?? (globalThis as any).chrome?.storage?.local;
   }
+  /** Forget what was read from storage and read it again (after a settings restore). */
+  async reload(): Promise<void> {
+    await this.pendingWrite.catch(() => {});
+    this.initialization = undefined;
+    this.profiles = {};
+    this.overrides = {};
+    await this.init();
+  }
   init(): Promise<void> {
     return (this.initialization ??= (async () => {
       if (!this.storage) return;
@@ -325,6 +334,13 @@ export class ModelCatalogue {
     const cached = this.cache.get(cacheKey);
     if (!refresh && cached && Date.now() - cached.at < 60000)
       return cached.models.map((model) => this.decorate(model, cacheKey, settings.baseUrl));
+    // Google's endpoints list their models in Gemini's own format (or, for Vertex express mode, not at all).
+    const gemini = await geminiModelEntries(settings.baseUrl, key, signal);
+    if (gemini) {
+      const listed = gemini.map((entry) => normalizeModel(entry, settings.baseUrl));
+      this.cache.set(cacheKey, { at: Date.now(), endpoint: settings.baseUrl, models: listed });
+      return listed.map((model) => this.decorate(model, cacheKey, settings.baseUrl));
+    }
     const url = completionUrl(settings.baseUrl).replace(
       /\/chat\/completions$/,
       "/models",

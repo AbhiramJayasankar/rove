@@ -22,4 +22,11 @@ export const DEFAULT_SETTINGS: Settings = {
   backgroundTabs: true,
   groupTabs: true,
   keepGoingOnBarClose: true,
+  webSearch: "off",
 };
+/** The highest numbered step limit; above it the limit is off (stored as 0). */
+export const MAX_STEP_LIMIT = 2000;
+/** Google AI Studio's OpenAI-compatible endpoint. Chat goes through the ordinary Chat Completions path. */
+export const GEMINI_STUDIO_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai";
+/** Vertex AI in express mode: an API key, no project. It speaks only Gemini's own generateContent API. */
+export const VERTEX_EXPRESS_BASE_URL = "https://aiplatform.googleapis.com/v1/publishers/google";

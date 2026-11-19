@@ -104,6 +104,8 @@ export function toolTitle(
       return t("Open page");
     }
   }
+  if (name === "web_search")
+    return args.query ? t("Search “{query}”", { query: String(args.query).slice(0, 80) }) : t("Search the web");
   if (name === "browser_press_key")
     return args.key ? t("Press {key}", { key: args.key }) : t("Press key");
   const titles: Record<string, string> = {

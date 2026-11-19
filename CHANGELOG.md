@@ -2,6 +2,21 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## 2.7.0 - 2026-11-19
+
+### Added
+- **Web search.** Choose Exa, Tavily or Parallel under **Settings > Tools > Web search** and add that service's API key. The model then gets a `web_search` tool that returns titles, links, dates and short excerpts, which is quicker than opening a search engine in a tab. Queries go only to the service you chose, its key is sent only to that service, and results on sites you blocked are left out. **Test search** checks the key. Web search works in New Tab mode too.
+- **Gemini.** The provider menu has **+ Add Google AI Studio (Gemini)** and **+ Add Vertex AI (Gemini)**. AI Studio uses Google's OpenAI-compatible endpoint, and its model list shows each model's real context window, output limit and thinking levels. Vertex AI takes an express-mode API key (no project or service account); Rove talks to it in Gemini's own format, since that is the only one Vertex accepts with an API key, and offers the Gemini models Vertex documents. Gemini's thought signatures are kept with tool calls on both, so multi-step tasks on Gemini 3 and later do not fail.
+- **Backup and restore** under **Settings > Model > Backup**: save your providers, instructions, standing notes, saved prompts, tool and voice settings to a file, with or without API keys, and restore them in any Rove. Chat history is not included.
+
+### Changed
+- **Updating no longer installs a second Rove.** Rove now has a fixed extension ID (`mklgbmacaelcomgamkccjncffojpfekb`), so loading a new release from a new folder updates the Rove you have, and your endpoints, keys, instructions and chats stay. Because the ID changes once with this release, this update still arrives as a new extension. The README's "Updating from 2.6.x or older" has a one-line way to carry your settings over; from 2.7.0 on, updates keep everything.
+- **The step limit goes up to 2,000, and past that it turns off.** With no limit, a task runs until it finishes or you press Stop. Before, the limit stopped at 200.
+- **Rove's side panel stays on the tabs where you open it.** Open it on a tab with the toolbar button or `Alt+Shift+O`, and switching to another tab closes it there; coming back shows it again. Before, the panel stayed open on every tab in the window.
+
+### Fixed
+- The message box no longer comes back tall and empty after you close and reopen the side panel while a task runs. The panel lays out narrow for a moment when it opens, and the box kept the height it measured then; it now measures again when its width changes.
+
 ## 2.6.2 - 2026-11-19
 
 ### Fixed

@@ -1056,3 +1056,34 @@ describe("context calibration against provider counts", () => {
     expect(contextBaseline({ ...DEFAULT_SETTINGS, disabledTools: [...DEFAULT_SETTINGS.disabledTools, "browser_drag", "browser_select"] })).toBeLessThan(base);
   });
 });
+
+describe("step limit and web search", () => {
+  it("a step limit of 0 lets a task run past 2000 steps until the model finishes", async () => {
+    let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => ++calls > 2005 ? response("Done.") : response(null, [call(`w${calls}`, "browser_wait", { milliseconds: 0 })])));
+    const ctx = setup({ maxSteps: 0, vision: false });
+    const run = ctx.engine.start("Keep going.");
+    const end = Date.now() + 60000;
+    while (ctx.engine.activeRunId && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(run.status).toBe("completed");
+    expect(calls).toBe(2006);
+  }, 70000);
+  it("a numbered limit still stops the task", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => response(null, [call("w", "browser_wait", { milliseconds: 0 })])));
+    const ctx = setup({ maxSteps: 3, vision: false });
+    const run = ctx.engine.start("Keep going.");
+    await until(() => !ctx.engine.activeRunId);
+    expect(run.status).toBe("failed");
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
+  });
+  it("web_search gets no tab, and no screenshot follows it", async () => {
+    let step = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => step++ === 0 ? response(null, [call("s", "web_search", { query: "rove" })]) : response("Found it.")));
+    const ctx = setup({ webSearch: "exa" });
+    ctx.execute.mockResolvedValue({ provider: "Exa", query: "rove", results: [] });
+    // New Tab mode: no tab is selected, and search still works.
+    ctx.engine.start("Search.");
+    await until(() => !ctx.engine.activeRunId);
+    expect(ctx.execute.mock.calls.map(([name, args]) => [name, args])).toEqual([["web_search", { query: "rove" }]]);
+  });
+});

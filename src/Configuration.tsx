@@ -17,7 +17,9 @@ import {
   X,
 } from "lucide-react";
 import type { AppState, ModelInfo, Settings } from "../shared/types";
-import { DEFAULT_PROMPT } from "../shared/defaults";
+import { DEFAULT_PROMPT, MAX_STEP_LIMIT } from "../shared/defaults";
+import WebSearchSettings, { useSearchKey } from "./WebSearchSettings";
+import BackupSettings from "./BackupSettings";
 import ModelChecklist from "./ModelChecklist";
 import ModelPicker from "./ModelPicker";
 import ModelAbilities from "./ModelAbilities";
@@ -76,8 +78,9 @@ export default function Configuration({
   const visibility = useModelVisibility(state.activeProviderId);
   const shortcuts = useShortcutsEditor();
   const [listed, setListed] = useState<ModelInfo[]>([]);
-  const saveLocal = async () => { await voice.save(); await visibility.save(); await shortcuts.save(); };
-  const localUnsaved = voice.dirty || visibility.touched || shortcuts.touched;
+  const search = useSearchKey(draft);
+  const saveLocal = async () => { await voice.save(); await visibility.save(); await shortcuts.save(); await search.save(); };
+  const localUnsaved = voice.dirty || visibility.touched || shortcuts.touched || search.dirty;
   useEffect(() => reportUnsaved(localUnsaved, saveLocal));
   useEffect(() => () => reportUnsaved(false, async () => {}), []);
   const [toolSearch, setToolSearch] = useState("");
@@ -145,6 +148,8 @@ export default function Configuration({
                 <ChoiceMenu label={t("Configure provider")} value={state.activeProviderId} options={[
                   ...state.providers.map(provider => ({ value: provider.id, label: provider.name })),
                   { value: "add:openrouter", label: t("+ Add OpenRouter") },
+                  { value: "add:gemini", label: t("+ Add Google AI Studio (Gemini)") },
+                  { value: "add:vertex", label: t("+ Add Vertex AI (Gemini)") },
                   { value: "add:custom", label: t("+ Add compatible provider") },
                 ]} onChange={id => void changeProvider(id)} disabled={!!pending || !!state.activeRunId} />
                 <button type="button" className="icon-button" aria-label={t("Remove provider")} title={t("Remove provider")} disabled={!!pending || !!state.activeRunId || state.providers.length < 2} onClick={() => void changeProvider("remove")}><Trash2 size={15} /></button>
@@ -260,22 +265,30 @@ export default function Configuration({
               <div className="tool-round-limit">
                 <label htmlFor="step-limit">{t("Step limit")}</label>
                 <div className="stepper">
-                  <button type="button" className="icon-button" aria-label={t("Fewer steps")} disabled={!!state.activeRunId || draft.maxSteps <= 1} onClick={() => update("maxSteps", Math.max(1, draft.maxSteps - 1))}><Minus size={14} /></button>
+                  <button type="button" className="icon-button" aria-label={t("Fewer steps")} disabled={!!state.activeRunId || draft.maxSteps === 1} onClick={() => update("maxSteps", draft.maxSteps === 0 ? MAX_STEP_LIMIT : Math.max(1, draft.maxSteps - 1))}><Minus size={14} /></button>
                   <input
                     id="step-limit"
-                    type="number"
-                    min={1}
-                    max={200}
-                    step={1}
-                    value={draft.maxSteps}
+                    type="text"
+                    inputMode="numeric"
+                    aria-describedby="step-limit-note"
+                    value={draft.maxSteps === 0 ? "∞" : String(draft.maxSteps)}
                     disabled={!!state.activeRunId}
-                    onChange={(event) =>
-                      update("maxSteps", Math.max(1, Math.min(200, Math.trunc(event.target.valueAsNumber) || 1)))
-                    }
+                    onChange={(event) => {
+                      const digits = event.target.value.replace(/\D/g, "");
+                      if (!digits) return;
+                      const steps = Number(digits);
+                      // Past the highest number the limit turns off.
+                      update("maxSteps", steps > MAX_STEP_LIMIT ? 0 : Math.max(1, steps));
+                    }}
                   />
-                  <button type="button" className="icon-button" aria-label={t("More steps")} disabled={!!state.activeRunId || draft.maxSteps >= 200} onClick={() => update("maxSteps", Math.min(200, draft.maxSteps + 1))}><Plus size={14} /></button>
+                  <button type="button" className="icon-button" aria-label={draft.maxSteps === MAX_STEP_LIMIT ? t("No step limit") : t("More steps")} disabled={!!state.activeRunId || draft.maxSteps === 0} onClick={() => update("maxSteps", draft.maxSteps >= MAX_STEP_LIMIT ? 0 : draft.maxSteps + 1)}><Plus size={14} /></button>
                 </div>
               </div>
+              <p className="step-limit-note" id="step-limit-note">
+                {draft.maxSteps === 0
+                  ? t("No limit: a task runs until it finishes or you stop it.")
+                  : t("Up to {max} steps per task. Go past {max} to remove the limit.", { max: MAX_STEP_LIMIT })}
+              </p>
             </div>
             <VoiceSettings voice={voice} />
             <div className="field language-field">
@@ -291,6 +304,7 @@ export default function Configuration({
                 onChange={(value) => setPreference(value as LanguagePreference)}
               />
             </div>
+            <BackupSettings busy={!!state.activeRunId} />
             <p className="about-line">
               Rove {__APP_VERSION__}
               <button type="button" className="text-button" onClick={() => whatsNew.current?.showModal()}>
@@ -383,6 +397,7 @@ export default function Configuration({
                 </div>
               ))}
             </div>
+            <WebSearchSettings state={state} draft={draft} update={update} search={search} />
             <div className="settings-heading">
               <h2 className="settings-title">{t("Browser tools")}</h2>
               <span className="tool-count-wrap">

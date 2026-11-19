@@ -12,6 +12,8 @@ import type {
   BrowserTransport,
   BridgeStatus,
 } from "../shared/types";
+import { webSearch, SEARCH_PROVIDERS, SEARCH_PROVIDER_IDS, type SearchProvider } from "../extension-core/search";
+import { hostOf, ruleFor } from "../shared/siteRules";
 import { ExtensionStore } from "./store";
 import { ProviderStore } from "./providers";
 import { settingsSchema, normalizeSettings, record, z } from "./validation";
@@ -30,6 +32,14 @@ import {
   isBlankPage,
 } from "./browser.js";
 
+// Registered at start-up so a click that wakes the worker is not missed.
+chrome.action.onClicked.addListener((tab) => {
+  if (tab.id === undefined) return;
+  // open() must be called inside the click, without awaiting first. Chrome handles the two calls
+  // in order, so the panel is enabled for this tab before it opens.
+  void chrome.sidePanel.setOptions({ tabId: tab.id, path: "index.html", enabled: true });
+  void chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+});
 const store = new ExtensionStore();
 const providers = new ProviderStore();
 const catalogue = new ModelCatalogue();
@@ -59,6 +69,26 @@ const attachmentsSchema = z.array(z.discriminatedUnion("kind", [
 const ports = new Set<chrome.runtime.Port>();
 let apiKey = "";
 const API_KEY_STORAGE_KEY = "modelApiKey";
+// Web search keys, one per search API. Each is sent only to its own provider's fixed endpoint.
+const SEARCH_KEYS_STORAGE_KEY = "searchApiKeys";
+let searchKeys: Partial<Record<SearchProvider, string>> = {};
+const searchKeysSchema = z.object({
+  exa: z.string().trim().max(1000).optional(),
+  tavily: z.string().trim().max(1000).optional(),
+  parallel: z.string().trim().max(1000).optional(),
+}).strict();
+function searchKeyState() {
+  return Object.fromEntries(SEARCH_PROVIDER_IDS.map((id) => [id, !!searchKeys[id]])) as Record<SearchProvider, boolean>;
+}
+async function runWebSearch(args: Record<string, any>, signal?: AbortSignal) {
+  const provider = store.settings.webSearch;
+  if (!provider || provider === "off") throw new Error("Web search is off. The user can choose a search API in Settings > Tools.");
+  const found = await webSearch(provider, searchKeys[provider] ?? "", { query: String(args.query ?? ""), maxResults: args.maxResults }, signal);
+  // Results on sites the user blocked are dropped, so the model is never pointed at them.
+  const rules = store.settings.siteRules ?? [];
+  const results = found.results.filter((result) => ruleFor(rules, hostOf(result.url))?.action !== "block");
+  return { ...found, results, ...(results.length < found.results.length ? { blockedResults: found.results.length - results.length } : {}) };
+}
 let admissions = 0;
 const admitting = new Set<string>();
 // Leases are deliberately not persisted: restart fails every interrupted run.
@@ -244,6 +274,8 @@ function transportForRun(runId?: string): BrowserTransport {
   return {
     status: () => ({ connected: true, browser: "Chrome", tabs: tabsFor(runId) }),
     execute: (action, args, signal) => {
+      // Web search talks to a search API, not the browser, so it does not wait for browser work.
+      if (action === "web_search") return runWebSearch(args, signal);
       const job = async () => {
         signal?.throwIfAborted();
         await store.flush();
@@ -391,6 +423,8 @@ const ready = (async () => {
     await chrome.storage.local.set({ [API_KEY_STORAGE_KEY]: apiKey });
   }
   await chrome.storage.session.remove("apiKey");
+  const savedSearchKeys = searchKeysSchema.safeParse((await chrome.storage.local.get(SEARCH_KEYS_STORAGE_KEY))[SEARCH_KEYS_STORAGE_KEY]);
+  searchKeys = savedSearchKeys.success ? savedSearchKeys.data : {};
   const savedTabChats = (await chrome.storage.session.get(TAB_CHATS_KEY))[TAB_CHATS_KEY];
   if (savedTabChats && typeof savedTabChats === "object") {
     const open = new Set((await chrome.tabs.query({})).map((tab) => String(tab.id)));
@@ -404,7 +438,10 @@ const ready = (async () => {
   await recoverSessions();
   tabLeases.clear();
   await refreshTabs();
-  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
+  // Rove's side panel belongs to the tabs it was opened on: off everywhere else, so switching
+  // to another tab closes it there, and coming back shows it again.
+  await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
+  await chrome.sidePanel.setOptions({ enabled: false });
 })();
 function state(): AppState {
   return {
@@ -412,6 +449,7 @@ function state(): AppState {
     settings: normalizeSettings(store.settings),
     modelInfo: catalogue.peek(store.settings, apiKey),
     hasApiKey: !!apiKey,
+    searchKeys: searchKeyState(),
     bridge: transport.status(),
     runs: store.summaries(),
     activeRunId: engine.activeRunId,
@@ -433,6 +471,7 @@ function settingsResult() {
     providers: providers.summaries(), activeProviderId: providers.activeId,
     settings: normalizeSettings(store.settings),
     hasApiKey: !!apiKey,
+    searchKeys: searchKeyState(),
     modelInfo: catalogue.peek(store.settings, apiKey),
     activeRunIds: engine.activeRunIds,
     activeRunId: engine.activeRunId,
@@ -471,6 +510,79 @@ async function listProviderModels(refresh: boolean, override?: { settings: Setti
   if (results.every(result => result.status === "rejected")) throw new Error(warnings.join(" "));
   return { models, warnings };
 }
+/** What a settings backup carries: everything in Settings, but not chat history. */
+const BACKUP_KEYS = [
+  "settings", "modelProviders", "activeModelProviderId", "visibleModels", "shortcuts", "voiceSettings",
+  "relay.modelProfiles.v1", "rove.modelOverrides.v1",
+];
+const BACKUP_SECRET_KEYS = [API_KEY_STORAGE_KEY, "modelProviderKeys", "voiceApiKey", SEARCH_KEYS_STORAGE_KEY];
+const BACKUP_FORMAT = "rove-settings-backup";
+async function backup(includeKeys: boolean) {
+  const keys = includeKeys ? [...BACKUP_KEYS, ...BACKUP_SECRET_KEYS] : BACKUP_KEYS;
+  return {
+    format: BACKUP_FORMAT,
+    version: 1,
+    app: chrome.runtime.getManifest().version,
+    exportedAt: new Date().toISOString(),
+    includesKeys: includeKeys,
+    storage: await chrome.storage.local.get(keys),
+  };
+}
+function sameOrigin(a: unknown, b: unknown) {
+  try {
+    return new URL(String(a)).origin === new URL(String(b)).origin;
+  } catch {
+    return false;
+  }
+}
+/** Read settings, keys and providers from storage again, as start-up does, after a restore. */
+async function loadSavedState() {
+  const saved = await chrome.storage.local.get([API_KEY_STORAGE_KEY, SEARCH_KEYS_STORAGE_KEY, "settings"]);
+  store.settings = normalizeSettings(saved.settings);
+  apiKey = typeof saved[API_KEY_STORAGE_KEY] === "string" ? saved[API_KEY_STORAGE_KEY] : "";
+  const keys = searchKeysSchema.safeParse(saved[SEARCH_KEYS_STORAGE_KEY]);
+  searchKeys = keys.success ? keys.data : {};
+  // A restored search API without its key here would offer a tool that cannot work.
+  if (store.settings.webSearch !== "off" && !searchKeys[store.settings.webSearch])
+    store.settings = { ...store.settings, webSearch: "off" };
+  await providers.init(store.settings, apiKey);
+  await catalogue.reload();
+  engine.setApprovalMode(store.settings.approvalMode);
+}
+async function restore(body: unknown) {
+  const input = z
+    .object({ format: z.literal(BACKUP_FORMAT, "This file is not a Rove settings backup."), version: z.literal(1), storage: record })
+    .parse(body);
+  const allowed = new Set([...BACKUP_KEYS, ...BACKUP_SECRET_KEYS]);
+  const values = Object.fromEntries(Object.entries(input.storage).filter(([key]) => allowed.has(key)));
+  // Reject a backup the worker could not start from, before anything is written.
+  try {
+    normalizeSettings(values.settings);
+  } catch {
+    throw new Error("This backup's settings are not valid for this version of Rove.");
+  }
+  if (values[SEARCH_KEYS_STORAGE_KEY] !== undefined && !searchKeysSchema.safeParse(values[SEARCH_KEYS_STORAGE_KEY]).success)
+    throw new Error("This backup's web search keys are not valid.");
+  // A backup without keys keeps the keys saved here, but only for the same provider at the same
+  // address: a key must never follow a provider whose address the backup changed.
+  const current = await chrome.storage.local.get(["modelProviders", "modelProviderKeys", "activeModelProviderId", "voiceSettings"]);
+  if (!("modelProviderKeys" in values)) {
+    const before: any[] = Array.isArray(current.modelProviders) ? current.modelProviders : [];
+    const after: any[] = Array.isArray(values.modelProviders) ? values.modelProviders : before;
+    const oldKeys = (current.modelProviderKeys ?? {}) as Record<string, string>;
+    values.modelProviderKeys = Object.fromEntries(after.flatMap((profile) => {
+      const old = before.find((item) => item?.id === profile?.id);
+      return old && oldKeys[profile.id] && sameOrigin(old.baseUrl, profile.baseUrl) ? [[profile.id, oldKeys[profile.id]]] : [];
+    }));
+  }
+  if (!(API_KEY_STORAGE_KEY in values)) {
+    const active = String(values.activeModelProviderId ?? current.activeModelProviderId ?? "");
+    values[API_KEY_STORAGE_KEY] = (values.modelProviderKeys as Record<string, string>)[active] ?? "";
+  }
+  if (!("voiceApiKey" in values) && values.voiceSettings !== undefined && !sameOrigin((current.voiceSettings as any)?.baseUrl, (values.voiceSettings as any)?.baseUrl))
+    values.voiceApiKey = "";
+  await chrome.storage.local.set(values);
+}
 async function route(path: string, method: string, body: any, settingsLocked = false): Promise<any> {
   const url = new URL(path, "https://rove.invalid");
   path = url.pathname;
@@ -504,6 +616,8 @@ async function route(path: string, method: string, body: any, settingsLocked = f
       body.apiKey === undefined
         ? apiKey
         : z.string().max(10000).parse(body.apiKey);
+    if (settings.webSearch !== "off" && !searchKeys[settings.webSearch])
+      throw new Error(`Add an API key for ${SEARCH_PROVIDERS[settings.webSearch].name} to use it for web search, or turn web search off.`);
     await providers.saveCurrent(settings, nextKey, body.providerName === undefined ? undefined : z.string().trim().min(1).max(80).parse(body.providerName));
     store.settings = settings;
     apiKey = nextKey;
@@ -652,6 +766,39 @@ async function route(path: string, method: string, body: any, settingsLocked = f
       admissions--;
       await releaseIdleBrowser();
     }
+  }
+  if (method === "PUT" && path === "/api/search-key") {
+    // Saved on its own, before the settings that choose the provider, like the voice key.
+    const input = z
+      .object({ provider: z.enum(["exa", "tavily", "parallel"]), apiKey: z.string().trim().max(1000) })
+      .strict()
+      .parse(body);
+    const next = { ...searchKeys };
+    if (input.apiKey) next[input.provider] = input.apiKey;
+    else delete next[input.provider];
+    await chrome.storage.local.set({ [SEARCH_KEYS_STORAGE_KEY]: next });
+    searchKeys = next;
+    const result = settingsResult();
+    broadcast("settings", result);
+    return result;
+  }
+  if (method === "POST" && path === "/api/search/test") {
+    const input = z
+      .object({ provider: z.enum(["exa", "tavily", "parallel"]), apiKey: z.string().trim().max(1000).optional() })
+      .strict()
+      .parse(body);
+    const key = input.apiKey || searchKeys[input.provider] || "";
+    const found = await webSearch(input.provider, key, { query: "Chrome extension side panel", maxResults: 2 });
+    return { ok: true, message: `${found.provider} answered with ${found.results.length} result${found.results.length === 1 ? "" : "s"}.` };
+  }
+  if (method === "GET" && path === "/api/backup") return backup(url.searchParams.get("keys") === "1");
+  if (method === "POST" && path === "/api/backup") {
+    if (engine.activeRunIds.length || admissions) throw new Error("Stop the active tasks before restoring settings.");
+    await restore(body);
+    await loadSavedState();
+    const result = settingsResult();
+    broadcast("settings", result);
+    return { ok: true, ...result };
   }
   if (method === "POST" && path === "/api/browser") {
     const input = z

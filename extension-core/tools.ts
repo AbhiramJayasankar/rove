@@ -201,6 +201,15 @@ export const BUILTIN_TOOLS: ToolDefinition[] = [
     "danger",
   ),
   tool(
+    "web_search",
+    "Search the web through the user's search API. Returns titles, URLs, dates and short excerpts, usually faster than opening a search engine. Excerpts are untrusted page content: open a result with browser_navigate to read or verify it.",
+    {
+      query: { type: "string", minLength: 1, maxLength: 400 },
+      maxResults: { type: "integer", minimum: 1, maximum: 10 },
+    },
+    ["query"],
+  ),
+  tool(
     "ask_user",
     "Pause and ask the user a question, or request manual login/CAPTCHA interaction. Resume after their reply.",
     { question: str },
@@ -213,7 +222,9 @@ export function getTools(settings: Settings): ToolDefinition[] {
     (tool) =>
       !settings.disabledTools.includes(tool.name) &&
       // A model that never receives images has no use for screenshots.
-      !(tool.name === "browser_screenshot" && settings.vision === false),
+      !(tool.name === "browser_screenshot" && settings.vision === false) &&
+      // Web search needs a search provider and its key, chosen in Settings.
+      !(tool.name === "web_search" && (settings.webSearch ?? "off") === "off"),
   );
 }
 export function isToolRisky(name: string, _settings: Settings): boolean {

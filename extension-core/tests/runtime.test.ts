@@ -44,6 +44,7 @@ vi.mock("../catalogue", async importOriginal => ({
   ...await importOriginal<typeof import("../catalogue")>(),
   ModelCatalogue: class {
     init = async () => {};
+    reload = async () => {};
     flush = async () => {};
     resolve = async () => null;
     peek = () => null;
@@ -67,6 +68,10 @@ async function start(prompt: string, tabId: number | null) {
 let tabRemoved: (tabId: number) => void = () => {};
 let tabCreated: (tab: Partial<chrome.tabs.Tab>) => void = () => {};
 let openTabs: number[] = [];
+let storage: Record<string, any> = {};
+let actionClicked: (tab: { id?: number }) => void = () => {};
+const sidePanel = { setPanelBehavior: vi.fn(async (_: any) => {}), setOptions: vi.fn(async (_: any) => {}), open: vi.fn(async (_: any) => {}) };
+const reload = vi.fn();
 beforeEach(async () => {
   openTabs = [7, 8, 9];
   fixture.tabs = [7, 8, 9].map(id => ({ id, url: "https://example.com", title: "Page", windowId: 1 }));
@@ -75,16 +80,21 @@ beforeEach(async () => {
   fixture.perform.mockImplementation(async (_action, args, claim) => { claim(args.tabId); return { tabId: args.tabId }; });
   fixture.flush.mockImplementation(async () => {});
   fixture.prepare.mockImplementation(async (id, claim) => { claim(id); return { tabId: id }; });
-  const storage: Record<string, any> = {};
+  storage = {};
   const area = {
     setAccessLevel: async () => {},
-    get: async () => structuredClone(storage),
+    get: async (keys?: string | string[]) => {
+      if (keys === undefined) return structuredClone(storage);
+      const wanted = typeof keys === "string" ? [keys] : keys;
+      return structuredClone(Object.fromEntries(Object.entries(storage).filter(([key]) => wanted.includes(key))));
+    },
     set: async (data: any) => { Object.assign(storage, structuredClone(data)); },
     remove: async (key: string) => { delete storage[key]; },
   };
   vi.stubGlobal("chrome", {
     storage: { local: area, session: area },
-    sidePanel: { setPanelBehavior: async () => {} },
+    sidePanel,
+    action: { onClicked: { addListener: (listener: typeof actionClicked) => { actionClicked = listener; } } },
     tabs: {
       onRemoved: { addListener: (listener: (tabId: number) => void) => { tabRemoved = listener; } },
       onCreated: { addListener: (listener: typeof tabCreated) => { tabCreated = listener; } },
@@ -94,6 +104,8 @@ beforeEach(async () => {
     runtime: {
       id: "rove", getURL: (path: string) => "chrome-extension://rove/" + path,
       getPlatformInfo: vi.fn(async () => ({})),
+      getManifest: () => ({ version: "9.9.9" }),
+      reload,
       onMessage: { addListener: (listener: typeof onMessage) => { onMessage = listener; } },
       onConnect: { addListener: () => {} },
     },
@@ -340,5 +352,100 @@ describe("which tab a task works in", () => {
     const chats = (await rpc("/api/state")).tabChats;
     expect(chats["11"]).toBeUndefined();
     expect(chats["14"]).toBeUndefined();
+  });
+});
+
+describe("side panel per tab", () => {
+  it("is off by default and opens only on the tab whose toolbar button was clicked", async () => {
+    expect(sidePanel.setPanelBehavior).toHaveBeenCalledWith({ openPanelOnActionClick: false });
+    expect(sidePanel.setOptions).toHaveBeenCalledWith({ enabled: false });
+    sidePanel.setOptions.mockClear();
+    actionClicked({ id: 8 });
+    expect(sidePanel.setOptions).toHaveBeenCalledWith({ tabId: 8, path: "index.html", enabled: true });
+    expect(sidePanel.open).toHaveBeenCalledWith({ tabId: 8 });
+    // Enabled before it opens, and both inside the click (no await in between).
+    expect(sidePanel.setOptions.mock.invocationCallOrder[0]).toBeLessThan(sidePanel.open.mock.invocationCallOrder[0]);
+  });
+});
+
+describe("web search", () => {
+  const settingsWith = async (patch: Record<string, unknown>) => ({ ...(await rpc("/api/settings")).settings, ...patch });
+  it("needs a saved key before a search API can be chosen, then searches with it and drops blocked sites", async () => {
+    const refused = await raw("/api/settings", "PUT", await settingsWith({ webSearch: "exa" }));
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toContain("Add an API key for Exa");
+    const keyed = await rpc("/api/search-key", "PUT", { provider: "exa", apiKey: " exa-secret-123 " });
+    expect(keyed.searchKeys).toEqual({ exa: true, tavily: false, parallel: false });
+    expect(storage.searchApiKeys).toEqual({ exa: "exa-secret-123" });
+    await rpc("/api/settings", "PUT", await settingsWith({ webSearch: "exa", siteRules: [{ pattern: "blocked.example", action: "block" }] }));
+    expect((await rpc("/api/state")).searchKeys.exa).toBe(true);
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify({ results: [
+      { title: "Kept", url: "https://kept.example/a", highlights: ["first", "second"], publishedDate: "2026-11-01T00:00:00Z" },
+      { title: "Blocked", url: "https://www.blocked.example/b", text: "hidden" },
+    ] })));
+    const found = await rpc("/api/browser", "POST", { action: "web_search", args: { query: "rove", maxResults: 3 } });
+    const [url, init] = vi.mocked(fetch).mock.calls.at(-1)!;
+    expect(url).toBe("https://api.exa.ai/search");
+    expect((init!.headers as Record<string, string>)["x-api-key"]).toBe("exa-secret-123");
+    expect(JSON.parse(String(init!.body))).toMatchObject({ query: "rove", numResults: 3 });
+    expect(found).toEqual({
+      provider: "Exa", query: "rove", blockedResults: 1,
+      results: [{ title: "Kept", url: "https://kept.example/a", published: "2026-11-01", excerpt: "first … second" }],
+    });
+  });
+  it("a restored search API without its key here is turned off", async () => {
+    const backup = await rpc("/api/backup");
+    backup.storage.settings = { ...backup.storage.settings, webSearch: "parallel" };
+    await rpc("/api/backup", "POST", backup);
+    expect((await rpc("/api/state")).settings.webSearch).toBe("off");
+  });
+  it("clearing a key removes it, and the tool reports search as off when no API is chosen", async () => {
+    await rpc("/api/search-key", "PUT", { provider: "tavily", apiKey: "tvly-1" });
+    await rpc("/api/search-key", "PUT", { provider: "tavily", apiKey: "" });
+    expect(storage.searchApiKeys).toEqual({});
+    const off = await raw("/api/browser", "POST", { action: "web_search", args: { query: "rove" } });
+    expect(off.ok).toBe(false);
+    expect(off.error).toContain("Web search is off");
+  });
+});
+
+describe("settings backup", () => {
+  it("leaves the keys out unless asked, restores a backup in place, and rejects other files", async () => {
+    await rpc("/api/settings", "PUT", { ...(await rpc("/api/settings")).settings, apiKey: "model-key" });
+    await rpc("/api/search-key", "PUT", { provider: "exa", apiKey: "exa-key" });
+    storage.shortcuts = [{ id: "a", name: "Daily", prompt: "Check news" }];
+    const plain = await rpc("/api/backup");
+    expect(plain).toMatchObject({ format: "rove-settings-backup", version: 1, app: "9.9.9", includesKeys: false });
+    expect(plain.storage.shortcuts).toEqual(storage.shortcuts);
+    expect(plain.storage).not.toHaveProperty("modelApiKey");
+    expect(plain.storage).not.toHaveProperty("searchApiKeys");
+    const full = await rpc("/api/backup?keys=1");
+    expect(full.storage).toMatchObject({ modelApiKey: "model-key", searchApiKeys: { exa: "exa-key" } });
+
+    expect((await raw("/api/backup", "POST", { format: "something-else", version: 1, storage: {} })).ok).toBe(false);
+    const broken = await raw("/api/backup", "POST", { ...full, storage: { ...full.storage, settings: { baseUrl: "not a url" } } });
+    expect(broken.ok).toBe(false);
+    expect(broken.error).toContain("not valid");
+
+    const restored = { ...plain, storage: { ...plain.storage, settings: { ...plain.storage.settings, systemPrompt: "Restored prompt", webSearch: "exa" }, unknownKey: 1 } };
+    const answer = await rpc("/api/backup", "POST", restored);
+    expect(answer.ok).toBe(true);
+    // The worker takes the restored settings at once, without restarting the extension.
+    expect(answer.settings).toMatchObject({ systemPrompt: "Restored prompt", webSearch: "exa" });
+    expect((await rpc("/api/state")).settings.systemPrompt).toBe("Restored prompt");
+    expect(storage).not.toHaveProperty("unknownKey");
+    // A backup without keys keeps the ones already saved.
+    expect(storage.modelApiKey).toBe("model-key");
+    expect((await rpc("/api/state")).searchKeys.exa).toBe(true);
+    expect(reload).not.toHaveBeenCalled();
+
+    // The same backup with the provider moved to another address: the key saved here stays behind.
+    const moved = structuredClone(plain);
+    moved.storage.modelProviders = moved.storage.modelProviders.map((profile: any) => ({ ...profile, baseUrl: "https://elsewhere.example/v1" }));
+    moved.storage.settings = { ...moved.storage.settings, baseUrl: "https://elsewhere.example/v1" };
+    await rpc("/api/backup", "POST", moved);
+    expect(storage.modelApiKey).toBe("");
+    expect(Object.values(storage.modelProviderKeys)).not.toContain("model-key");
+    expect((await rpc("/api/state")).hasApiKey).toBe(false);
   });
 });

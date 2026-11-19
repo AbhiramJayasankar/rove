@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DEFAULT_PROMPT, DEFAULT_SETTINGS } from "../shared/defaults";
+import { DEFAULT_PROMPT, DEFAULT_SETTINGS, MAX_STEP_LIMIT } from "../shared/defaults";
 import type { Settings } from "../shared/types";
 const record = z.record(z.string(), z.unknown());
 const automaticSettings = {
@@ -36,7 +36,8 @@ export const settingsSchema = z.preprocess(
       )
       .max(200)
       .default([]),
-    maxSteps: z.number().int().min(1).max(200),
+    // 0 means no step limit.
+    maxSteps: z.number().int().min(0).max(MAX_STEP_LIMIT),
     contextMode: z.literal("auto").default("auto"),
     contextWindow: z
       .number()
@@ -69,6 +70,7 @@ export const settingsSchema = z.preprocess(
     backgroundTabs: z.boolean().default(DEFAULT_SETTINGS.backgroundTabs),
     groupTabs: z.boolean().default(DEFAULT_SETTINGS.groupTabs),
     keepGoingOnBarClose: z.boolean().default(DEFAULT_SETTINGS.keepGoingOnBarClose),
+    webSearch: z.enum(["off", "exa", "tavily", "parallel"]).default("off"),
   }),
 );
 

@@ -56,6 +56,7 @@ export interface Settings {
   memory: string;
   /** Per-site overrides of the approval mode. A rule for a host also covers its subdomains. */
   siteRules: { pattern: string; action: "allow" | "ask" | "block" }[];
+  /** Model turns per task; 0 means no limit. */
   maxSteps: number;
   contextWindow: number;
   contextMode: "auto";
@@ -74,6 +75,8 @@ export interface Settings {
   groupTabs: boolean;
   /** Carry on if the user closes Chrome's "started debugging this browser" bar; Rove reconnects on its next action. */
   keepGoingOnBarClose: boolean;
+  /** Which search API the web_search tool uses; "off" hides the tool. Keys are stored separately. */
+  webSearch: "off" | "exa" | "tavily" | "parallel";
 }
 export interface TabInfo {
   id: number;
@@ -137,6 +140,8 @@ export interface AppState {
   modelInfo?: ModelInfo | null;
   settings: Settings;
   hasApiKey: boolean;
+  /** Which web search APIs have a saved key. */
+  searchKeys?: Partial<Record<"exa" | "tavily" | "parallel", boolean>>;
   bridge: BridgeStatus;
   runs: RunRecord[];
   activeRunId: string | null;

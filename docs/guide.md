@@ -47,7 +47,7 @@ Up to three tasks run at once, each leasing its own tabs. Stop (or Escape) preve
 
 ### Which chat the side panel shows
 
-Chrome keeps one Rove side panel per window, and it follows the tab you are on:
+Rove's side panel opens on the tab where you click Rove's toolbar button (or press `Alt+Shift+O`) and stays with that tab: switch to another tab and it closes there, come back and it is open again. Open it on as many tabs as you like. Within a panel, the chat follows the tab:
 
 - A tab Rove has worked in shows that chat, including tabs Rove opened for it and the tab you started it from. Switching tabs switches chats; a running task keeps going while you look elsewhere, and the strip at the top lists every running task (one that needs you says so).
 - A tab with no chat shows a fresh one that works on that tab. **New task** does the same for the tab you are on. Unsent text stays with the tab you typed it beside.

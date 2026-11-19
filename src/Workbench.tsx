@@ -65,6 +65,11 @@ type Props = {
   /** In the side panel: the tab beside it (null when none). Undefined in a full-page Rove tab. */
   homeTab?: number | null;
 };
+/** Grow the prompt box with its text, up to 120 px. */
+function fitPrompt(input: HTMLTextAreaElement) {
+  input.style.height = "auto";
+  input.style.height = Math.min(input.scrollHeight, 120) + "px";
+}
 export default function Workbench({
   newChatVersion,
   state,
@@ -207,10 +212,23 @@ export default function Workbench({
   }, [question?.id]);
   useEffect(() => {
     const input = promptRef.current;
-    if (!input) return;
-    input.style.height = "auto";
-    input.style.height = Math.min(input.scrollHeight, 120) + "px";
+    if (input) fitPrompt(input);
   }, [prompt, visible]);
+  // A side panel reopened mid-task lays out at a narrow width first, so the box measured then is far
+  // too tall (the placeholder wraps). Measure again whenever the box's width changes.
+  useEffect(() => {
+    const input = promptRef.current;
+    if (!input || typeof ResizeObserver === "undefined") return;
+    let width = input.clientWidth;
+    const observer = new ResizeObserver(() => {
+      if (input.clientWidth === width) return;
+      width = input.clientWidth;
+      fitPrompt(input);
+    });
+    observer.observe(input);
+    return () => observer.disconnect();
+    // The box can mount after the panel does (while the chat loads); attach once it exists.
+  }, [promptRef.current]);
   const slash = slashQuery(prompt);
   const slashMatches = slash === null ? [] : shortcutMatches(shortcuts, slash);
   const slashOpen = slash !== null && !slashDismissed;

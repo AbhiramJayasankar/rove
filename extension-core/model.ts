@@ -1,6 +1,7 @@
 import type { ModelInfo, Settings, ToolDefinition } from "../shared/types";
 import { readBounded } from "./tools";
 import { resolvedReasoningEffort } from "../shared/capabilities";
+import { GeminiAnswer, geminiGenerationConfig, isVertexExpress, toGeminiRequest, vertexStreamUrl } from "./gemini";
 
 export function completionUrl(baseUrl: string): string {
   const url = new URL(baseUrl.trim());
@@ -69,7 +70,7 @@ export class ModelEndpointError extends Error {
   }
   get contextExceeded() {
     return this.status === 400 || this.status === 413
-      ? /context[_ -]length|context[_ -]window|too[_ -]many[_ -]tokens|max(?:imum)?[_ -]context|prompt[_ -]too[_ -]long/i.test(
+      ? /context[_ -]length|context[_ -]window|too[_ -]many[_ -]tokens|max(?:imum)?[_ -]context|prompt[_ -]too[_ -]long|exceeds the maximum number of tokens/i.test(
           `${this.code || ""} ${this.message}`,
         )
       : false;
@@ -87,10 +88,10 @@ export class ModelEndpointError extends Error {
       .map(Number)
       .find((n) => Number.isFinite(n) && n > 0);
     const match = this.message.match(
-      /(?:maximum context length (?:is|of)|context (?:window|limit)(?: is|:| of)?)\s*([\d,]+)\s*tokens/i,
+      /(?:maximum context length (?:is|of)|context (?:window|limit)(?: is|:| of)?)\s*([\d,]+)\s*tokens|maximum number of tokens allowed \(([\d,]+)\)/i,
     );
     return (
-      explicit || (match ? Number(match[1].replaceAll(",", "")) : undefined)
+      explicit || (match ? Number((match[1] ?? match[2]).replaceAll(",", "")) : undefined)
     );
   }
 }
@@ -237,6 +238,9 @@ async function streamedCompletion(
         current.function.name += call.function.name;
       if (call.function?.arguments)
         current.function.arguments += call.function.arguments;
+      // Gemini sends a thought signature here, and needs it back with the call on the next request.
+      if (call.extra_content && typeof call.extra_content === "object")
+        current.extra_content = { ...current.extra_content, ...call.extra_content };
       calls.set(index, current);
     }
     onDelta?.({
@@ -296,7 +300,9 @@ export async function complete(
 ): Promise<{ message: any; usage?: any; requestId?: string }> {
   if (!settings.model.trim())
     throw new Error("Choose a model in Settings before starting a run.");
-  const endpoint = completionUrl(settings.baseUrl);
+  // Vertex AI in express mode takes an API key but only Gemini's own request format.
+  const vertex = isVertexExpress(settings.baseUrl);
+  const endpoint = vertex ? vertexStreamUrl(settings.baseUrl, settings.model) : completionUrl(settings.baseUrl);
   let response: Response;
   // The limit is how long the endpoint may stay silent, not the total time: a long
   // reasoning stream that keeps producing output must not be cut off mid-answer.
@@ -324,10 +330,13 @@ export async function complete(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
+        ...(apiKey ? (vertex ? { "x-goog-api-key": apiKey } : { Authorization: `Bearer ${apiKey}` }) : {}),
         ...sessionHeaders(endpoint, session),
       },
-      body: JSON.stringify({
+      body: JSON.stringify(vertex ? {
+        ...toGeminiRequest(messages, tools),
+        generationConfig: geminiGenerationConfig(settings.model, generationOptions(settings, model)),
+      } : {
         model: settings.model,
         messages,
         stream: settings.stream,
@@ -373,6 +382,8 @@ export async function complete(
     let details: any;
     try {
       details = JSON.parse(redact(raw, apiKey));
+      // Google wraps its errors in a one-item array.
+      if (Array.isArray(details)) details = details[0];
     } catch {
       /* Keep the bounded text error. */
     }
@@ -383,6 +394,15 @@ export async function complete(
       details,
       response.headers.get("x-request-id") || undefined,
     );
+  }
+  if (vertex) {
+    try {
+      return await vertexAnswer(response, onDelta, arm);
+    } catch (error) {
+      if (signal.aborted) throw signal.reason;
+      if (timedOut()) throw silent();
+      throw new Error(redact(error instanceof Error ? error.message : String(error), apiKey));
+    }
   }
   let data: any;
   try {
@@ -454,6 +474,61 @@ export async function complete(
     requestId: response.headers.get("x-request-id") || data.id,
   };
   }
+}
+
+/** Read a Vertex AI generateContent answer, streamed as server-sent events or sent whole. */
+async function vertexAnswer(
+  response: Response,
+  onDelta?: (delta: ModelDelta) => void,
+  onActivity?: () => void,
+): Promise<{ message: any; usage?: any; requestId?: string }> {
+  const answer = new GeminiAnswer();
+  const take = (payload: string) => {
+    if (!payload.trim()) return;
+    let chunk: any;
+    try {
+      chunk = JSON.parse(payload);
+    } catch {
+      throw new Error("Vertex AI returned malformed JSON.");
+    }
+    for (const item of Array.isArray(chunk) ? chunk : [chunk]) answer.add(item, onDelta);
+  };
+  if (response.headers.get("content-type")?.includes("text/event-stream") && response.body) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "", bytes = 0;
+    const consume = (block: string) =>
+      take(block.split(/\r?\n/).filter((line) => line.startsWith("data:")).map((line) => line.slice(5).trimStart()).join("\n"));
+    try {
+      for (;;) {
+        let chunk: ReadableStreamReadResult<Uint8Array>;
+        try {
+          chunk = await reader.read();
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") throw error;
+          throw new Error(`The connection to the model dropped before the answer finished (${error instanceof Error ? error.message : String(error)}). No partial tool calls were executed; try again.`);
+        }
+        if (chunk.done) break;
+        onActivity?.();
+        bytes += chunk.value.byteLength;
+        if (bytes > 16_000_000) throw new Error("Model response exceeds 16 MB.");
+        buffer += decoder.decode(chunk.value, { stream: true });
+        let separator: RegExpExecArray | null;
+        while ((separator = /\r?\n\r?\n/.exec(buffer))) {
+          consume(buffer.slice(0, separator.index));
+          buffer = buffer.slice(separator.index + separator[0].length);
+        }
+      }
+      buffer += decoder.decode();
+      if (buffer.trim()) consume(buffer);
+    } finally {
+      await reader.cancel().catch(() => {});
+      reader.releaseLock();
+    }
+    if (!answer.finish && !answer.calls.length)
+      throw new Error("Model stream ended before completion. No partial tool calls were executed.");
+  } else take(await readBounded(response, 16_000_000));
+  return { message: answer.message(), ...(answer.usage ? { usage: answer.usage } : {}), requestId: answer.id };
 }
 
 export async function testModel(
