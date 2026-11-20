@@ -19,7 +19,7 @@
   color: var(--ink);
   background: var(--canvas);
   --ink: #272923;
-  --muted: #73786c;
+  --muted: #646a5e;
   --canvas: #fcfcf9;
   --surface: #ffffff;
   --line: #dfe4d8;
@@ -34,25 +34,10 @@
   --error-surface: #f7ece8;
   --shadow: #2729231a;
   --backdrop: #27292336;
+  --dot-idle: #b7bcb0;
+  --dot-done: #658151;
+  --dot-wait: #b0873f;
   --display: Syne, sans-serif;
-}
-[data-theme="dark"] {
-  --ink: #e5e8df;
-  --muted: #a1a799;
-  --canvas: #242722;
-  --surface: #2c3029;
-  --line: #454c3d;
-  --accent: #b8c9a5;
-  --accent-hover: #ccdbbc;
-  --accent-soft: #363e2e;
-  --subtle: #2c3127;
-  --on-accent: #20271a;
-  --switch-track: #626a59;
-  --danger: #efa38d;
-  --warning: #d8bb7e;
-  --error-surface: #42312b;
-  --shadow: #00000040;
-  --backdrop: #00000075;
 }
 * {
   box-sizing: border-box;
@@ -319,17 +304,17 @@ input:focus-visible + .switch {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #b7bcb0;
+  background: var(--dot-idle);
   flex-shrink: 0;
 }
 .status-dot.completed {
-  background: #658151;
+  background: var(--dot-done);
 }
 .status-dot.running {
   background: var(--accent);
 }
 .status-dot.awaiting_approval {
-  background: #b0873f;
+  background: var(--dot-wait);
 }
 .status-dot.failed {
   background: var(--danger);
@@ -650,7 +635,7 @@ input:focus-visible + .switch {
   border-radius: 10px;
   padding: 12px 16px;
   font-size: 12px;
-  box-shadow: 0 4px 18px #27292316;
+  box-shadow: 0 4px 18px var(--shadow);
 }
 .loading-state {
   flex: 1;

@@ -19,7 +19,7 @@ import { RuntimeEventSource as EventSource } from "./transport";
 import Workbench from "./Workbench";
 import Configuration from "./Configuration";
 import HistoryDialog from "./HistoryDialog";
-import { applyTheme, readTheme } from "./theme";
+import { useAppearance } from "./theme";
 import { readVisibleModels } from "./modelVisibility";
 import ActiveTasks from "./ActiveTasks";
 import { useHomeTab } from "./homeTab";
@@ -46,9 +46,9 @@ function withActive(old: AppState, id: string, running: boolean): Pick<AppState,
 }
 
 export default function App() {
-  const [theme, setTheme] = useState(readTheme);
+  const appearance = useAppearance();
+  const theme = appearance.mode;
   const t = useT();
-  useEffect(() => applyTheme(theme), [theme]);
   const historyDialog = useRef<HTMLDialogElement>(null);
   const [state, setState] = useState<AppState | null>(null);
   const [draft, setDraft] = useState<Settings>(DEFAULT_SETTINGS);
@@ -546,7 +546,7 @@ export default function App() {
             className="icon-button"
             aria-label={theme === "light" ? t("Use dark mode") : t("Use light mode")}
             title={theme === "light" ? t("Dark mode") : t("Light mode")}
-            onClick={() => setTheme(theme === "light" ? "dark" : "light")}
+            onClick={() => appearance.setPreference(theme === "light" ? "dark" : "light")}
           >
             {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
           </button>
@@ -649,6 +649,7 @@ export default function App() {
             </div>
             {page !== "workbench" && (
               <Configuration
+                appearance={appearance}
                 providerName={providerName}
                 setProviderName={setProviderName}
                 changeProvider={changeProvider}

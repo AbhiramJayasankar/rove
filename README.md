@@ -119,6 +119,7 @@ Rove cannot control Chrome's own pages (`chrome://…`), the Chrome Web Store or
 - **Reuse prompts.** Standing instructions apply to every task, and a `/` menu inserts saved prompts.
 - **Attach context.** Add images, text files or a screenshot of the current tab.
 - **Dictate.** Speak your task with Chrome's built-in speech recognition, or with a Whisper-compatible endpoint of your choice.
+- **Pick a look.** Six colour themes, each in light and dark, under **Settings > Model > Appearance**.
 - **Keep a record.** Every task is saved locally. Export one as JSON or a readable Markdown transcript.
 
 The [user guide](docs/guide.md) covers models and local servers, multiple providers, browsing behavior, site rules, attachments, voice input and storage in detail.

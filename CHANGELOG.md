@@ -2,6 +2,14 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## 2.8.0 - 2026-11-20
+
+### Added
+- **Themes.** **Settings > Model > Appearance** has six colour themes, Sage (the one Rove always had), Harbor, Heather, Ochre, Rosehip and Graphite, each with a light and a dark version. Every swatch is a small Rove chat drawn in that theme's own colours, and picking one repaints Rove at once. Next to them, choose **Match Chrome**, **Light** or **Dark**; the moon and sun button in the header still switches light and dark and keeps your theme. Other open Rove panels follow the change, and **Match Chrome** follows Chrome when it switches between light and dark. Your theme is saved in backups.
+
+### Changed
+- Sage's grey secondary text is a shade darker in light mode, so it meets the WCAG AA contrast ratio (4.5:1) on the page and in settings panels. Every theme is checked for this in the tests.
+
 ## 2.7.0 - 2026-11-19
 
 ### Added

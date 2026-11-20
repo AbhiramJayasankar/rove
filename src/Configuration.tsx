@@ -34,8 +34,11 @@ import VoiceSettings, { useVoiceSettings } from "./VoiceSettings";
 import ChoiceMenu from "./ChoiceMenu";
 import { LANGUAGE_NAMES, useLanguage, useT, type LanguagePreference } from "./i18n";
 import { json, toolTitle, type Action, type Page } from "./ui";
+import ThemeSettings from "./ThemeSettings";
+import type { Appearance } from "./theme";
 
 type Props = {
+  appearance: Appearance;
   providerName: string;
   setProviderName: (name: string) => void;
   changeProvider: (id: string, model?: string) => Promise<void>;
@@ -55,6 +58,7 @@ type Props = {
   reportUnsaved: (unsaved: boolean, save: () => Promise<void>) => void;
 };
 export default function Configuration({
+  appearance,
   providerName,
   setProviderName,
   changeProvider,
@@ -291,6 +295,7 @@ export default function Configuration({
               </p>
             </div>
             <VoiceSettings voice={voice} />
+            <ThemeSettings appearance={appearance} />
             <div className="field language-field">
               <span>{t("Language")}</span>
               <ChoiceMenu

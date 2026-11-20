@@ -82,7 +82,7 @@ Dictation runs inside the composer with a live waveform and timer. On first use 
 ## Storage and privacy
 
 - The model API key persists in `chrome.storage.local`, restricted to Rove's own pages, across Chrome and extension restarts. Settings, history, API responses and run exports exclude it. Saving an empty key clears it.
-- Settings and learned model limits use `chrome.storage.local`. Run metadata and the append-only event history use IndexedDB. Light/dark mode and the free-model filter persist in the extension profile.
+- Settings and learned model limits use `chrome.storage.local`. Run metadata and the append-only event history use IndexedDB. The colour theme, light/dark mode and the free-model filter persist in the extension profile.
 - Page text and screenshots sent to the model go directly from your browser to the endpoint you chose. Rove has no server and sends nothing anywhere else.
 - Web Speech dictation sends audio to Google through Chrome; the Groq backend sends it to the endpoint you configure.
 - The worker attaches the debugger before a run's model requests and releases it afterwards. If Chrome interrupts a run, its history remains and the run is marked failed on recovery; no browser action is resumed automatically. Durable journal checkpoints are written before every model or tool dispatch.

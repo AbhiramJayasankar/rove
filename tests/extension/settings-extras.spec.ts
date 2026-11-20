@@ -101,3 +101,22 @@ test("a backup saved from Settings restores instructions and keys", async () => 
   expect(state.settings.memory).toBe("Notes to keep");
   expect(state.hasApiKey).toBe(true);
 });
+
+test("a theme picked in Settings repaints Rove at once and is kept", async () => {
+  await openSettings("Model");
+  await ui.getByRole("radio", { name: "Dark" }).click();
+  await ui.getByRole("radio", { name: "Harbor" }).click();
+  const ink = () => ui.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--ink").trim());
+  await expect.poll(ink).toBe("#e3e8ee");
+  await expect(ui.getByRole("radio", { name: "Harbor" })).toHaveAttribute("aria-checked", "true");
+  await ui.reload();
+  await expect.poll(ink).toBe("#e3e8ee");
+  expect(await ui.evaluate(() => [document.documentElement.dataset.theme, document.documentElement.dataset.palette])).toEqual(["dark", "harbor"]);
+  // The header switch keeps the theme and changes only light and dark.
+  await ui.getByRole("button", { name: /use light mode/i }).click();
+  await expect.poll(ink).toBe("#222831");
+  await openSettings("Model");
+  await ui.getByRole("radio", { name: "Match Chrome" }).click();
+  await ui.getByRole("radio", { name: "Sage" }).click();
+  expect(await ui.evaluate(() => [localStorage.getItem("relay.theme"), localStorage.getItem("relay.palette")])).toEqual([null, null]);
+});
