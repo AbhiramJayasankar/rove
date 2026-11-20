@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Rove",
-  "version": "2.9.0",
+  "version": "2.9.1",
   "description": "Your browser agent. Your endpoint, prompts, tools and history. Runs entirely in Chrome.",
   "minimum_chrome_version": "125",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsUNQ1+kRIIPxOzyT3gXEkmWxop+8bTq5birgKh7Yc4pv9S2XI4iWj9mybsWR2KtlCHUmoDpkR5ht/U6Am9D60TLTP8VGk0wNIAcCFMVEO9r1m3b4zFLNJY3voWi1/tVMJG0MxuKTEaBiQNfKN4zy+ngpxbwzkMrgwNIDp//GBP1wLdJ36V8GsGCKjr5Eb505FT9U01dRl5i1cn+KSdDkmA1h4J3ebFxwvkdjBj/99rHfu/sEutJnyzbMsWi0YdFRcktI9mLf5kBxw6MZyb4SEJzQnw80kbutF0Ag45FD/uyOHMfP+8mPrl/b/wrSZEOp07tU9GQ+YEKlxkmKfzpWAQIDAQAB",

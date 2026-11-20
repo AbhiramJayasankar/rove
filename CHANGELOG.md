@@ -2,6 +2,11 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## 2.9.1 - 2026-11-20
+
+### Fixed
+- A scheduled task's on/off switch flips as soon as you click it, instead of after Rove has saved the change, and goes back if saving fails.
+
 ## 2.9.0 - 2026-11-20
 
 ### Added

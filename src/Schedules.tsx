@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { CalendarClock, LoaderCircle, Pencil, Play, Plus, Trash2 } from "lucide-react";
 import type { Schedule, ScheduleRepeat } from "../extension-core/schedule";
 import type { AppState } from "../shared/types";
@@ -58,6 +58,12 @@ export default function Schedules({ state, openRun }: { state: AppState; openRun
   const [draft, setDraft] = useState<Draft | null>(null);
   const [working, setWorking] = useState("");
   const [error, setError] = useState("");
+  // A switch flips at once and goes back only if saving fails.
+  const [toggled, setToggled] = useState<Record<string, boolean>>({});
+  // Drop a switch's own value once the saved schedule agrees with it.
+  useEffect(() => {
+    setToggled((old) => Object.fromEntries(Object.entries(old).filter(([id, value]) => state.schedules?.find((item) => item.id === id)?.enabled !== value)));
+  }, [state.schedules]);
   const schedules = [...(state.schedules ?? [])].sort((a, b) => (a.nextAt ?? Infinity) - (b.nextAt ?? Infinity) || a.createdAt - b.createdAt);
   const asks = state.settings.approvalMode !== "never";
 
@@ -234,9 +240,14 @@ export default function Schedules({ state, openRun }: { state: AppState; openRun
                   type="checkbox"
                   role="switch"
                   aria-label={t("{name} is on", { name: name(schedule) })}
-                  checked={schedule.enabled}
+                  checked={toggled[schedule.id] ?? schedule.enabled}
                   disabled={!!working}
-                  onChange={(event) => void call(schedule.id, () => save({ id: schedule.id, name: schedule.name, prompt: schedule.prompt, repeat: schedule.repeat, enabled: event.target.checked }))}
+                  onChange={(event) => {
+                    const enabled = event.target.checked;
+                    setToggled((old) => ({ ...old, [schedule.id]: enabled }));
+                    void call(schedule.id, () => save({ id: schedule.id, name: schedule.name, prompt: schedule.prompt, repeat: schedule.repeat, enabled }))
+                      .then((ok) => { if (!ok) setToggled(({ [schedule.id]: _, ...rest }) => rest); });
+                  }}
                 />
                 <span className="switch" aria-hidden="true" />
               </label>
