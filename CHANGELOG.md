@@ -2,6 +2,13 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## 2.9.0 - 2026-11-20
+
+### Added
+- **Scheduled tasks.** The new calendar button in the header lists tasks Rove runs by itself: once at a date and time, on chosen days at a time (every day, weekdays, or any days you pick), or every few hours. Each one runs in a new tab with your current model while Chrome is open, shows in your history, and Chrome notifies you when it finishes (with the start of its answer), fails, or is waiting for your approval. A time missed while Chrome was closed runs when Chrome opens, if that is within 12 hours. **Run now**, an on/off switch, edit and delete are on each one.
+- **Connected apps (MCP).** Claude Code, Codex, Cursor and other MCP clients can now use Rove. Rove ships a small MCP server (`mcp/rove-mcp.mjs`, Node.js 22 or newer, no installs) that your app starts; switch on **Settings > Tools > Connected apps** and copy the setup command shown there. The app can use Rove's browser tools in your own Chrome, in background tabs Rove groups for it, or hand Rove a whole task with `rove_run_task` and get the answer back. Your site rules apply to every app, tools you switched off stay off, and each half can be turned off. A pairing token keeps other programs from posing as the server, and several apps can be connected at once.
+- **Pitch black** for dark mode under **Settings > Model > Appearance**: the page turns pure black (#000000), so OLED pixels stay off, with every theme's accent kept.
+
 ## 2.8.0 - 2026-11-20
 
 ### Added

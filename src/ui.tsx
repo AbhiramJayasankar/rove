@@ -81,7 +81,8 @@ export function CopyButton({ text, label }: { text: string; label?: string }) {
     </button>
   );
 }
-export type Page = "workbench" | "settings" | "instructions" | "tools";
+export type Page = "workbench" | "settings" | "instructions" | "tools" | "schedules";
+export type SettingsPage = Exclude<Page, "workbench" | "schedules">;
 export type Shot = {
   dataUrl: string;
   url?: string;

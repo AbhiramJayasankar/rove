@@ -119,10 +119,32 @@ Rove cannot control Chrome's own pages (`chrome://…`), the Chrome Web Store or
 - **Reuse prompts.** Standing instructions apply to every task, and a `/` menu inserts saved prompts.
 - **Attach context.** Add images, text files or a screenshot of the current tab.
 - **Dictate.** Speak your task with Chrome's built-in speech recognition, or with a Whisper-compatible endpoint of your choice.
-- **Pick a look.** Six colour themes, each in light and dark, under **Settings > Model > Appearance**.
+- **Run tasks on a schedule.** The calendar button in the header lists scheduled tasks: once, on chosen days at a set time, or every few hours. Rove runs each one by itself in a new tab while Chrome is open, and sends a notification when it finishes or needs you.
+- **Work with Claude Code and other MCP apps.** Turn on **Settings > Tools > Connected apps** and Claude Code, Codex, Cursor or any MCP client can use Rove's browser tools in your Chrome, or hand Rove a whole task. See [Use Rove from Claude Code](#use-rove-from-claude-code-and-other-mcp-apps).
+- **Pick a look.** Six colour themes, each in light and dark, plus pitch black for OLED screens, under **Settings > Model > Appearance**.
 - **Keep a record.** Every task is saved locally. Export one as JSON or a readable Markdown transcript.
 
 The [user guide](docs/guide.md) covers models and local servers, multiple providers, browsing behavior, site rules, attachments, voice input and storage in detail.
+
+## Use Rove from Claude Code and other MCP apps
+
+Rove ships a small MCP server, `mcp/rove-mcp.mjs`, inside the extension folder. Your MCP app starts it, and Rove connects to it on `127.0.0.1`. It needs Node.js 22 or newer and nothing else.
+
+1. In Rove, open **Settings > Tools > Connected apps**, switch on **Let apps like Claude Code use Rove**, and save.
+2. Type the folder you loaded in `chrome://extensions` into **Rove folder**, then copy the Claude Code command shown below it. It looks like this:
+
+```sh
+claude mcp add rove --scope user -e ROVE_TOKEN=<token from Rove> -- node "C:\path\to\Rove\mcp\rove-mcp.mjs"
+```
+
+For other apps, copy the JSON config shown under it instead. Rove connects within 30 seconds of the app starting, and the panel shows which app is connected and what it did lately.
+
+What the app gets:
+
+- **Browser tools** (`browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_screenshot` and the rest): the app drives your Chrome itself, in tabs Rove opens in the background and groups. Tools you switched off in Rove stay off.
+- **Task handoff** (`rove_run_task`, `rove_task_status`, `rove_stop_task`): the app gives Rove a whole task, which Rove's own model carries out in a new tab and answers. The task shows in your history.
+
+Your site rules apply to every app: a blocked site is refused, and an *Ask* site is refused with a note asking you to allow it, since Rove cannot ask you in the middle of the app's call. Each switch can be turned off on its own. The token in the command stops other programs on your computer from posing as Rove's server; **New token** replaces it.
 
 ## Staying safe
 

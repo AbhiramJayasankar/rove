@@ -1433,7 +1433,10 @@ var DEFAULT_SETTINGS = {
   backgroundTabs: true,
   groupTabs: true,
   keepGoingOnBarClose: true,
-  webSearch: "off"
+  webSearch: "off",
+  mcpEnabled: false,
+  mcpBrowserTools: true,
+  mcpRunTasks: true
 };
 var MAX_STEP_LIMIT = 2e3;
 
@@ -23517,7 +23520,10 @@ var settingsSchema = external_exports.preprocess(
     backgroundTabs: external_exports.boolean().default(DEFAULT_SETTINGS.backgroundTabs),
     groupTabs: external_exports.boolean().default(DEFAULT_SETTINGS.groupTabs),
     keepGoingOnBarClose: external_exports.boolean().default(DEFAULT_SETTINGS.keepGoingOnBarClose),
-    webSearch: external_exports.enum(["off", "exa", "tavily", "parallel"]).default("off")
+    webSearch: external_exports.enum(["off", "exa", "tavily", "parallel"]).default("off"),
+    mcpEnabled: external_exports.boolean().default(DEFAULT_SETTINGS.mcpEnabled),
+    mcpBrowserTools: external_exports.boolean().default(DEFAULT_SETTINGS.mcpBrowserTools),
+    mcpRunTasks: external_exports.boolean().default(DEFAULT_SETTINGS.mcpRunTasks)
   })
 );
 function normalizeSettings(value) {
@@ -23643,6 +23649,335 @@ var ExtensionStore = class {
     );
     const { lastEventId: _, ...record3 } = meta3;
     return { ...record3, events: events.map(({ runId: _2, ...event }) => event) };
+  }
+};
+
+// extension-core/schedule.ts
+var MAX_SCHEDULES = 50;
+var MINUTE = 6e4;
+var HOUR = 60 * MINUTE;
+function parseTime(time4) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time4);
+  if (!match) throw new Error(`Invalid time "${time4}". Use HH:MM.`);
+  const [hours, minutes] = [Number(match[1]), Number(match[2])];
+  if (hours > 23 || minutes > 59) throw new Error(`Invalid time "${time4}". Use HH:MM.`);
+  return [hours, minutes];
+}
+function nextRunAfter(repeat, after) {
+  if (repeat.kind === "once") return repeat.at > after ? repeat.at : void 0;
+  if (repeat.kind === "hours") {
+    const every = Math.max(1, Math.min(168, Math.round(repeat.hours))) * HOUR;
+    if (repeat.start > after) return repeat.start;
+    return repeat.start + (Math.floor((after - repeat.start) / every) + 1) * every;
+  }
+  const days = [...new Set(repeat.days)].filter((day) => Number.isInteger(day) && day >= 0 && day <= 6);
+  if (!days.length) return void 0;
+  const [hours, minutes] = parseTime(repeat.time);
+  const base = new Date(after);
+  for (let offset = 0; offset <= 8; offset++) {
+    const candidate = new Date(base.getFullYear(), base.getMonth(), base.getDate() + offset, hours, minutes, 0, 0);
+    if (candidate.getTime() > after && days.includes(candidate.getDay())) return candidate.getTime();
+  }
+  return void 0;
+}
+function scheduleName(schedule) {
+  const name = schedule.name.trim() || schedule.prompt.trim().split("\n")[0];
+  return name.length > 80 ? `${name.slice(0, 79)}\u2026` : name;
+}
+
+// extension-src/schedules.ts
+var STORAGE_KEY = "schedules";
+var ALARM_PREFIX = "rove-schedule:";
+var RETRY_MS = 5 * 6e4;
+var RETRY_FOR_MS = 30 * 6e4;
+var LATE_LIMIT_MS = 12 * 60 * 6e4;
+var Scheduler = class {
+  constructor(deps) {
+    this.deps = deps;
+  }
+  deps;
+  schedules = [];
+  retrySince = /* @__PURE__ */ new Map();
+  /** Schedules being started right now, so a second alarm for the same time cannot start them twice. */
+  firing = /* @__PURE__ */ new Set();
+  runs = /* @__PURE__ */ new Map();
+  // runId -> schedule id
+  writing = Promise.resolve();
+  async load() {
+    const saved = (await chrome.storage.local.get(STORAGE_KEY))[STORAGE_KEY];
+    this.schedules = Array.isArray(saved) ? saved : [];
+    for (const schedule of this.schedules)
+      if (schedule.lastRun?.runId && ["running", "awaiting_approval", "awaiting_user"].includes(schedule.lastRun.outcome))
+        schedule.lastRun = { ...schedule.lastRun, outcome: "failed", note: "Rove restarted while it ran." };
+    await this.sync();
+  }
+  /** Make the alarms match storage, and run what came due while Chrome was closed. */
+  async sync(now = Date.now()) {
+    const alarms = await chrome.alarms.getAll();
+    const wanted = /* @__PURE__ */ new Set();
+    for (const schedule of this.schedules) {
+      if (!schedule.enabled) {
+        schedule.nextAt = void 0;
+        continue;
+      }
+      if (schedule.nextAt === void 0) schedule.nextAt = nextRunAfter(schedule.repeat, now);
+      else if (schedule.nextAt <= now) {
+        const missedAt = schedule.nextAt;
+        if (now - missedAt <= LATE_LIMIT_MS) {
+          schedule.nextAt = now + 1e3;
+        } else {
+          schedule.lastRun = { at: missedAt, outcome: "skipped", note: "Chrome was closed at the scheduled time." };
+          schedule.nextAt = nextRunAfter(schedule.repeat, now);
+          if (schedule.repeat.kind === "once") schedule.enabled = false;
+        }
+      }
+      if (schedule.nextAt !== void 0) {
+        wanted.add(ALARM_PREFIX + schedule.id);
+        await chrome.alarms.create(ALARM_PREFIX + schedule.id, { when: Math.max(schedule.nextAt, now + 1e3) });
+      }
+    }
+    for (const alarm of alarms)
+      if (alarm.name.startsWith(ALARM_PREFIX) && !wanted.has(alarm.name)) await chrome.alarms.clear(alarm.name);
+    await this.persist();
+  }
+  async save(input2) {
+    const existing = input2.id ? this.schedules.find((item) => item.id === input2.id) : void 0;
+    if (input2.id && !existing) throw new Error("Scheduled task not found.");
+    if (!existing && this.schedules.length >= MAX_SCHEDULES) throw new Error(`Rove keeps at most ${MAX_SCHEDULES} scheduled tasks.`);
+    const now = Date.now();
+    if (input2.enabled && nextRunAfter(input2.repeat, now) === void 0)
+      throw new Error(input2.repeat.kind === "once" ? "Choose a time in the future." : "Choose at least one day.");
+    const schedule = {
+      ...existing ?? { id: crypto.randomUUID(), createdAt: now },
+      name: input2.name.trim(),
+      prompt: input2.prompt.trim(),
+      repeat: input2.repeat,
+      enabled: input2.enabled,
+      nextAt: void 0
+    };
+    this.schedules = existing ? this.schedules.map((item) => item.id === schedule.id ? schedule : item) : [...this.schedules, schedule];
+    this.retrySince.delete(schedule.id);
+    await this.sync(now);
+    return this.schedules.find((item) => item.id === schedule.id);
+  }
+  async remove(id) {
+    this.schedules = this.schedules.filter((item) => item.id !== id);
+    this.retrySince.delete(id);
+    await chrome.alarms.clear(ALARM_PREFIX + id);
+    await this.persist();
+  }
+  /** Start a schedule's task now, outside its times. */
+  async runNow(id) {
+    const schedule = this.schedules.find((item) => item.id === id);
+    if (!schedule) throw new Error("Scheduled task not found.");
+    if (!this.deps.canStart()) throw new Error("Three tasks are already running. Wait for one to finish.");
+    return this.start(schedule, Date.now(), false);
+  }
+  /** chrome.alarms.onAlarm. Returns false for alarms that are not Rove schedules. */
+  async onAlarm(name) {
+    if (!name.startsWith(ALARM_PREFIX)) return false;
+    const schedule = this.schedules.find((item) => item.id === name.slice(ALARM_PREFIX.length));
+    if (!schedule?.enabled || this.firing.has(schedule.id)) return true;
+    const now = Date.now();
+    if (schedule.nextAt === void 0 || schedule.nextAt > now + 2e3) return true;
+    if (!this.deps.canStart()) {
+      const since = this.retrySince.get(schedule.id) ?? now;
+      this.retrySince.set(schedule.id, since);
+      if (now - since < RETRY_FOR_MS) {
+        schedule.nextAt = now + RETRY_MS;
+        await chrome.alarms.create(name, { when: schedule.nextAt });
+        await this.persist();
+        return true;
+      }
+      this.retrySince.delete(schedule.id);
+      schedule.lastRun = { at: now, outcome: "skipped", note: "Three tasks were already running for 30 minutes." };
+      this.deps.notify(schedule, `Skipped: ${scheduleName(schedule)}`, "Three other Rove tasks were running, so this one did not start.");
+      await this.advance(schedule, now);
+      return true;
+    }
+    this.retrySince.delete(schedule.id);
+    this.firing.add(schedule.id);
+    try {
+      await this.start(schedule, now, true);
+    } finally {
+      this.firing.delete(schedule.id);
+    }
+    return true;
+  }
+  async start(schedule, now, advance) {
+    let runId;
+    try {
+      runId = (await this.deps.startRun(schedule.prompt)).id;
+      this.runs.set(runId, schedule.id);
+      schedule.lastRun = { runId, at: now, outcome: "running" };
+    } catch (error62) {
+      const message = error62 instanceof Error ? error62.message : String(error62);
+      schedule.lastRun = { at: now, outcome: "failed", note: message };
+      this.deps.notify(schedule, `Could not start: ${scheduleName(schedule)}`, message);
+    }
+    if (advance) await this.advance(schedule, now);
+    else await this.persist();
+    return { runId };
+  }
+  async advance(schedule, now) {
+    schedule.nextAt = nextRunAfter(schedule.repeat, now);
+    if (schedule.nextAt === void 0) {
+      if (schedule.repeat.kind === "once") schedule.enabled = false;
+      await chrome.alarms.clear(ALARM_PREFIX + schedule.id);
+    } else await chrome.alarms.create(ALARM_PREFIX + schedule.id, { when: schedule.nextAt });
+    await this.persist();
+  }
+  owns(runId) {
+    return this.runs.has(runId) || this.schedules.some((item) => item.lastRun?.runId === runId);
+  }
+  /** Keep the list's "last run" in step with the task, and tell the user when it needs them or ends. */
+  onRunStatus(runId, status, summary) {
+    const schedule = this.schedules.find((item) => item.id === this.runs.get(runId) || item.lastRun?.runId === runId);
+    if (!schedule?.lastRun || schedule.lastRun.runId !== runId) return;
+    const outcome = status;
+    if (schedule.lastRun.outcome === outcome) return;
+    schedule.lastRun = { ...schedule.lastRun, outcome, ...summary ? { note: summary } : {} };
+    const name = scheduleName(schedule);
+    if (outcome === "completed") this.deps.notify(schedule, `Done: ${name}`, summary || "The scheduled task finished.", runId);
+    else if (outcome === "failed") this.deps.notify(schedule, `Failed: ${name}`, summary || "The scheduled task failed.", runId);
+    else if (outcome === "awaiting_approval") this.deps.notify(schedule, `Waiting for you: ${name}`, "The scheduled task needs your approval to continue.", runId);
+    else if (outcome === "awaiting_user") this.deps.notify(schedule, `Question: ${name}`, summary || "The scheduled task asked you a question.", runId);
+    if (["completed", "failed", "stopped"].includes(outcome)) this.runs.delete(runId);
+    void this.persist();
+  }
+  persist() {
+    const snapshot2 = structuredClone(this.schedules);
+    this.writing = this.writing.then(() => chrome.storage.local.set({ [STORAGE_KEY]: snapshot2 })).catch(() => {
+    });
+    this.deps.changed(snapshot2);
+    return this.writing;
+  }
+};
+
+// extension-src/mcp.ts
+var MCP_PORT = 47821;
+var SCAN_MS = 1e4;
+var PING_MS = 2e4;
+var MCP_ALARM = "rove-mcp-scan";
+var McpBridge = class {
+  constructor(deps) {
+    this.deps = deps;
+  }
+  deps;
+  socket;
+  connecting = false;
+  scanTimer;
+  pingTimer;
+  clients = /* @__PURE__ */ new Map();
+  activity = [];
+  lastTools = "";
+  status() {
+    return { connected: !!this.socket, clients: [...new Set([...this.clients.values()].map((client) => client.name))], activity: this.activity };
+  }
+  /** Turn the connection on or off to match settings; call after settings change and at start-up. */
+  async refresh() {
+    if (this.deps.enabled()) {
+      await chrome.alarms.create(MCP_ALARM, { periodInMinutes: 0.5 });
+      this.scan();
+    } else {
+      await chrome.alarms.clear(MCP_ALARM);
+      clearTimeout(this.scanTimer);
+      this.scanTimer = void 0;
+      this.disconnect();
+    }
+  }
+  /** Tools changed (a setting turned a tool on or off): tell the server. */
+  toolsChanged() {
+    const tools = JSON.stringify(this.deps.tools());
+    if (tools === this.lastTools) return;
+    this.lastTools = tools;
+    this.socket?.send(JSON.stringify({ type: "tools", tools: this.deps.tools() }));
+  }
+  scan() {
+    clearTimeout(this.scanTimer);
+    this.scanTimer = void 0;
+    if (!this.deps.enabled() || this.socket || this.connecting) return;
+    this.connecting = true;
+    let socket;
+    try {
+      socket = new WebSocket(`ws://127.0.0.1:${MCP_PORT}/extension`);
+    } catch {
+      this.connecting = false;
+      return this.later();
+    }
+    let accepted = false;
+    const giveUp = setTimeout(() => socket.close(), 5e3);
+    socket.onmessage = (event) => {
+      let message;
+      try {
+        message = JSON.parse(String(event.data));
+      } catch {
+        return;
+      }
+      if (!accepted) {
+        clearTimeout(giveUp);
+        if (message?.type !== "hello" || message.server !== "rove-mcp" || !this.deps.token() || message.token !== this.deps.token()) {
+          socket.close();
+          return;
+        }
+        accepted = true;
+        this.connecting = false;
+        this.socket = socket;
+        if (message.client?.name) this.clients.set(String(message.client.name), { name: String(message.client.name), version: message.client.version });
+        this.lastTools = JSON.stringify(this.deps.tools());
+        socket.send(JSON.stringify({ type: "ready", version: chrome.runtime.getManifest().version, tools: this.deps.tools() }));
+        this.pingTimer = setInterval(() => socket.send(JSON.stringify({ type: "ping" })), PING_MS);
+        this.deps.changed(this.status());
+        return;
+      }
+      if (message?.type === "client" && message.client?.name) {
+        this.clients.set(String(message.client.name), { name: String(message.client.name), version: message.client.version });
+        this.deps.changed(this.status());
+      } else if (message?.type === "call" && typeof message.id === "string") void this.answer(socket, message);
+    };
+    socket.onclose = () => {
+      clearTimeout(giveUp);
+      if (this.socket === socket) {
+        this.socket = void 0;
+        clearInterval(this.pingTimer);
+        this.clients.clear();
+        this.deps.changed(this.status());
+      }
+      if (!accepted) this.connecting = false;
+      this.later();
+    };
+    socket.onerror = () => {
+    };
+  }
+  later() {
+    if (this.deps.enabled() && !this.scanTimer) this.scanTimer = setTimeout(() => this.scan(), SCAN_MS);
+  }
+  disconnect() {
+    clearInterval(this.pingTimer);
+    const socket = this.socket;
+    this.socket = void 0;
+    this.clients.clear();
+    socket?.close();
+    this.deps.changed(this.status());
+  }
+  async answer(socket, message) {
+    const client = { name: String(message.client?.name || "MCP client"), version: message.client?.version };
+    if (!this.clients.has(client.name)) {
+      this.clients.set(client.name, client);
+    }
+    const entry = { client: client.name, tool: String(message.tool), at: Date.now(), ok: true };
+    let reply;
+    try {
+      const result = await this.deps.call(String(message.tool), message.args && typeof message.args === "object" ? message.args : {}, client);
+      reply = { type: "result", id: message.id, ok: true, result };
+    } catch (error62) {
+      entry.ok = false;
+      entry.error = error62 instanceof Error ? error62.message : String(error62);
+      reply = { type: "result", id: message.id, ok: false, error: entry.error };
+    }
+    this.activity = [entry, ...this.activity].slice(0, 20);
+    this.deps.changed(this.status());
+    if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(reply));
   }
 };
 
@@ -24906,6 +25241,17 @@ chrome.action.onClicked.addListener((tab2) => {
   void chrome.sidePanel.open({ tabId: tab2.id }).catch(() => {
   });
 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === MCP_ALARM) void ready.then(() => mcp.scan()).catch(() => {
+  });
+  else void ready.then(() => scheduler.onAlarm(alarm.name)).catch(() => {
+  });
+});
+chrome.notifications?.onClicked.addListener((notificationId) => {
+  const runId = notificationId.split("|")[1];
+  void chrome.notifications.clear(notificationId);
+  if (runId) void chrome.tabs.create({ url: chrome.runtime.getURL(`index.html?run=${encodeURIComponent(runId)}`) });
+});
 var store = new ExtensionStore();
 var providers = new ProviderStore();
 var catalogue = new ModelCatalogue();
@@ -25083,6 +25429,7 @@ async function releaseRun(runId) {
   }
 }
 async function cleanupIdleBrowser() {
+  if (Date.now() - mcpLastAction < MCP_IDLE_MS) return;
   if (!engine.activeRunIds.length && admissions === 0 && !hasPendingDialogs()) {
     await detachAll();
     tabLeases.clear();
@@ -25187,6 +25534,7 @@ var engine = new AgentEngine({
         activeRunIds: engine.activeRunIds,
         activeRunId: engine.activeRunId
       });
+      if (scheduler.owns(runId)) void runSummary(runId, event.data.status, event.data.message).then((summary) => scheduler.onRunStatus(runId, event.data.status, summary));
       if (["completed", "failed", "stopped"].includes(event.data.status)) {
         queueMicrotask(() => {
           void enqueue(async () => {
@@ -25211,6 +25559,164 @@ var engine = new AgentEngine({
     store.saveRun(run);
     if (first) broadcast("run", run);
   }
+});
+async function runSummary(runId, status, message) {
+  if (status === "failed" && message) return clip(message);
+  if (status !== "completed") return void 0;
+  await store.flush();
+  const run = await store.getRun(runId);
+  const answer = [...run?.events ?? []].reverse().find((event) => event.type === "assistant")?.data.content;
+  return typeof answer === "string" ? clip(answer) : void 0;
+}
+function clip(text, length = 240) {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > length ? `${flat.slice(0, length - 1)}\u2026` : flat;
+}
+var scheduler = new Scheduler({
+  startRun: (prompt) => route("/api/runs", "POST", { prompt, tabId: null }),
+  canStart: () => engine.activeRunIds.length + admissions < MAX_CONCURRENT_RUNS,
+  changed: (schedules) => broadcast("schedules", schedules),
+  notify: (schedule, title, message, runId) => {
+    void chrome.notifications?.create(`${schedule.id}|${runId ?? ""}|${Date.now()}`, {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icons/128.png"),
+      title,
+      message: message || " ",
+      priority: 1
+    }).catch(() => {
+    });
+  }
+});
+var repeatSchema = external_exports.discriminatedUnion("kind", [
+  external_exports.object({ kind: external_exports.literal("once"), at: external_exports.number().int().positive() }).strict(),
+  external_exports.object({ kind: external_exports.literal("days"), time: external_exports.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/, "Use a time like 09:00."), days: external_exports.array(external_exports.number().int().min(0).max(6)).max(7) }).strict(),
+  external_exports.object({ kind: external_exports.literal("hours"), hours: external_exports.number().int().min(1).max(168), start: external_exports.number().int().positive() }).strict()
+]);
+var scheduleSchema = external_exports.object({
+  id: external_exports.string().uuid().optional(),
+  name: external_exports.string().max(120).default(""),
+  prompt: external_exports.string().trim().min(1, "Write what Rove should do.").max(5e4),
+  repeat: repeatSchema,
+  enabled: external_exports.boolean().default(true)
+}).strict();
+var MCP_TOKEN_KEY = "mcpToken";
+var mcpToken = "";
+var newToken = () => [...crypto.getRandomValues(new Uint8Array(18))].map((b) => b.toString(16).padStart(2, "0")).join("");
+var MCP_NO_TAB = /* @__PURE__ */ new Set(["browser_tabs", "browser_wait", "browser_downloads", "browser_save_file", "web_search"]);
+var mcpTabs = /* @__PURE__ */ new Map();
+var mcpLastAction = 0;
+var mcpCleanup;
+var MCP_IDLE_MS = 6e4;
+var RUN_TOOLS = [
+  {
+    name: "rove_run_task",
+    description: "Hand a whole browsing task to Rove, which does it in a new Chrome tab with the user's chosen model and settings, and returns its answer. Waits up to waitSeconds; if the task is still going, call rove_task_status with the runId. The task appears in Rove's history, and the user's approval settings apply.",
+    inputSchema: { type: "object", properties: {
+      prompt: { type: "string", minLength: 1, maxLength: 5e4, description: "The task, as you would type it to Rove." },
+      waitSeconds: { type: "integer", minimum: 0, maximum: 600, default: 120, description: "How long to wait for the answer." }
+    }, required: ["prompt"], additionalProperties: false }
+  },
+  {
+    name: "rove_task_status",
+    description: "The status of a Rove task started with rove_run_task, with its answer once it finishes. Can wait for it to finish.",
+    inputSchema: { type: "object", properties: {
+      runId: { type: "string" },
+      waitSeconds: { type: "integer", minimum: 0, maximum: 600, default: 0 }
+    }, required: ["runId"], additionalProperties: false }
+  },
+  {
+    name: "rove_stop_task",
+    description: "Stop a running Rove task.",
+    inputSchema: { type: "object", properties: { runId: { type: "string" } }, required: ["runId"], additionalProperties: false }
+  }
+];
+function mcpTools() {
+  const settings = store.settings;
+  const browser = settings.mcpBrowserTools ? getTools(settings).filter((tool2) => tool2.name !== "ask_user").map((tool2) => ({
+    name: tool2.name,
+    description: MCP_NO_TAB.has(tool2.name) || tool2.name === "browser_navigate" ? tool2.description : `${tool2.description} Without tabId, acts in the tab you last used.`,
+    inputSchema: tool2.parameters,
+    annotations: { readOnlyHint: tool2.risk === "read", destructiveHint: tool2.risk === "danger" }
+  })) : [];
+  return [...settings.mcpRunTasks ? RUN_TOOLS : [], ...browser];
+}
+async function taskReport(runId, waitSeconds) {
+  const until = Date.now() + Math.max(0, Math.min(600, waitSeconds)) * 1e3;
+  for (; ; ) {
+    const live = store.summaries().find((run2) => run2.id === runId);
+    if (!engine.isActive(runId) || live?.status === "awaiting_approval" || Date.now() >= until) break;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  await store.flush();
+  const run = await store.getRun(runId);
+  if (!run) throw new Error("No Rove task with that runId.");
+  const answer = [...run.events].reverse().find((event) => event.type === "assistant")?.data.content;
+  const error62 = run.status === "failed" ? [...run.events].reverse().find((event) => event.type === "status" && event.data.message)?.data.message : void 0;
+  return {
+    runId,
+    status: run.status,
+    ...typeof answer === "string" && answer ? { answer } : {},
+    ...error62 ? { error: error62 } : {},
+    ...run.status === "awaiting_approval" ? { note: "Rove is waiting for the user to approve an action in its side panel." } : {},
+    ...run.status === "running" ? { note: "Still running. Call rove_task_status with this runId to wait for the answer." } : {}
+  };
+}
+async function mcpCall(tool2, args, client) {
+  const settings = store.settings;
+  if (RUN_TOOLS.some((item) => item.name === tool2)) {
+    if (!settings.mcpRunTasks) throw new Error("Rove's settings do not let connected apps start Rove tasks.");
+    if (tool2 === "rove_run_task") {
+      const prompt = external_exports.string().trim().min(1).max(5e4).parse(args.prompt);
+      const run = await route("/api/runs", "POST", { prompt, tabId: null });
+      return taskReport(run.id, Number.isFinite(args.waitSeconds) ? Number(args.waitSeconds) : 120);
+    }
+    const runId = external_exports.string().min(1).parse(args.runId);
+    if (tool2 === "rove_stop_task") {
+      engine.stop(runId);
+      return taskReport(runId, 0);
+    }
+    return taskReport(runId, Number.isFinite(args.waitSeconds) ? Number(args.waitSeconds) : 0);
+  }
+  if (!settings.mcpBrowserTools) throw new Error("Rove's settings do not let connected apps use the browser tools.");
+  const definition = getTools(settings).find((item) => item.name === tool2 && item.name !== "ask_user");
+  if (!definition) throw new Error(`${tool2} is not available. It may be switched off in Rove's settings.`);
+  const actual = { ...args };
+  const remembered = mcpTabs.get(client.name);
+  if (!MCP_NO_TAB.has(tool2) && actual.tabId == null && !(tool2 === "browser_navigate" && actual.newTab)) {
+    if (remembered === void 0)
+      throw new Error("No tab yet. Open one with browser_navigate and newTab:true, or pick one from browser_tabs and pass its tabId.");
+    actual.tabId = remembered;
+  }
+  const validation = new Validator(definition.parameters).validate(actual);
+  if (!validation.valid) throw new Error(`Invalid arguments: ${JSON.stringify(validation.errors.map((error62) => error62.error))}`);
+  if (tool2 === "web_search") return runWebSearch(actual);
+  await refreshTabs();
+  const host = tool2 === "browser_navigate" ? hostOf2(String(actual.url ?? "")) : MCP_NO_TAB.has(tool2) ? void 0 : hostOf2(tabs.find((tab2) => tab2.id === actual.tabId)?.url ?? "");
+  const rule = ruleFor(settings.siteRules ?? [], host);
+  if (rule?.action === "block") throw new Error(`The user's site rules in Rove block ${host}. Do not retry it or look for another way to reach this site.`);
+  if (rule?.action === "ask") throw new Error(`The user's site rules in Rove say to ask before acting on ${host}. Ask the user to allow ${host} in Rove (Settings > Tools > Sites) first.`);
+  mcpLastAction = Date.now();
+  clearTimeout(mcpCleanup);
+  try {
+    const result = await enqueue(() => perform(tool2, actual, (tabId, info) => {
+      if (busyWithAnotherRun(tabId)) throw new Error(`A Rove task is working in tab ${tabId}. Use another tab, or newTab:true.`);
+      if (info?.created) void groupTab(`mcp:${client.name}`, tabId);
+    }, !MCP_NO_TAB.has(tool2)));
+    if (result && typeof result === "object" && Number.isInteger(result.tabId)) mcpTabs.set(client.name, result.tabId);
+    else if (Number.isInteger(actual.tabId)) mcpTabs.set(client.name, actual.tabId);
+    if (tool2 === "browser_tabs") tabs = result;
+    return result;
+  } finally {
+    mcpLastAction = Date.now();
+    mcpCleanup = setTimeout(() => void releaseIdleBrowser(), MCP_IDLE_MS + 1e3);
+  }
+}
+var mcp = new McpBridge({
+  enabled: () => store.settings.mcpEnabled,
+  token: () => mcpToken,
+  tools: mcpTools,
+  call: mcpCall,
+  changed: (status) => broadcast("mcp", status)
 });
 configureBrowser(() => store.settings);
 setNotifier((type, data) => {
@@ -25267,6 +25773,11 @@ var ready = (async () => {
   await refreshTabs();
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
   await chrome.sidePanel.setOptions({ enabled: false });
+  await scheduler.load();
+  const savedToken = (await chrome.storage.local.get(MCP_TOKEN_KEY))[MCP_TOKEN_KEY];
+  mcpToken = typeof savedToken === "string" && savedToken.length >= 32 ? savedToken : newToken();
+  if (mcpToken !== savedToken) await chrome.storage.local.set({ [MCP_TOKEN_KEY]: mcpToken });
+  await mcp.refresh();
 })();
 function state() {
   return {
@@ -25282,7 +25793,9 @@ function state() {
     activeRunIds: engine.activeRunIds,
     tools: BUILTIN_TOOLS,
     tabChats,
-    contextBaseline: contextBaseline(store.settings)
+    contextBaseline: contextBaseline(store.settings),
+    schedules: scheduler.schedules,
+    mcp: mcp.status()
   };
 }
 function ownPage(sender) {
@@ -25437,6 +25950,8 @@ async function route(path, method, body, settingsLocked = false) {
     store.settings = settings;
     apiKey = nextKey;
     engine.setApprovalMode(settings.approvalMode);
+    await mcp.refresh();
+    mcp.toolsChanged();
     const result = settingsResult();
     broadcast("settings", result);
     return result;
@@ -25590,6 +26105,20 @@ async function route(path, method, body, settingsLocked = false) {
     broadcast("settings", result);
     return { ok: true, ...result };
   }
+  if (method === "GET" && path === "/api/mcp") return { token: mcpToken, port: MCP_PORT, ...mcp.status() };
+  if (method === "POST" && path === "/api/mcp/token") {
+    mcpToken = newToken();
+    await chrome.storage.local.set({ [MCP_TOKEN_KEY]: mcpToken });
+    await mcp.refresh();
+    return { token: mcpToken };
+  }
+  if (method === "GET" && path === "/api/schedules") return scheduler.schedules;
+  if (method === "PUT" && path === "/api/schedules") return scheduler.save(scheduleSchema.parse(body));
+  if (method === "DELETE" && path === "/api/schedules") {
+    await scheduler.remove(external_exports.object({ id: external_exports.string() }).parse(body).id);
+    return { ok: true };
+  }
+  if (method === "POST" && path === "/api/schedules/run") return scheduler.runNow(external_exports.object({ id: external_exports.string() }).parse(body).id);
   if (method === "POST" && path === "/api/browser") {
     const input2 = external_exports.object({ action: external_exports.string(), args: record2.default({}) }).parse(body);
     const definition = BUILTIN_TOOLS.find((tool2) => tool2.name === input2.action);

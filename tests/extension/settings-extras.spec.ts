@@ -120,3 +120,46 @@ test("a theme picked in Settings repaints Rove at once and is kept", async () =>
   await ui.getByRole("radio", { name: "Sage" }).click();
   expect(await ui.evaluate(() => [localStorage.getItem("relay.theme"), localStorage.getItem("relay.palette")])).toEqual([null, null]);
 });
+
+test("pitch black puts dark mode on #000000 and keeps the theme's accent", async () => {
+  await openSettings("Model");
+  await ui.getByRole("radio", { name: "Dark" }).click();
+  await ui.getByRole("radio", { name: "Heather" }).click();
+  const canvas = () => ui.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--canvas").trim());
+  await expect.poll(canvas).toBe("#241f29");
+  await ui.getByRole("switch", { name: "Pitch black in dark mode" }).check();
+  await expect.poll(canvas).toBe("#000000");
+  expect(await ui.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--accent").trim())).toBe("#cdb2e0");
+  // Light mode is unaffected; the setting is kept for the next dark mode.
+  await ui.getByRole("radio", { name: "Light" }).click();
+  await expect.poll(canvas).toBe("#fcfafd");
+  await ui.reload();
+  expect(await ui.evaluate(() => localStorage.getItem("relay.black"))).toBe("1");
+  await openSettings("Model");
+  await ui.getByRole("switch", { name: "Pitch black in dark mode" }).uncheck();
+  await ui.getByRole("radio", { name: "Match Chrome" }).click();
+  await ui.getByRole("radio", { name: "Sage" }).click();
+});
+
+test("a scheduled task is made, turned off and deleted from the Scheduled tasks page", async () => {
+  await ui.goto(base);
+  await ui.getByRole("button", { name: "Scheduled tasks" }).click();
+  await expect(ui.locator(".schedules-empty")).toBeVisible();
+  await ui.getByRole("button", { name: "New schedule" }).click();
+  await ui.getByLabel("What should Rove do?").fill("Check the status page and tell me if anything is down.");
+  await ui.getByLabel("Name (optional)").fill("Status check");
+  for (const day of ["Sat", "Sun"]) await ui.getByRole("button", { name: day, exact: true }).click();
+  await ui.locator('.schedule-when input[type="time"]').fill("07:45");
+  await ui.getByRole("button", { name: "Schedule", exact: true }).click();
+  const card = ui.locator(".schedule-card").filter({ hasText: "Status check" });
+  await expect(card).toContainText("Weekdays at");
+  await expect(card).toContainText("Next:");
+  const [saved] = (await rpc("/api/state")).schedules;
+  expect(saved).toMatchObject({ name: "Status check", enabled: true, repeat: { kind: "days", time: "07:45", days: [1, 2, 3, 4, 5] } });
+  expect(new Date(saved.nextAt).getHours()).toBe(7);
+  await card.getByRole("switch").uncheck();
+  await expect.poll(async () => (await rpc("/api/state")).schedules[0].enabled).toBe(false);
+  ui.once("dialog", (dialog) => void dialog.accept());
+  await card.getByRole("button", { name: "Delete" }).click();
+  await expect.poll(async () => (await rpc("/api/state")).schedules.length).toBe(0);
+});

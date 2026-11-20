@@ -1,7 +1,7 @@
 import type { CSSProperties } from "react";
 import { Check } from "lucide-react";
 import { PALETTES, cssVariables } from "./palettes";
-import type { Appearance, ModePreference } from "./theme";
+import { themeTokens, type Appearance, type ModePreference } from "./theme";
 import { useT } from "./i18n";
 
 const MODES: [ModePreference, string][] = [
@@ -13,7 +13,7 @@ const MODES: [ModePreference, string][] = [
 /** Theme and light/dark choice. Each swatch is a small Rove chat drawn in that theme's own colours. */
 export default function ThemeSettings({ appearance }: { appearance: Appearance }) {
   const t = useT();
-  const { preference, palette, mode, setPreference, setPalette } = appearance;
+  const { preference, palette, mode, black, setPreference, setPalette, setBlack } = appearance;
   return (
     <section className="theme-settings">
       <h2 className="settings-title">{t("Appearance")}</h2>
@@ -32,6 +32,22 @@ export default function ThemeSettings({ appearance }: { appearance: Appearance }
             </button>
           ))}
         </div>
+        <div className="tool-row behavior-row black-row">
+          <div className="behavior-text">
+            <strong>{t("Pitch black in dark mode")}</strong>
+            <small>{t("Pure black backgrounds for OLED screens, where black pixels are switched off.")}</small>
+          </div>
+          <label className="tool-toggle">
+            <input
+              type="checkbox"
+              role="switch"
+              aria-label={t("Pitch black in dark mode")}
+              checked={black}
+              onChange={(event) => setBlack(event.target.checked)}
+            />
+            <span className="switch" aria-hidden="true" />
+          </label>
+        </div>
         <div className="theme-grid" role="radiogroup" aria-label={t("Theme")}>
           {PALETTES.map((option) => {
             const selected = option.id === palette;
@@ -45,7 +61,7 @@ export default function ThemeSettings({ appearance }: { appearance: Appearance }
                 className={`theme-swatch${selected ? " selected" : ""}`}
                 onClick={() => setPalette(option.id)}
               >
-                <span className="theme-preview" style={cssVariables(option[mode]) as CSSProperties} aria-hidden="true">
+                <span className="theme-preview" style={cssVariables(themeTokens(option.id, mode, black)) as CSSProperties} aria-hidden="true">
                   <span className="preview-ask" />
                   <span className="preview-line" />
                   <span className="preview-line short" />

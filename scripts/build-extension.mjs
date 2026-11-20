@@ -25,4 +25,6 @@ const manifest = JSON.parse(await fs.readFile(path.join(root,'extension-src/mani
 manifest.version = version;
 await fs.writeFile(path.join(destination,'manifest.json'), JSON.stringify(manifest, null, 2));
 await fs.cp(path.join(root,'extension-src/icons'),path.join(destination,'icons'),{recursive:true});
+// The MCP server that apps like Claude Code start; it ships inside the extension folder.
+await fs.cp(path.join(root,'extension-src/mcp'),path.join(destination,'mcp'),{recursive:true});
 console.log(`Load unpacked: ${destination}`);

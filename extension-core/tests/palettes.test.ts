@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PALETTES, cssVariables, paletteById } from "../../src/palettes";
+import { PALETTES, cssVariables, paletteById, pitchBlack } from "../../src/palettes";
 
 function luminance(hex: string) {
   const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
@@ -22,8 +22,8 @@ describe("colour themes", () => {
   it("text stays readable (WCAG AA) on every background it sits on", () => {
     const failures: string[] = [];
     for (const palette of PALETTES)
-      for (const mode of ["light", "dark"] as const) {
-        const t = palette[mode];
+      for (const mode of ["light", "dark", "black"] as const) {
+        const t = mode === "black" ? pitchBlack(palette.dark) : palette[mode];
         const pairs: [string, string, string, number][] = [
           ["ink/canvas", t.ink, t.canvas, 7], ["ink/panel", t.ink, t.panel, 7], ["ink/accentSoft", t.ink, t.accentSoft, 7],
           ["muted/canvas", t.muted, t.canvas, 4.5], ["muted/panel", t.muted, t.panel, 4.5], ["muted/field", t.muted, t.field, 4.5],
@@ -36,6 +36,14 @@ describe("colour themes", () => {
         }
       }
     expect(failures).toEqual([]);
+  });
+  it("pitch black puts the page on #000000 and keeps raised surfaces dark", () => {
+    for (const palette of PALETTES) {
+      const black = pitchBlack(palette.dark);
+      expect(black.canvas).toBe("#000000");
+      for (const key of ["surface", "panel", "subtle"] as const) expect(luminance(black[key])).toBeLessThan(0.01);
+      expect(black.accent).toBe(palette.dark.accent);
+    }
   });
   it("maps tokens to CSS custom properties and falls back to Sage", () => {
     expect(cssVariables(PALETTES[0].light)["--accent-hover"]).toBe("#405037");

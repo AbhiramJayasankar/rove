@@ -79,10 +79,32 @@ Settings → Model → Speech to text selects the backend:
 
 Dictation runs inside the composer with a live waveform and timer. On first use Chrome may need a small permission window: choose **Allow** and it closes. If blocked, check Chrome's microphone site settings and your system's microphone permission for Chrome. API clips stay below 25 MB and 10 minutes; Groq free quotas vary. Audio and the voice key stay out of history and exports. Cancelling cannot retract audio already uploaded.
 
+## Scheduled tasks
+
+The calendar button in the header opens **Scheduled tasks**. A scheduled task is a prompt with a time: once at a date and time, on chosen days of the week at a time, or every 1 to 168 hours from a start time. Times are the computer's local time.
+
+- Rove starts the task by itself in a new tab (New Tab mode) with the model and settings in use at that moment, and it appears in history like any other chat.
+- Chrome must be running. Rove keeps its times in `chrome.alarms` and sets them again when Chrome or the extension restarts. A time missed while Chrome was closed runs once when Chrome opens, if that is within 12 hours; an older one is marked skipped.
+- If three tasks are already running, Rove tries again every 5 minutes for 30 minutes, then skips that time.
+- A Chrome notification says when a scheduled task finishes (with the start of its answer), fails, or waits for an approval. Clicking it opens the chat in a Rove tab.
+- Your approval mode applies. With *Ask first*, a scheduled task stops at the first action that needs approval and waits for you; choose Auto-approve for tasks that should run unattended, and use site rules to keep them away from sites they should not touch.
+- **Run now** starts a scheduled task straight away without moving its next time. A one-off turns itself off once it has run.
+
+## Connected apps (MCP)
+
+**Settings > Tools > Connected apps** lets MCP clients such as Claude Code, Codex or Cursor use Rove. It is off until you switch it on.
+
+- The app starts `mcp/rove-mcp.mjs` from the Rove folder (Node.js 22 or newer) over stdio. The script listens on `127.0.0.1:47821`; Rove's service worker connects out to it, every 10 seconds while it is awake and at least every 30 seconds through an alarm, and keeps the connection open with a ping every 20 seconds. Several apps can run at once: the first script owns the port and relays for the others.
+- The script accepts Rove only from Rove's own extension origin, and Rove accepts the script only if it presents the token from Rove's settings (`ROVE_TOKEN`). Web pages cannot reach the script, because browsers always send their own origin.
+- **Browser tools** run in the background in tabs Rove groups for the app. Without a `tabId`, a tool acts in the tab the app used last. Rove keeps the debugger attached for a minute after the app's last action, then lets go.
+- **Task handoff** starts an ordinary Rove task in a new tab and returns its status and answer; `rove_task_status` waits for a running one.
+- Site rules apply to every call: Block refuses, and Ask refuses with a message telling the app to ask you to allow the site, because Rove cannot show you an approval in the middle of the app's call. Rove's approval mode does not apply to direct browser tools; your MCP app's own permission prompts do. Tasks handed to Rove follow Rove's approval mode.
+- The panel lists the connected apps and their last 20 actions. Nothing an app does through the browser tools is added to Rove's chat history.
+
 ## Storage and privacy
 
 - The model API key persists in `chrome.storage.local`, restricted to Rove's own pages, across Chrome and extension restarts. Settings, history, API responses and run exports exclude it. Saving an empty key clears it.
-- Settings and learned model limits use `chrome.storage.local`. Run metadata and the append-only event history use IndexedDB. The colour theme, light/dark mode and the free-model filter persist in the extension profile.
+- Settings and learned model limits use `chrome.storage.local`. Run metadata and the append-only event history use IndexedDB. The colour theme, light/dark mode, pitch black and the free-model filter persist in the extension profile.
 - Page text and screenshots sent to the model go directly from your browser to the endpoint you chose. Rove has no server and sends nothing anywhere else.
 - Web Speech dictation sends audio to Google through Chrome; the Groq backend sends it to the endpoint you configure.
 - The worker attaches the debugger before a run's model requests and releases it afterwards. If Chrome interrupts a run, its history remains and the run is marked failed on recovery; no browser action is resumed automatically. Durable journal checkpoints are written before every model or tool dispatch.

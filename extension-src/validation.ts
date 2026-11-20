@@ -71,6 +71,9 @@ export const settingsSchema = z.preprocess(
     groupTabs: z.boolean().default(DEFAULT_SETTINGS.groupTabs),
     keepGoingOnBarClose: z.boolean().default(DEFAULT_SETTINGS.keepGoingOnBarClose),
     webSearch: z.enum(["off", "exa", "tavily", "parallel"]).default("off"),
+    mcpEnabled: z.boolean().default(DEFAULT_SETTINGS.mcpEnabled),
+    mcpBrowserTools: z.boolean().default(DEFAULT_SETTINGS.mcpBrowserTools),
+    mcpRunTasks: z.boolean().default(DEFAULT_SETTINGS.mcpRunTasks),
   }),
 );
 

@@ -4,7 +4,7 @@ import { api, json } from "./ui";
 import { useT } from "./i18n";
 
 /** Display preferences kept in the page's own storage, carried in the backup too. */
-const UI_KEYS = ["relay.theme", "relay.palette", "rove.language", "relay.freeModels"];
+const UI_KEYS = ["relay.theme", "relay.palette", "relay.black", "rove.language", "relay.freeModels"];
 
 export default function BackupSettings({ busy }: { busy: boolean }) {
   const t = useT();

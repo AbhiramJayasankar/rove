@@ -2,7 +2,7 @@ import { Validator } from "@cfworker/json-schema";
 import { AgentEngine, MAX_CONCURRENT_RUNS, contextBaseline } from "../extension-core/agent";
 import { historyBeforeEdit } from "../extension-core/conversation";
 import { ModelCatalogue, effectiveSettings } from "../extension-core/catalogue";
-import { BUILTIN_TOOLS } from "../extension-core/tools";
+import { BUILTIN_TOOLS, getTools } from "../extension-core/tools";
 import { parseReasoningBody, testModel } from "../extension-core/model";
 import type {
   AppState,
@@ -15,6 +15,9 @@ import type {
 import { webSearch, SEARCH_PROVIDERS, SEARCH_PROVIDER_IDS, type SearchProvider } from "../extension-core/search";
 import { hostOf, ruleFor } from "../shared/siteRules";
 import { ExtensionStore } from "./store";
+import { Scheduler } from "./schedules";
+import { McpBridge, MCP_ALARM, MCP_PORT, type McpClient } from "./mcp";
+import type { Schedule } from "../extension-core/schedule";
 import { ProviderStore } from "./providers";
 import { settingsSchema, normalizeSettings, record, z } from "./validation";
 import {
@@ -39,6 +42,16 @@ chrome.action.onClicked.addListener((tab) => {
   // in order, so the panel is enabled for this tab before it opens.
   void chrome.sidePanel.setOptions({ tabId: tab.id, path: "index.html", enabled: true });
   void chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
+});
+// Registered at start-up too, so an alarm or a notification click that wakes the worker is handled.
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === MCP_ALARM) void ready.then(() => mcp.scan()).catch(() => {});
+  else void ready.then(() => scheduler.onAlarm(alarm.name)).catch(() => {});
+});
+chrome.notifications?.onClicked.addListener((notificationId) => {
+  const runId = notificationId.split("|")[1];
+  void chrome.notifications.clear(notificationId);
+  if (runId) void chrome.tabs.create({ url: chrome.runtime.getURL(`index.html?run=${encodeURIComponent(runId)}`) });
 });
 const store = new ExtensionStore();
 const providers = new ProviderStore();
@@ -237,6 +250,7 @@ async function releaseRun(runId: string) {
   }
 }
 async function cleanupIdleBrowser() {
+  if (Date.now() - mcpLastAction < MCP_IDLE_MS) return;
   if (!engine.activeRunIds.length && admissions === 0 && !hasPendingDialogs()) {
     await detachAll();
     tabLeases.clear();
@@ -350,6 +364,7 @@ const engine = new AgentEngine({
         activeRunIds: engine.activeRunIds,
         activeRunId: engine.activeRunId,
       });
+      if (scheduler.owns(runId)) void runSummary(runId, event.data.status, event.data.message).then((summary) => scheduler.onRunStatus(runId, event.data.status, summary));
       if (["completed", "failed", "stopped"].includes(event.data.status)) {
         queueMicrotask(() => {
           void enqueue(async () => {
@@ -375,6 +390,174 @@ const engine = new AgentEngine({
     store.saveRun(run);
     if (first) broadcast("run", run);
   },
+});
+/** What a scheduled task's notification says: the answer when it finished, the error when it failed. */
+async function runSummary(runId: string, status: string, message?: string) {
+  if (status === "failed" && message) return clip(message);
+  if (status !== "completed") return undefined;
+  await store.flush();
+  const run = await store.getRun(runId);
+  const answer = [...(run?.events ?? [])].reverse().find((event) => event.type === "assistant")?.data.content;
+  return typeof answer === "string" ? clip(answer) : undefined;
+}
+function clip(text: string, length = 240) {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > length ? `${flat.slice(0, length - 1)}…` : flat;
+}
+const scheduler = new Scheduler({
+  startRun: (prompt) => route("/api/runs", "POST", { prompt, tabId: null }),
+  canStart: () => engine.activeRunIds.length + admissions < MAX_CONCURRENT_RUNS,
+  changed: (schedules) => broadcast("schedules", schedules),
+  notify: (schedule, title, message, runId) => {
+    void chrome.notifications?.create(`${schedule.id}|${runId ?? ""}|${Date.now()}`, {
+      type: "basic",
+      iconUrl: chrome.runtime.getURL("icons/128.png"),
+      title,
+      message: message || " ",
+      priority: 1,
+    }).catch(() => {});
+  },
+});
+const repeatSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("once"), at: z.number().int().positive() }).strict(),
+  z.object({ kind: z.literal("days"), time: z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/, "Use a time like 09:00."), days: z.array(z.number().int().min(0).max(6)).max(7) }).strict(),
+  z.object({ kind: z.literal("hours"), hours: z.number().int().min(1).max(168), start: z.number().int().positive() }).strict(),
+]);
+const scheduleSchema = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().max(120).default(""),
+  prompt: z.string().trim().min(1, "Write what Rove should do.").max(50000),
+  repeat: repeatSchema,
+  enabled: z.boolean().default(true),
+}).strict();
+// ---------- Connected apps (MCP) ----------
+const MCP_TOKEN_KEY = "mcpToken";
+let mcpToken = "";
+const newToken = () => [...crypto.getRandomValues(new Uint8Array(18))].map((b) => b.toString(16).padStart(2, "0")).join("");
+// Tools an app can use without a tab. Everything else needs a tabId, or acts in the app's last tab.
+const MCP_NO_TAB = new Set(["browser_tabs", "browser_wait", "browser_downloads", "browser_save_file", "web_search"]);
+const mcpTabs = new Map<string, number>(); // app name -> the tab it last worked in
+let mcpLastAction = 0;
+let mcpCleanup: ReturnType<typeof setTimeout> | undefined;
+const MCP_IDLE_MS = 60_000;
+const RUN_TOOLS = [
+  {
+    name: "rove_run_task",
+    description: "Hand a whole browsing task to Rove, which does it in a new Chrome tab with the user's chosen model and settings, and returns its answer. Waits up to waitSeconds; if the task is still going, call rove_task_status with the runId. The task appears in Rove's history, and the user's approval settings apply.",
+    inputSchema: { type: "object", properties: {
+      prompt: { type: "string", minLength: 1, maxLength: 50000, description: "The task, as you would type it to Rove." },
+      waitSeconds: { type: "integer", minimum: 0, maximum: 600, default: 120, description: "How long to wait for the answer." },
+    }, required: ["prompt"], additionalProperties: false },
+  },
+  {
+    name: "rove_task_status",
+    description: "The status of a Rove task started with rove_run_task, with its answer once it finishes. Can wait for it to finish.",
+    inputSchema: { type: "object", properties: {
+      runId: { type: "string" },
+      waitSeconds: { type: "integer", minimum: 0, maximum: 600, default: 0 },
+    }, required: ["runId"], additionalProperties: false },
+  },
+  {
+    name: "rove_stop_task",
+    description: "Stop a running Rove task.",
+    inputSchema: { type: "object", properties: { runId: { type: "string" } }, required: ["runId"], additionalProperties: false },
+  },
+];
+function mcpTools() {
+  const settings = store.settings;
+  const browser = settings.mcpBrowserTools
+    ? getTools(settings).filter((tool) => tool.name !== "ask_user").map((tool) => ({
+        name: tool.name,
+        description: MCP_NO_TAB.has(tool.name) || tool.name === "browser_navigate"
+          ? tool.description
+          : `${tool.description} Without tabId, acts in the tab you last used.`,
+        inputSchema: tool.parameters,
+        annotations: { readOnlyHint: tool.risk === "read", destructiveHint: tool.risk === "danger" },
+      }))
+    : [];
+  return [...(settings.mcpRunTasks ? RUN_TOOLS : []), ...browser];
+}
+async function taskReport(runId: string, waitSeconds: number) {
+  const until = Date.now() + Math.max(0, Math.min(600, waitSeconds)) * 1000;
+  for (;;) {
+    const live = store.summaries().find((run) => run.id === runId);
+    if (!engine.isActive(runId) || live?.status === "awaiting_approval" || Date.now() >= until) break;
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  await store.flush();
+  const run = await store.getRun(runId);
+  if (!run) throw new Error("No Rove task with that runId.");
+  const answer = [...run.events].reverse().find((event) => event.type === "assistant")?.data.content;
+  const error = run.status === "failed" ? [...run.events].reverse().find((event) => event.type === "status" && event.data.message)?.data.message : undefined;
+  return {
+    runId,
+    status: run.status,
+    ...(typeof answer === "string" && answer ? { answer } : {}),
+    ...(error ? { error } : {}),
+    ...(run.status === "awaiting_approval" ? { note: "Rove is waiting for the user to approve an action in its side panel." } : {}),
+    ...(run.status === "running" ? { note: "Still running. Call rove_task_status with this runId to wait for the answer." } : {}),
+  };
+}
+async function mcpCall(tool: string, args: Record<string, any>, client: McpClient) {
+  const settings = store.settings;
+  if (RUN_TOOLS.some((item) => item.name === tool)) {
+    if (!settings.mcpRunTasks) throw new Error("Rove's settings do not let connected apps start Rove tasks.");
+    if (tool === "rove_run_task") {
+      const prompt = z.string().trim().min(1).max(50000).parse(args.prompt);
+      const run = await route("/api/runs", "POST", { prompt, tabId: null });
+      return taskReport(run.id, Number.isFinite(args.waitSeconds) ? Number(args.waitSeconds) : 120);
+    }
+    const runId = z.string().min(1).parse(args.runId);
+    if (tool === "rove_stop_task") {
+      engine.stop(runId);
+      return taskReport(runId, 0);
+    }
+    return taskReport(runId, Number.isFinite(args.waitSeconds) ? Number(args.waitSeconds) : 0);
+  }
+  if (!settings.mcpBrowserTools) throw new Error("Rove's settings do not let connected apps use the browser tools.");
+  const definition = getTools(settings).find((item) => item.name === tool && item.name !== "ask_user");
+  if (!definition) throw new Error(`${tool} is not available. It may be switched off in Rove's settings.`);
+  const actual: Record<string, any> = { ...args };
+  const remembered = mcpTabs.get(client.name);
+  if (!MCP_NO_TAB.has(tool) && actual.tabId == null && !(tool === "browser_navigate" && actual.newTab)) {
+    if (remembered === undefined)
+      throw new Error("No tab yet. Open one with browser_navigate and newTab:true, or pick one from browser_tabs and pass its tabId.");
+    actual.tabId = remembered;
+  }
+  const validation = new Validator(definition.parameters).validate(actual);
+  if (!validation.valid) throw new Error(`Invalid arguments: ${JSON.stringify(validation.errors.map((error) => error.error))}`);
+  if (tool === "web_search") return runWebSearch(actual);
+  // The user's site rules apply to connected apps too. Rove cannot ask the user mid-call, so "Ask" refuses.
+  await refreshTabs();
+  const host = tool === "browser_navigate" ? hostOf(String(actual.url ?? ""))
+    : MCP_NO_TAB.has(tool) ? undefined
+    : hostOf(tabs.find((tab) => tab.id === actual.tabId)?.url ?? "");
+  const rule = ruleFor(settings.siteRules ?? [], host);
+  if (rule?.action === "block") throw new Error(`The user's site rules in Rove block ${host}. Do not retry it or look for another way to reach this site.`);
+  if (rule?.action === "ask") throw new Error(`The user's site rules in Rove say to ask before acting on ${host}. Ask the user to allow ${host} in Rove (Settings > Tools > Sites) first.`);
+  mcpLastAction = Date.now();
+  clearTimeout(mcpCleanup);
+  try {
+    const result: any = await enqueue(() => perform(tool, actual, (tabId: number, info?: { created?: boolean }) => {
+      if (busyWithAnotherRun(tabId)) throw new Error(`A Rove task is working in tab ${tabId}. Use another tab, or newTab:true.`);
+      if (info?.created) void groupTab(`mcp:${client.name}`, tabId);
+    }, !MCP_NO_TAB.has(tool)));
+    if (result && typeof result === "object" && Number.isInteger(result.tabId)) mcpTabs.set(client.name, result.tabId);
+    else if (Number.isInteger(actual.tabId)) mcpTabs.set(client.name, actual.tabId);
+    if (tool === "browser_tabs") tabs = result;
+    return result;
+  } finally {
+    mcpLastAction = Date.now();
+    // Keep the debugger attached between an app's actions; let go a minute after the last one.
+    mcpCleanup = setTimeout(() => void releaseIdleBrowser(), MCP_IDLE_MS + 1000);
+  }
+}
+const mcp = new McpBridge({
+  enabled: () => store.settings.mcpEnabled,
+  token: () => mcpToken,
+  tools: mcpTools,
+  call: mcpCall,
+  changed: (status) => broadcast("mcp", status),
 });
 // Browser behaviour settings apply to the next action of every task, not just to tasks admitted afterwards.
 configureBrowser(() => store.settings);
@@ -442,6 +625,11 @@ const ready = (async () => {
   // to another tab closes it there, and coming back shows it again.
   await chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: false });
   await chrome.sidePanel.setOptions({ enabled: false });
+  await scheduler.load();
+  const savedToken = (await chrome.storage.local.get(MCP_TOKEN_KEY))[MCP_TOKEN_KEY];
+  mcpToken = typeof savedToken === "string" && savedToken.length >= 32 ? savedToken : newToken();
+  if (mcpToken !== savedToken) await chrome.storage.local.set({ [MCP_TOKEN_KEY]: mcpToken });
+  await mcp.refresh();
 })();
 function state(): AppState {
   return {
@@ -457,6 +645,8 @@ function state(): AppState {
     tools: BUILTIN_TOOLS,
     tabChats,
     contextBaseline: contextBaseline(store.settings),
+    schedules: scheduler.schedules,
+    mcp: mcp.status(),
   };
 }
 function ownPage(sender: chrome.runtime.MessageSender) {
@@ -622,6 +812,8 @@ async function route(path: string, method: string, body: any, settingsLocked = f
     store.settings = settings;
     apiKey = nextKey;
     engine.setApprovalMode(settings.approvalMode);
+    await mcp.refresh();
+    mcp.toolsChanged();
     const result = settingsResult();
     broadcast("settings", result);
     return result;
@@ -800,6 +992,20 @@ async function route(path: string, method: string, body: any, settingsLocked = f
     broadcast("settings", result);
     return { ok: true, ...result };
   }
+  if (method === "GET" && path === "/api/mcp") return { token: mcpToken, port: MCP_PORT, ...mcp.status() };
+  if (method === "POST" && path === "/api/mcp/token") {
+    mcpToken = newToken();
+    await chrome.storage.local.set({ [MCP_TOKEN_KEY]: mcpToken });
+    await mcp.refresh();
+    return { token: mcpToken };
+  }
+  if (method === "GET" && path === "/api/schedules") return scheduler.schedules;
+  if (method === "PUT" && path === "/api/schedules") return scheduler.save(scheduleSchema.parse(body));
+  if (method === "DELETE" && path === "/api/schedules") {
+    await scheduler.remove(z.object({ id: z.string() }).parse(body).id);
+    return { ok: true };
+  }
+  if (method === "POST" && path === "/api/schedules/run") return scheduler.runNow(z.object({ id: z.string() }).parse(body).id);
   if (method === "POST" && path === "/api/browser") {
     const input = z
       .object({ action: z.string(), args: record.default({}) })

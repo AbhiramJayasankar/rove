@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_PALETTE, cssVariables, paletteById, type Mode, type PaletteId } from "./palettes";
+import { DEFAULT_PALETTE, cssVariables, paletteById, pitchBlack, type Mode, type PaletteId, type Tokens } from "./palettes";
 
 /** "system" follows Chrome's light or dark setting. Stored under relay.theme (absent means system). */
 export type ModePreference = Mode | "system";
 const MODE_KEY = "relay.theme";
 const PALETTE_KEY = "relay.palette";
+/** "1" when dark mode should use pure black backgrounds (OLED). */
+const BLACK_KEY = "relay.black";
 
 function read(key: string) {
   try {
@@ -30,16 +32,26 @@ export function readModePreference(): ModePreference {
 export function readPalette(): PaletteId {
   return paletteById(read(PALETTE_KEY)).id;
 }
+export function readBlack(): boolean {
+  return read(BLACK_KEY) === "1";
+}
+/** The colours a theme uses in a mode; dark with pitch black on puts the page on #000000. */
+export function themeTokens(paletteId: PaletteId, mode: Mode, black: boolean): Tokens {
+  const palette = paletteById(paletteId);
+  return mode === "dark" && black ? pitchBlack(palette.dark) : palette[mode];
+}
 export function resolveMode(preference: ModePreference): Mode {
   return preference === "system" ? (systemDark() ? "dark" : "light") : preference;
 }
 
 /** Paint the page with the saved theme and mode. */
-export function applyTheme(preference = readModePreference(), paletteId = readPalette()) {
+export function applyTheme(preference = readModePreference(), paletteId = readPalette(), black = readBlack()) {
   const mode = resolveMode(preference);
-  const tokens = paletteById(paletteId)[mode];
+  const tokens = themeTokens(paletteId, mode, black);
   const root = document.documentElement;
   root.dataset.theme = mode;
+  if (mode === "dark" && black) root.dataset.black = "";
+  else delete root.dataset.black;
   root.dataset.palette = paletteId;
   root.style.colorScheme = mode;
   for (const [name, value] of Object.entries(cssVariables(tokens))) root.style.setProperty(name, value);
@@ -51,15 +63,17 @@ export type Appearance = ReturnType<typeof useAppearance>;
 export function useAppearance() {
   const [preference, setPreferenceState] = useState(readModePreference);
   const [palette, setPaletteState] = useState(readPalette);
+  const [black, setBlackState] = useState(readBlack);
   const [systemMode, setSystemMode] = useState(() => resolveMode("system"));
-  useEffect(() => applyTheme(preference, palette), [preference, palette, systemMode]);
+  useEffect(() => applyTheme(preference, palette, black), [preference, palette, black, systemMode]);
   useEffect(() => {
     const media = matchMedia("(prefers-color-scheme: dark)");
     const onSystem = () => setSystemMode(media.matches ? "dark" : "light");
     const onStorage = (event: StorageEvent) => {
-      if (event.key !== MODE_KEY && event.key !== PALETTE_KEY && event.key !== null) return;
+      if (![MODE_KEY, PALETTE_KEY, BLACK_KEY, null].includes(event.key)) return;
       setPreferenceState(readModePreference());
       setPaletteState(readPalette());
+      setBlackState(readBlack());
     };
     media.addEventListener("change", onSystem);
     addEventListener("storage", onStorage);
@@ -71,10 +85,15 @@ export function useAppearance() {
   return {
     preference,
     palette,
+    black,
     mode: preference === "system" ? systemMode : preference,
     setPreference(next: ModePreference) {
       write(MODE_KEY, next === "system" ? null : next);
       setPreferenceState(next);
+    },
+    setBlack(next: boolean) {
+      write(BLACK_KEY, next ? "1" : null);
+      setBlackState(next);
     },
     setPalette(next: PaletteId) {
       write(PALETTE_KEY, next === DEFAULT_PALETTE ? null : next);

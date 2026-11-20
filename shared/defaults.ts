@@ -23,6 +23,9 @@ export const DEFAULT_SETTINGS: Settings = {
   groupTabs: true,
   keepGoingOnBarClose: true,
   webSearch: "off",
+  mcpEnabled: false,
+  mcpBrowserTools: true,
+  mcpRunTasks: true,
 };
 /** The highest numbered step limit; above it the limit is off (stored as 0). */
 export const MAX_STEP_LIMIT = 2000;

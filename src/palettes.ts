@@ -119,3 +119,26 @@ export function cssVariables(tokens: Tokens): Record<string, string> {
     Object.entries(tokens).map(([key, value]) => [`--${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`, value]),
   );
 }
+
+function scale(hex: string, factor: number) {
+  const channels = [1, 3, 5].map((i) => Math.round(parseInt(hex.slice(i, i + 2), 16) * factor));
+  return `#${channels.map((c) => c.toString(16).padStart(2, "0")).join("")}${hex.slice(7)}`;
+}
+/** A theme's dark set on pure black, for OLED screens: the page background is #000000 (pixels off),
+ *  and raised surfaces keep a trace of the theme's tint so panels still read as panels. */
+export function pitchBlack(tokens: Tokens): Tokens {
+  return {
+    ...tokens,
+    canvas: "#000000",
+    subtle: scale(tokens.subtle, 0.35),
+    surface: scale(tokens.surface, 0.42),
+    panel: scale(tokens.panel, 0.42),
+    field: scale(tokens.field, 0.55),
+    line: scale(tokens.line, 0.7),
+    accentSoft: scale(tokens.accentSoft, 0.65),
+    errorSurface: scale(tokens.errorSurface, 0.6),
+    switchTrack: scale(tokens.switchTrack, 0.85),
+    shadow: "#00000000",
+    backdrop: "#000000b3",
+  };
+}

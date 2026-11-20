@@ -33,8 +33,9 @@ import { useModelVisibility } from "./modelVisibility";
 import VoiceSettings, { useVoiceSettings } from "./VoiceSettings";
 import ChoiceMenu from "./ChoiceMenu";
 import { LANGUAGE_NAMES, useLanguage, useT, type LanguagePreference } from "./i18n";
-import { json, toolTitle, type Action, type Page } from "./ui";
+import { json, toolTitle, type Action, type Page, type SettingsPage } from "./ui";
 import ThemeSettings from "./ThemeSettings";
+import McpSettings from "./McpSettings";
 import type { Appearance } from "./theme";
 
 type Props = {
@@ -45,7 +46,7 @@ type Props = {
   state: AppState;
   draft: Settings;
   update: <K extends keyof Settings>(key: K, value: Settings[K]) => void;
-  page: Exclude<Page, "workbench">;
+  page: SettingsPage;
   setPage: (page: Page) => void;
   pending: string;
   action: Action;
@@ -403,6 +404,7 @@ export default function Configuration({
               ))}
             </div>
             <WebSearchSettings state={state} draft={draft} update={update} search={search} />
+            <McpSettings state={state} draft={draft} update={update} />
             <div className="settings-heading">
               <h2 className="settings-title">{t("Browser tools")}</h2>
               <span className="tool-count-wrap">

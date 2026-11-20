@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Rove",
-  "version": "2.8.0",
+  "version": "2.9.0",
   "description": "Your browser agent. Your endpoint, prompts, tools and history. Runs entirely in Chrome.",
   "minimum_chrome_version": "125",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAsUNQ1+kRIIPxOzyT3gXEkmWxop+8bTq5birgKh7Yc4pv9S2XI4iWj9mybsWR2KtlCHUmoDpkR5ht/U6Am9D60TLTP8VGk0wNIAcCFMVEO9r1m3b4zFLNJY3voWi1/tVMJG0MxuKTEaBiQNfKN4zy+ngpxbwzkMrgwNIDp//GBP1wLdJ36V8GsGCKjr5Eb505FT9U01dRl5i1cn+KSdDkmA1h4J3ebFxwvkdjBj/99rHfu/sEutJnyzbMsWi0YdFRcktI9mLf5kBxw6MZyb4SEJzQnw80kbutF0Ag45FD/uyOHMfP+8mPrl/b/wrSZEOp07tU9GQ+YEKlxkmKfzpWAQIDAQAB",
-  "permissions": ["debugger", "tabs", "tabGroups", "storage", "downloads", "sidePanel", "unlimitedStorage"],
+  "permissions": ["debugger", "tabs", "tabGroups", "storage", "downloads", "sidePanel", "unlimitedStorage", "alarms", "notifications"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "background": { "service_worker": "runtime.js", "type": "module" },
   "side_panel": { "default_path": "index.html" },
@@ -14,6 +14,6 @@
   "action": { "default_title": "Open Rove", "default_icon": { "16":"icons/16.png", "32":"icons/32.png", "48":"icons/48.png", "128":"icons/128.png" } },
   "icons": { "16":"icons/16.png", "32":"icons/32.png", "48":"icons/48.png", "128":"icons/128.png" },
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'self'; connect-src https: http:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'self'; connect-src https: http: ws://127.0.0.1:47821; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
   }
 }

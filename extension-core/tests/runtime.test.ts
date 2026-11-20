@@ -72,7 +72,11 @@ let storage: Record<string, any> = {};
 let actionClicked: (tab: { id?: number }) => void = () => {};
 const sidePanel = { setPanelBehavior: vi.fn(async (_: any) => {}), setOptions: vi.fn(async (_: any) => {}), open: vi.fn(async (_: any) => {}) };
 const reload = vi.fn();
+const alarms = new Map<string, { name: string; scheduledTime: number }>();
+let alarmFired: (alarm: { name: string }) => void = () => {};
+const notifications = { create: vi.fn(async (..._: any[]) => ""), clear: vi.fn(async () => true), onClicked: { addListener: () => {} } };
 beforeEach(async () => {
+  alarms.clear();
   openTabs = [7, 8, 9];
   fixture.tabs = [7, 8, 9].map(id => ({ id, url: "https://example.com", title: "Page", windowId: 1 }));
   vi.resetModules();
@@ -94,6 +98,13 @@ beforeEach(async () => {
   vi.stubGlobal("chrome", {
     storage: { local: area, session: area },
     sidePanel,
+    alarms: {
+      getAll: async () => [...alarms.values()],
+      create: async (name: string, info: { when: number }) => { alarms.set(name, { name, scheduledTime: info.when }); },
+      clear: async (name: string) => alarms.delete(name),
+      onAlarm: { addListener: (listener: typeof alarmFired) => { alarmFired = listener; } },
+    },
+    notifications,
     action: { onClicked: { addListener: (listener: typeof actionClicked) => { actionClicked = listener; } } },
     tabs: {
       onRemoved: { addListener: (listener: (tabId: number) => void) => { tabRemoved = listener; } },
@@ -447,5 +458,69 @@ describe("settings backup", () => {
     expect(storage.modelApiKey).toBe("");
     expect(Object.values(storage.modelProviderKeys)).not.toContain("model-key");
     expect((await rpc("/api/state")).hasApiKey).toBe(false);
+  });
+});
+
+describe("scheduled tasks", () => {
+  const daily = { kind: "days", time: "09:00", days: [0, 1, 2, 3, 4, 5, 6] };
+  it("saves a schedule, sets its alarm and starts it in a new tab when the alarm fires", async () => {
+    const saved = await rpc("/api/schedules", "PUT", { name: "Morning check", prompt: "Read the news", repeat: daily });
+    expect(saved).toMatchObject({ name: "Morning check", enabled: true });
+    expect(saved.nextAt).toBeGreaterThan(Date.now());
+    expect(alarms.get(`rove-schedule:${saved.id}`)?.scheduledTime).toBe(saved.nextAt);
+    expect(storage.schedules).toHaveLength(1);
+    // Make it due, as Chrome does when the alarm's time comes.
+    const due = Date.now() + 300;
+    await rpc("/api/schedules", "PUT", { id: saved.id, name: "Morning check", prompt: "Read the news", repeat: { kind: "hours", hours: 24, start: due } });
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    alarmFired({ name: `rove-schedule:${saved.id}` });
+    await vi.waitFor(async () => expect((await rpc("/api/state")).schedules[0].lastRun?.outcome).toBe("running"));
+    const state = await rpc("/api/state");
+    const runId = state.schedules[0].lastRun.runId;
+    expect(state.activeRunIds).toContain(runId);
+    expect(fixture.prepare).not.toHaveBeenCalled();
+    // The next time moves on a day, and its alarm with it.
+    expect(state.schedules[0].nextAt).toBe(due + 24 * 3600_000);
+    expect(alarms.get(`rove-schedule:${saved.id}`)?.scheduledTime).toBe(due + 24 * 3600_000);
+  });
+  it("refuses a one-off in the past and a schedule with no days", async () => {
+    expect((await raw("/api/schedules", "PUT", { prompt: "x", repeat: { kind: "once", at: Date.now() - 60000 } })).error).toMatch(/future/);
+    expect((await raw("/api/schedules", "PUT", { prompt: "x", repeat: { ...daily, days: [] } })).error).toMatch(/at least one day/);
+    expect((await raw("/api/schedules", "PUT", { prompt: " ", repeat: daily })).ok).toBe(false);
+  });
+  it("turning a schedule off or deleting it clears its alarm", async () => {
+    const saved = await rpc("/api/schedules", "PUT", { prompt: "Check mail", repeat: daily });
+    await rpc("/api/schedules", "PUT", { id: saved.id, name: "", prompt: "Check mail", repeat: daily, enabled: false });
+    expect(alarms.has(`rove-schedule:${saved.id}`)).toBe(false);
+    await rpc("/api/schedules", "PUT", { id: saved.id, name: "", prompt: "Check mail", repeat: daily, enabled: true });
+    expect(alarms.has(`rove-schedule:${saved.id}`)).toBe(true);
+    await rpc("/api/schedules", "DELETE", { id: saved.id });
+    expect(alarms.size).toBe(0);
+    expect((await rpc("/api/state")).schedules).toEqual([]);
+  });
+  it("a duplicate or early alarm for the same time starts the task only once", async () => {
+    const saved = await rpc("/api/schedules", "PUT", { prompt: "Check mail", repeat: { kind: "once", at: Date.now() + 1500 } });
+    await new Promise((resolve) => setTimeout(resolve, 1600));
+    alarmFired({ name: `rove-schedule:${saved.id}` });
+    alarmFired({ name: `rove-schedule:${saved.id}` });
+    await vi.waitFor(async () => expect((await rpc("/api/state")).schedules[0].lastRun?.outcome).toBe("running"));
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    alarmFired({ name: `rove-schedule:${saved.id}` });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect((await rpc("/api/state")).activeRunIds).toHaveLength(1);
+    expect((await rpc("/api/state")).schedules[0].enabled).toBe(false);
+  });
+  it("an alarm that fires before its schedule's time does nothing", async () => {
+    const saved = await rpc("/api/schedules", "PUT", { prompt: "Check mail", repeat: { kind: "days", time: "09:00", days: [0, 1, 2, 3, 4, 5, 6] } });
+    alarmFired({ name: `rove-schedule:${saved.id}` });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect((await rpc("/api/state")).activeRunIds).toHaveLength(0);
+    expect((await rpc("/api/state")).schedules[0].lastRun).toBeUndefined();
+  });
+  it("Run now starts the task without moving its next time", async () => {
+    const saved = await rpc("/api/schedules", "PUT", { prompt: "Check mail", repeat: daily });
+    const { runId } = await rpc("/api/schedules/run", "POST", { id: saved.id });
+    expect((await rpc("/api/state")).activeRunIds).toContain(runId);
+    expect((await rpc("/api/state")).schedules[0].nextAt).toBe(saved.nextAt);
   });
 });

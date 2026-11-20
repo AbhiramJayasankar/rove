@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
+  CalendarClock,
   Check,
   CircleAlert,
   History,
@@ -14,11 +15,12 @@ import {
 } from "lucide-react";
 import type { AppState, RunEvent, RunRecord, Settings, TabInfo } from "../shared/types";
 import { DEFAULT_SETTINGS, GEMINI_STUDIO_BASE_URL, VERTEX_EXPRESS_BASE_URL } from "../shared/defaults";
-import { api, json, type Action, type Page } from "./ui";
+import { api, json, type Action, type Page, type SettingsPage } from "./ui";
 import { RuntimeEventSource as EventSource } from "./transport";
 import Workbench from "./Workbench";
 import Configuration from "./Configuration";
 import HistoryDialog from "./HistoryDialog";
+import Schedules from "./Schedules";
 import { useAppearance } from "./theme";
 import { readVisibleModels } from "./modelVisibility";
 import ActiveTasks from "./ActiveTasks";
@@ -55,6 +57,7 @@ export default function App() {
   const [providerName, setProviderName] = useState("");
   const providerRef = useRef<string | undefined>(undefined);
   const [page, setPage] = useState<Page>("workbench");
+  const settingsOpen = page !== "workbench" && page !== "schedules";
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [newChatVersion, setNewChatVersion] = useState(0);
   const [error, setError] = useState("");
@@ -251,6 +254,14 @@ export default function App() {
             contextWindow: settings.settings.contextWindow,
           }));
         });
+        source.addEventListener("mcp", (event) => {
+          const mcp = JSON.parse((event as MessageEvent).data);
+          setState((old) => (old ? { ...old, mcp } : old));
+        });
+        source.addEventListener("schedules", (event) => {
+          const schedules = JSON.parse((event as MessageEvent).data);
+          setState((old) => (old ? { ...old, schedules } : old));
+        });
         source.addEventListener("tab_chats", (event) => {
           const tabChats = JSON.parse((event as MessageEvent).data);
           setState((old) => (old ? { ...old, tabChats } : old));
@@ -359,6 +370,9 @@ export default function App() {
       pagePlaced.current = true;
       let saved: string | null = null;
       try { saved = sessionStorage.getItem(PAGE_CHAT_KEY); } catch {}
+      // A notification about a scheduled task opens Rove in a tab with ?run=<id>.
+      const linked = new URLSearchParams(location.search).get("run");
+      if (linked && state.runs.some((r) => r.id === linked)) saved = linked;
       setSelectedId(saved && state.runs.some((r) => r.id === saved) ? saved : null);
     }
   }, [!!state, home.ready, home.panel, home.tabId, boundId]);
@@ -432,7 +446,7 @@ export default function App() {
   const pendingLeave = useRef<(() => void) | null>(null);
   const savedProviderName = state?.providers.find((provider) => provider.id === state.activeProviderId)?.name;
   function settingsUnsaved() {
-    if (page === "workbench" || !state) return false;
+    if (page === "workbench" || page === "schedules" || !state) return false;
     return (
       keyChanged ||
       localUnsaved.current.unsaved ||
@@ -551,6 +565,15 @@ export default function App() {
             {theme === "light" ? <Moon size={17} /> : <Sun size={17} />}
           </button>
           <button
+            className={`icon-button ${page === "schedules" ? "selected" : ""}`}
+            aria-label={t("Scheduled tasks")}
+            title={t("Scheduled tasks")}
+            aria-pressed={page === "schedules"}
+            onClick={() => (page === "schedules" ? setPage("workbench") : leaveSettings(() => setPage("schedules")))}
+          >
+            <CalendarClock size={18} />
+          </button>
+          <button
             className="icon-button"
             aria-label={t("Task history")}
             title={t("History")}
@@ -575,12 +598,12 @@ export default function App() {
             </button>
           )}
           <button
-            className={`icon-button ${page !== "workbench" ? "selected" : ""}`}
+            className={`icon-button ${settingsOpen ? "selected" : ""}`}
             aria-label={t("Settings")}
             title={t("Settings")}
-            aria-pressed={page !== "workbench"}
+            aria-pressed={settingsOpen}
             onClick={() =>
-              page === "workbench" ? setPage("settings") : leaveSettings(() => setPage("workbench"))
+              !settingsOpen ? setPage("settings") : leaveSettings(() => setPage("workbench"))
             }
           >
             <Settings2 size={18} />
@@ -647,7 +670,16 @@ export default function App() {
                 visible={page === "workbench"}
               />
             </div>
-            {page !== "workbench" && (
+            {page === "schedules" && (
+              <Schedules
+                state={state}
+                openRun={(id) => {
+                  chooseChat(id);
+                  setPage("workbench");
+                }}
+              />
+            )}
+            {settingsOpen && (
               <Configuration
                 appearance={appearance}
                 providerName={providerName}
@@ -656,7 +688,7 @@ export default function App() {
                 state={state}
                 draft={draft}
                 update={update}
-                page={page}
+                page={page as SettingsPage}
                 setPage={setPage}
                 pending={pending}
                 action={action}

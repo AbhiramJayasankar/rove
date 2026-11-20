@@ -77,6 +77,12 @@ export interface Settings {
   keepGoingOnBarClose: boolean;
   /** Which search API the web_search tool uses; "off" hides the tool. Keys are stored separately. */
   webSearch: "off" | "exa" | "tavily" | "parallel";
+  /** Let MCP clients (Claude Code and others) connect through Rove's MCP server. Off by default. */
+  mcpEnabled: boolean;
+  /** Connected apps may use the browser tools themselves. */
+  mcpBrowserTools: boolean;
+  /** Connected apps may hand whole tasks to Rove's own model. */
+  mcpRunTasks: boolean;
 }
 export interface TabInfo {
   id: number;
@@ -147,6 +153,10 @@ export interface AppState {
   activeRunId: string | null;
   activeRunIds: string[];
   tools: ToolDefinition[];
+  /** Scheduled tasks, soonest first is up to the UI. */
+  schedules?: import("../extension-core/schedule").Schedule[];
+  /** Connected apps (MCP): whether Rove is connected to its MCP server, and what used it lately. */
+  mcp?: { connected: boolean; clients: string[]; activity: { client: string; tool: string; at: number; ok: boolean; error?: string }[] };
   /** Chrome tab ID -> the chat the side panel shows on that tab; "" means a fresh chat. Cleared when Chrome restarts. */
   tabChats?: Record<string, string>;
   /** Estimated tokens a new chat starts with: the system message and the tool definitions. */
