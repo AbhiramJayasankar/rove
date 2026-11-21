@@ -11,6 +11,8 @@ export type McpActivity = { client: string; tool: string; at: number; ok: boolea
 export type McpStatus = { connected: boolean; clients: string[]; activity: McpActivity[] };
 export type McpDeps = {
   enabled(): boolean;
+  /** The server's port: MCP_PORT unless changed (ROVE_MCP_PORT on the server side must match). */
+  port(): number;
   token(): string;
   tools(): unknown[];
   call(tool: string, args: Record<string, unknown>, client: McpClient): Promise<unknown>;
@@ -32,7 +34,8 @@ export class McpBridge {
   }
 
   /** Turn the connection on or off to match settings; call after settings change and at start-up. */
-  async refresh() {
+  async refresh(reconnect = false) {
+    if (reconnect) this.disconnect();
     if (this.deps.enabled()) {
       await chrome.alarms.create(MCP_ALARM, { periodInMinutes: 0.5 });
       this.scan();
@@ -59,7 +62,7 @@ export class McpBridge {
     this.connecting = true;
     let socket: WebSocket;
     try {
-      socket = new WebSocket(`ws://127.0.0.1:${MCP_PORT}/extension`);
+      socket = new WebSocket(`ws://127.0.0.1:${this.deps.port()}/extension`);
     } catch {
       this.connecting = false;
       return this.later();

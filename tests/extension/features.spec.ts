@@ -3,6 +3,7 @@ import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
 import { DEFAULT_SETTINGS } from "../../shared/defaults";
+import { openSection } from "./settings-nav";
 
 let context: BrowserContext, ui: Page, server: http.Server, origin: string;
 const bodies: any[] = [];
@@ -41,8 +42,7 @@ test.beforeAll(async () => {
 test.afterAll(async () => { await context?.close(); await new Promise<void>((resolve) => server?.close(() => resolve())); });
 
 test("standing instructions, saved prompts and site rules save and take effect", async () => {
-  await ui.getByRole("button", { name: "Settings", exact: true }).click();
-  await ui.getByRole("button", { name: "Instructions", exact: true }).click();
+  await openSection(ui, "Instructions");
   await ui.getByRole("textbox", { name: "Standing instructions" }).fill("Always answer in British English.");
   await ui.getByRole("button", { name: "Add saved prompt" }).click();
   await ui.getByRole("textbox", { name: "Name", exact: true }).fill("daily-news");
@@ -50,7 +50,7 @@ test("standing instructions, saved prompts and site rules save and take effect",
   await ui.getByRole("textbox", { name: "Start page (optional)", exact: true }).fill("https://news.ycombinator.com");
   await ui.getByRole("button", { name: "Keep prompt" }).click();
   await expect(ui.getByText("/daily-news")).toBeVisible();
-  await ui.getByRole("button", { name: "Tools", exact: true }).click();
+  await openSection(ui, "Tools and sites");
   await ui.getByLabel("Site to add").fill("https://www.Example.com/page");
   await ui.getByRole("button", { name: "Block www.example.com" }).click();
   await expect(ui.getByRole("radio", { name: "Block", checked: true })).toBeVisible();
@@ -100,8 +100,7 @@ test("attaches a text file from the paperclip, shows it on the message, and send
 });
 
 test("tool tooltips explain each tool, its risk and its inputs, and group headings explain themselves", async () => {
-  await ui.getByRole("button", { name: "Settings", exact: true }).click();
-  await ui.getByRole("button", { name: "Tools", exact: true }).click();
+  await openSection(ui, "Tools and sites");
   await ui.getByRole("button", { name: "About Read page", exact: true }).hover();
   const tip = ui.getByRole("tooltip");
   await expect(tip).toContainText("browser_snapshot");

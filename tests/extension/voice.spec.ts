@@ -1,5 +1,6 @@
 import { test, expect, chromium, type BrowserContext, type Page } from "@playwright/test";
 import path from "node:path";
+import { openSection } from "./settings-nav";
 
 let context: BrowserContext, ui: Page;
 test.beforeAll(async () => {
@@ -97,7 +98,7 @@ test("API dictation uses only the voice key and configured backend; settings per
     const response = await chrome.runtime.sendMessage({ type: "rove-api", path: "/api/settings", method: "GET" });
     await chrome.runtime.sendMessage({ type: "rove-api", path: "/api/settings", method: "PUT", body: { ...response.data.settings, apiKey: "model-secret" } });
   });
-  await ui.getByRole("button", { name: "Settings", exact: true }).click();
+  await openSection(ui, "Search and voice");
   await ui.getByRole("radio", { name: /Groq \/ compatible API/ }).click();
   await ui.getByLabel("Voice API key", { exact: false }).fill("voice-secret");
   await expect(ui.getByRole("button", { name: /Save voice settings/ })).toHaveCount(0);

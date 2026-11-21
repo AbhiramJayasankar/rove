@@ -1,19 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import changelog from "../CHANGELOG.md?raw";
 import {
+  Archive,
   Check,
+  ChevronLeft,
+  ChevronRight,
+  Compass,
   Cpu,
   Eye,
   EyeOff,
+  LayoutGrid,
   LoaderCircle,
   Minus,
+  Palette,
+  Plug,
   Plus,
   RotateCcw,
   ScrollText,
+  Search,
+  ShieldCheck,
   Trash2,
-  Wrench,
   X,
 } from "lucide-react";
 import type { AppState, ModelInfo, Settings } from "../shared/types";
@@ -33,9 +41,10 @@ import { useModelVisibility } from "./modelVisibility";
 import VoiceSettings, { useVoiceSettings } from "./VoiceSettings";
 import ChoiceMenu from "./ChoiceMenu";
 import { LANGUAGE_NAMES, useLanguage, useT, type LanguagePreference } from "./i18n";
-import { json, toolTitle, type Action, type Page, type SettingsPage } from "./ui";
+import { json, toolTitle, type Action, type Page, type SettingsPage, type SettingsSection } from "./ui";
 import ThemeSettings from "./ThemeSettings";
 import McpSettings from "./McpSettings";
+import { paletteById } from "./palettes";
 import type { Appearance } from "./theme";
 
 type Props = {
@@ -58,6 +67,50 @@ type Props = {
   /** Lets the app warn before leaving with unsaved prompts, voice or model-list changes, and save them. */
   reportUnsaved: (unsaved: boolean, save: () => Promise<void>) => void;
 };
+
+type Section = { id: SettingsSection; title: string; about: string; Icon: typeof Cpu };
+/** Settings, grouped by what the user is deciding: what Rove thinks with, how it acts, what it
+ *  connects to, and how it looks. Each section is its own page under the overview. */
+const SECTIONS: Section[][] = [
+  [
+    { id: "model", title: "Model", about: "The AI provider and model Rove thinks with.", Icon: Cpu },
+    { id: "instructions", title: "Instructions", about: "What Rove is told in every chat, and the prompts you reuse.", Icon: ScrollText },
+  ],
+  [
+    { id: "browsing", title: "Browsing", about: "How Rove works in your tabs, and how long a task may run.", Icon: Compass },
+    { id: "tools", title: "Tools and sites", about: "Which browser tools Rove may use, and rules for particular sites.", Icon: ShieldCheck },
+  ],
+  [
+    { id: "search", title: "Search and voice", about: "Web search for up-to-date answers, and speech to text for dictating.", Icon: Search },
+    { id: "apps", title: "Connected apps", about: "Let Claude Code and other MCP apps use Rove.", Icon: Plug },
+  ],
+  [
+    { id: "appearance", title: "Appearance", about: "Theme, light or dark, and language.", Icon: Palette },
+    { id: "backup", title: "Backup", about: "Move your setup to another Chrome profile, or keep a copy.", Icon: Archive },
+  ],
+];
+const ALL_SECTIONS = SECTIONS.flat();
+/** Saved settings each section edits, to mark sections with unsaved changes. */
+const SECTION_KEYS: Partial<Record<SettingsSection, (keyof Settings)[]>> = {
+  model: ["baseUrl", "model", "reasoningEffort", "contextWindow", "maxOutputTokens", "maxImages", "vision", "stream", "modelTimeoutSeconds"],
+  instructions: ["systemPrompt", "memory"],
+  browsing: ["maxSteps", "backgroundTabs", "groupTabs", "keepGoingOnBarClose"],
+  tools: ["disabledTools", "siteRules"],
+  search: ["webSearch"],
+  apps: ["mcpEnabled", "mcpBrowserTools", "mcpRunTasks"],
+};
+const SEARCH_NAMES = { exa: "Exa", tavily: "Tavily", parallel: "Parallel" } as const;
+
+/** Fills a translated template's {placeholders} with elements, so a sentence can hold links. */
+function fill(template: string, parts: Record<string, ReactNode>) {
+  return template.split(/(\{\w+\})/).map((piece, index) => {
+    const name = /^\{(\w+)\}$/.exec(piece)?.[1];
+    return <Fragment key={index}>{name && name in parts ? parts[name] : piece}</Fragment>;
+  });
+}
+/** "anthropic/claude-sonnet-4" reads as "claude-sonnet-4". */
+const shortModel = (id: string) => id.split("/").pop() || id;
+
 export default function Configuration({
   appearance,
   providerName,
@@ -90,11 +143,11 @@ export default function Configuration({
   useEffect(() => () => reportUnsaved(false, async () => {}), []);
   const [toolSearch, setToolSearch] = useState("");
   const whatsNew = useRef<HTMLDialogElement>(null);
-  const tabs: [Page, string, typeof Cpu][] = [
-    ["settings", "Model", Cpu],
-    ["instructions", "Instructions", ScrollText],
-    ["tools", "Tools", Wrench],
-  ];
+  const scroller = useRef<HTMLDivElement>(null);
+  // A new section starts at its top.
+  useEffect(() => {
+    scroller.current?.scrollTo({ top: 0 });
+  }, [page]);
   const selectedInfo =
     (state.modelInfo?.id === draft.model && state.settings.baseUrl === draft.baseUrl ? state.modelInfo : undefined) ??
     listed.find((info) => info.id === draft.model);
@@ -117,37 +170,94 @@ export default function Configuration({
   const groups = (["read", "write", "danger"] as const)
     .map((risk) => ({ risk, items: tools.filter((tool) => tool.risk === risk) }))
     .filter((group) => group.items.length);
-  return (
-    <section className="settings-page">
-      <div className="settings-nav">
-        <nav
-          aria-label={t("Settings sections")}
-          className="settings-tabs"
-          style={{ "--tab-index": tabs.findIndex(([id]) => id === page) } as React.CSSProperties}
-        >
-          <span className="settings-tabs-thumb" aria-hidden="true" />
-          {tabs.map(([id, label, Icon]) => (
-            <button
-              aria-current={page === id ? "page" : undefined}
-              className={page === id ? "selected" : ""}
-              key={id}
-              onClick={() => setPage(id)}
-            >
-              <Icon size={15} aria-hidden="true" />
-              {t(label)}
-            </button>
-          ))}
-        </nav>
+
+  const savedProviderName = state.providers.find((provider) => provider.id === state.activeProviderId)?.name ?? "";
+  const unsaved = (id: SettingsSection) => {
+    const changed = (SECTION_KEYS[id] ?? []).some((key) => JSON.stringify(draft[key]) !== JSON.stringify(state.settings[key]));
+    if (id === "model") return changed || keyChanged || visibility.touched || providerName !== savedProviderName;
+    if (id === "instructions") return changed || shortcuts.touched;
+    if (id === "search") return changed || search.dirty || voice.dirty;
+    return changed;
+  };
+
+  // One short line per section, saying how it is set now.
+  const modelName = draft.model ? (selectedInfo?.name || shortModel(draft.model)) : "";
+  const ruleCount = draft.siteRules.length;
+  const rulesText = ruleCount === 0 ? t("no site rules") : ruleCount === 1 ? t("1 site rule") : t("{n} site rules", { n: ruleCount });
+  const promptCount = shortcuts.items.length;
+  const promptsText = promptCount === 0 ? t("no saved prompts") : promptCount === 1 ? t("1 saved prompt") : t("{n} saved prompts", { n: promptCount });
+  const toolsText = t("{n} of {total} tools", { n: enabledCount, total: state.tools.length });
+  const modeText = appearance.preference === "system" ? t("matches Chrome") : appearance.mode === "dark" ? (appearance.black ? t("pitch black") : t("dark")) : t("light");
+  const mcp = state.mcp;
+  const summaries: Record<SettingsSection, string> = {
+    model: draft.model ? t("{model} on {provider}", { model: modelName, provider: providerName || savedProviderName }) : t("No model connected yet"),
+    instructions: t("{instructions}, {prompts}", {
+      instructions: draft.systemPrompt === DEFAULT_PROMPT ? t("Default instructions") : t("Custom instructions"),
+      prompts: promptsText,
+    }),
+    browsing: t("{steps}, {tabs}", {
+      steps: draft.maxSteps === 0 ? t("No step limit") : t("Up to {n} steps", { n: draft.maxSteps }),
+      tabs: draft.backgroundTabs ? t("in background tabs") : t("in the tab in front"),
+    }),
+    tools: t("{tools}, {rules}", { tools: toolsText, rules: rulesText }),
+    search: t("{search}, {voice}", {
+      search: draft.webSearch === "off" ? t("Web search off") : t("Search with {name}", { name: SEARCH_NAMES[draft.webSearch] }),
+      voice: voice.value.backend === "web" ? t("dictation by Chrome") : t("dictation by your API"),
+    }),
+    apps: !state.settings.mcpEnabled
+      ? t("Off")
+      : mcp?.connected
+        ? t("Connected: {apps}", { apps: mcp.clients.join(", ") || t("an MCP app") })
+        : t("On, waiting for an app"),
+    appearance: t("{theme}, {mode}", { theme: paletteById(appearance.palette).name, mode: modeText }),
+    backup: t("Export or restore your setup"),
+  };
+
+  const go = (id: SettingsPage) => () => setPage(id);
+  const link = (id: SettingsSection, text: string) => (
+    <button type="button" className="readout-link" onClick={go(id)}>{text}</button>
+  );
+  const readout = (
+    <p className="settings-readout">
+      {draft.model
+        ? fill(t("Rove thinks with {model} on {provider}."), { model: link("model", modelName), provider: link("model", providerName || savedProviderName) })
+        : fill(t("Rove needs a model before it can work: {connect}."), { connect: link("model", t("connect one")) })}{" "}
+      {fill(t("It works {tabs} and may use {tools}."), {
+        tabs: link("browsing", draft.backgroundTabs ? t("in background tabs") : t("in the tab in front")),
+        tools: link("tools", toolsText),
+      })}
+      {ruleCount > 0 && <>{" "}{fill(t("You set {rules}."), { rules: link("tools", rulesText) })}</>}
+      {state.settings.mcpEnabled && mcp?.connected && <>{" "}{fill(t("{apps} can use it too."), { apps: link("apps", mcp.clients.join(", ") || t("an MCP app")) })}</>}
+    </p>
+  );
+
+  const current = ALL_SECTIONS.find((section) => section.id === page);
+  const toggleRows = (rows: readonly (readonly [keyof Settings, string, string])[]) =>
+    rows.map(([key, title, note]) => (
+      <div className="tool-row behavior-row" key={key}>
+        <div className="behavior-text">
+          <strong>{title}</strong>
+          <small>{note}</small>
+        </div>
+        <label className="tool-toggle">
+          <input
+            type="checkbox"
+            role="switch"
+            aria-label={title}
+            checked={draft[key] as boolean}
+            onChange={(e) => update(key, e.target.checked as never)}
+          />
+          <span className="switch" aria-hidden="true" />
+        </label>
       </div>
-      <div className="settings-content">
-        {state.activeRunId && (
-          <div className="message">
-            {t("Stop the running tasks before saving settings.")}
-          </div>
-        )}
-        {page === "settings" ? (
-          <section className="connection-settings">
-            <h2 className="settings-title">{t("Language model")}</h2>
+    ));
+
+  function body(id: SettingsSection) {
+    switch (id) {
+      case "model":
+        return (
+          <>
+            <h2 className="settings-title">{t("Provider")}</h2>
             <div className="panel provider-panel">
               <div className="provider-picker-row">
                 <ChoiceMenu label={t("Configure provider")} value={state.activeProviderId} options={[
@@ -187,11 +297,7 @@ export default function Configuration({
                     spellCheck={false}
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={
-                      state.hasApiKey
-                        ? t("Saved key · enter to replace")
-                        : t("Enter API key")
-                    }
+                    placeholder={state.hasApiKey ? t("Saved key · enter to replace") : t("Enter API key")}
                   />
                   <button
                     type="button"
@@ -219,6 +325,7 @@ export default function Configuration({
                 </div>
               </div>
             </div>
+            <h2 className="settings-title">{t("Models")}</h2>
             <div className="panel model-panel">
               <div className="field model-connection-field">
                 <span>{t("Models in chat")}</span>
@@ -267,6 +374,52 @@ export default function Configuration({
                     : t("Choose a model above to see its abilities and what the endpoint reports.")}
                 </p>
               )}
+            </div>
+          </>
+        );
+      case "instructions":
+        return (
+          <>
+            <div className="settings-heading">
+              <h2 className="settings-title">{t("System instructions")}</h2>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={t("Reset instructions")}
+                title={t("Reset instructions")}
+                onClick={() => update("systemPrompt", DEFAULT_PROMPT)}
+              >
+                <RotateCcw size={16} />
+              </button>
+            </div>
+            <div className="panel editor-panel">
+              <textarea
+                aria-label={t("System instructions")}
+                className="instructions-editor"
+                value={draft.systemPrompt}
+                onChange={(e) => update("systemPrompt", e.target.value)}
+                spellCheck={false}
+              />
+            </div>
+            <h2 className="settings-title">{t("Standing instructions")}</h2>
+            <div className="panel memory-panel">
+              <textarea
+                aria-label={t("Standing instructions")}
+                className="instructions-editor memory-editor"
+                placeholder={t("Things Rove should always know or follow, in every chat.")}
+                value={draft.memory}
+                onChange={(e) => update("memory", e.target.value)}
+                spellCheck={false}
+              />
+            </div>
+            <ShortcutsEditor editor={shortcuts} />
+          </>
+        );
+      case "browsing":
+        return (
+          <>
+            <h2 className="settings-title">{t("Steps per task")}</h2>
+            <div className="panel steps-panel">
               <div className="tool-round-limit">
                 <label htmlFor="step-limit">{t("Step limit")}</label>
                 <div className="stepper">
@@ -295,116 +448,19 @@ export default function Configuration({
                   : t("Up to {max} steps per task. Go past {max} to remove the limit.", { max: MAX_STEP_LIMIT })}
               </p>
             </div>
-            <VoiceSettings voice={voice} />
-            <ThemeSettings appearance={appearance} />
-            <div className="field language-field">
-              <span>{t("Language")}</span>
-              <ChoiceMenu
-                label={t("Language")}
-                value={preference}
-                placement="top"
-                options={[
-                  { value: "auto", label: t("Match Chrome") },
-                  ...(Object.entries(LANGUAGE_NAMES) as [string, string][]).map(([value, label]) => ({ value, label })),
-                ]}
-                onChange={(value) => setPreference(value as LanguagePreference)}
-              />
-            </div>
-            <BackupSettings busy={!!state.activeRunId} />
-            <p className="about-line">
-              Rove {__APP_VERSION__}
-              <button type="button" className="text-button" onClick={() => whatsNew.current?.showModal()}>
-                {t("What's new")}
-              </button>
-            </p>
-            <dialog
-              ref={whatsNew}
-              className="history-dialog changelog-dialog"
-              aria-label={t("What's new")}
-              onClick={(event) => {
-                if (event.target === event.currentTarget) whatsNew.current?.close();
-              }}
-            >
-              <div className="dialog-heading">
-                <h2>{t("What's new")}</h2>
-                <button className="icon-button" aria-label={t("Close what's new")} onClick={() => whatsNew.current?.close()}>
-                  <X size={18} />
-                </button>
-              </div>
-              <div className="markdown changelog-body">
-                <Markdown remarkPlugins={[remarkGfm]}>{changelog}</Markdown>
-              </div>
-            </dialog>
-          </section>
-        ) : page === "instructions" ? (
-          <section className="instructions-settings">
-            <div className="settings-heading">
-              <h2 className="settings-title">{t("System instructions")}</h2>
-              <button
-                type="button"
-                className="icon-button"
-                aria-label={t("Reset instructions")}
-                title={t("Reset instructions")}
-                onClick={() => update("systemPrompt", DEFAULT_PROMPT)}
-              >
-                <RotateCcw size={16} />
-              </button>
-            </div>
-            <div className="panel editor-panel">
-              <textarea
-                aria-label={t("System instructions")}
-                className="instructions-editor"
-                value={draft.systemPrompt}
-                onChange={(e) => update("systemPrompt", e.target.value)}
-                spellCheck={false}
-              />
-            </div>
-            <div className="settings-heading">
-              <h2 className="settings-title">{t("Standing instructions")}</h2>
-            </div>
-            <div className="panel memory-panel">
-              <textarea
-                aria-label={t("Standing instructions")}
-                className="instructions-editor memory-editor"
-                placeholder={t("Things Rove should always know or follow, in every chat.")}
-                value={draft.memory}
-                onChange={(e) => update("memory", e.target.value)}
-                spellCheck={false}
-              />
-            </div>
-            <ShortcutsEditor editor={shortcuts} />
-          </section>
-        ) : (
-          <section className="tools-settings">
-            <div className="settings-heading">
-              <h2 className="settings-title">{t("Browsing")}</h2>
-            </div>
+            <h2 className="settings-title">{t("Tabs")}</h2>
             <div className="panel behavior-panel">
-              {([
+              {toggleRows([
                 ["backgroundTabs", t("Work in the background"), t("Rove opens and drives its tabs without switching to them, so you can keep using Chrome. Turn this off if a page only works while it is in front.")],
                 ["groupTabs", t("Group Rove's tabs"), t("Tabs Rove opens go into one Chrome tab group per task, so you can see them and close them together.")],
                 ["keepGoingOnBarClose", t("Keep going if I close Chrome's debugging bar"), t("An extension cannot hide that bar. If you close it, Rove reconnects at its next action and the bar returns. Turn this off to stop the task instead.")],
-              ] as const).map(([key, title, note]) => (
-                <div className="tool-row behavior-row" key={key}>
-                  <div className="behavior-text">
-                    <strong>{title}</strong>
-                    <small>{note}</small>
-                  </div>
-                  <label className="tool-toggle">
-                    <input
-                      type="checkbox"
-                      role="switch"
-                      aria-label={title}
-                      checked={draft[key]}
-                      onChange={(e) => update(key, e.target.checked)}
-                    />
-                    <span className="switch" aria-hidden="true" />
-                  </label>
-                </div>
-              ))}
+              ] as const)}
             </div>
-            <WebSearchSettings state={state} draft={draft} update={update} search={search} />
-            <McpSettings state={state} draft={draft} update={update} />
+          </>
+        );
+      case "tools":
+        return (
+          <>
             <div className="settings-heading">
               <h2 className="settings-title">{t("Browser tools")}</h2>
               <span className="tool-count-wrap">
@@ -442,9 +498,7 @@ export default function Configuration({
                             <strong>{toolTitle(tool.name, {}, t)}</strong>
                           </summary>
                           <p>{tool.description}</p>
-                          <pre>
-                            {json({ name: tool.name, parameters: tool.parameters })}
-                          </pre>
+                          <pre>{json({ name: tool.name, parameters: tool.parameters })}</pre>
                         </details>
                       </div>
                       <Tooltip label={t("About {name}", { name: toolTitle(tool.name, {}, t) })} width={320}>
@@ -460,9 +514,7 @@ export default function Configuration({
                             update(
                               "disabledTools",
                               e.target.checked
-                                ? draft.disabledTools.filter(
-                                    (name) => name !== tool.name,
-                                  )
+                                ? draft.disabledTools.filter((name) => name !== tool.name)
                                 : [...draft.disabledTools, tool.name],
                             )
                           }
@@ -475,20 +527,143 @@ export default function Configuration({
               </div>
             ))}
             <SiteRules rules={draft.siteRules} onChange={(rules) => update("siteRules", rules)} />
-          </section>
-        )}
+          </>
+        );
+      case "search":
+        return (
+          <>
+            <WebSearchSettings state={state} draft={draft} update={update} search={search} />
+            <VoiceSettings voice={voice} />
+          </>
+        );
+      case "apps":
+        return <McpSettings state={state} draft={draft} update={update} />;
+      case "appearance":
+        return (
+          <>
+            <ThemeSettings appearance={appearance} />
+            <h2 className="settings-title">{t("Language")}</h2>
+            <div className="panel language-panel">
+              <div className="field language-field">
+                <span>{t("Language of Rove's screens")}</span>
+                <ChoiceMenu
+                  label={t("Language")}
+                  value={preference}
+                  options={[
+                    { value: "auto", label: t("Match Chrome") },
+                    ...(Object.entries(LANGUAGE_NAMES) as [string, string][]).map(([value, label]) => ({ value, label })),
+                  ]}
+                  onChange={(value) => setPreference(value as LanguagePreference)}
+                />
+              </div>
+            </div>
+          </>
+        );
+      case "backup":
+        return <BackupSettings busy={!!state.activeRunId} />;
+    }
+  }
+
+  const sectionButton = (section: Section, variant: "rail" | "row") => {
+    const dirty = unsaved(section.id);
+    const summaryId = `settings-summary-${section.id}`;
+    return (
+      <button
+        type="button"
+        key={section.id}
+        className={variant === "rail" ? "rail-item" : "settings-row"}
+        aria-current={page === section.id ? "page" : undefined}
+        aria-label={t(section.title)}
+        aria-describedby={variant === "row" ? summaryId : undefined}
+        onClick={go(section.id)}
+      >
+        <span className="row-icon" aria-hidden="true"><section.Icon size={variant === "rail" ? 15 : 17} /></span>
+        <span className="row-text">
+          <span className="row-title">{t(section.title)}</span>
+          {variant === "row" && <span className="row-summary" id={summaryId}>{summaries[section.id]}</span>}
+        </span>
+        {dirty && <span className="row-dirty" title={t("Unsaved changes")} aria-label={t("Unsaved changes")} />}
+        {variant === "row" && <ChevronRight className="row-chevron" size={16} aria-hidden="true" />}
+      </button>
+    );
+  };
+
+  return (
+    <section className={`settings-page ${current ? "is-section" : "is-overview"}`}>
+      <div className="settings-layout">
+        <nav className="settings-rail" aria-label={t("Settings sections")}>
+          <button type="button" className="rail-item rail-overview" aria-current={!current ? "page" : undefined} onClick={go("settings")}>
+            <span className="row-icon" aria-hidden="true"><LayoutGrid size={15} /></span>
+            <span className="row-text"><span className="row-title">{t("Overview")}</span></span>
+          </button>
+          {SECTIONS.map((group, index) => (
+            <div className="rail-group" key={index}>{group.map((section) => sectionButton(section, "rail"))}</div>
+          ))}
+        </nav>
+        <div className="settings-content" ref={scroller}>
+          <div className="settings-view" key={page} data-section={current?.id ?? "overview"}>
+            {state.activeRunId && (
+              <div className="message">{t("Stop the running tasks before saving settings.")}</div>
+            )}
+            {current ? (
+              <>
+                <header className="section-head">
+                  <button type="button" className="section-back" onClick={go("settings")}>
+                    <ChevronLeft size={15} aria-hidden="true" />
+                    {t("All settings")}
+                  </button>
+                  <h1 className="settings-display">{t(current.title)}</h1>
+                  <p className="section-about">{t(current.about)}</p>
+                </header>
+                <div className="section-body">{body(current.id)}</div>
+              </>
+            ) : (
+              <>
+                <header className="overview-head">
+                  <h1 className="settings-display">{t("Settings")}</h1>
+                  {readout}
+                </header>
+                <div className="settings-groups">
+                  {SECTIONS.map((group, index) => (
+                    <div className="settings-group" key={index}>{group.map((section) => sectionButton(section, "row"))}</div>
+                  ))}
+                </div>
+                <p className="about-line">
+                  <span>Rove {__APP_VERSION__}</span>
+                  <button type="button" className="text-button" onClick={() => whatsNew.current?.showModal()}>
+                    {t("What's new")}
+                  </button>
+                </p>
+              </>
+            )}
+          </div>
+        </div>
       </div>
-      <footer className="settings-footer">
+      <dialog
+        ref={whatsNew}
+        className="history-dialog changelog-dialog"
+        aria-label={t("What's new")}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) whatsNew.current?.close();
+        }}
+      >
+        <div className="dialog-heading">
+          <h2>{t("What's new")}</h2>
+          <button className="icon-button" aria-label={t("Close what's new")} onClick={() => whatsNew.current?.close()}>
+            <X size={18} />
+          </button>
+        </div>
+        <div className="markdown changelog-body">
+          <Markdown remarkPlugins={[remarkGfm]}>{changelog}</Markdown>
+        </div>
+      </dialog>
+      <footer className="settings-footer" hidden={!current && !ALL_SECTIONS.some((section) => unsaved(section.id))}>
         <button
           className="button primary"
           disabled={!!pending || !!state.activeRunId}
           onClick={() => saveSettings(saveLocal)}
         >
-          {pending === "save" ? (
-            <LoaderCircle className="spin" size={15} />
-          ) : (
-            <Check size={15} />
-          )}
+          {pending === "save" ? <LoaderCircle className="spin" size={15} /> : <Check size={15} />}
           {t("Save changes")}
         </button>
       </footer>

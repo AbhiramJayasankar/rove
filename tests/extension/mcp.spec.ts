@@ -6,6 +6,8 @@ import path from "node:path";
 // Connected apps: an MCP client starts mcp/rove-mcp.mjs over stdio, and the extension connects to it.
 // This drives the real server script and the real extension, the way Claude Code does.
 let context: BrowserContext, ui: Page, server: http.Server, origin: string;
+// Not Rove's usual port, so tests never meet a real Rove MCP server running on this machine.
+const TEST_PORT = 47871;
 const servers: ChildProcessWithoutNullStreams[] = [];
 async function rpc(route: string, method = "GET", body?: unknown): Promise<any> {
   const result = await ui.evaluate(({ route, method, body }) => chrome.runtime.sendMessage({ type: "rove-api", path: route, method, body }), { route, method, body });
@@ -14,7 +16,7 @@ async function rpc(route: string, method = "GET", body?: unknown): Promise<any> 
 }
 /** A line-delimited JSON-RPC client over the server's stdio. */
 function mcpClient(token: string, name: string) {
-  const child = spawn(process.execPath, [path.resolve("extension/mcp/rove-mcp.mjs")], { env: { ...process.env, ROVE_TOKEN: token } });
+  const child = spawn(process.execPath, [path.resolve("extension/mcp/rove-mcp.mjs")], { env: { ...process.env, ROVE_TOKEN: token, ROVE_MCP_PORT: String(TEST_PORT) } });
   servers.push(child);
   let buffer = "";
   let next = 1;
@@ -64,8 +66,13 @@ test.beforeAll(async () => {
       for await (const chunk of request) raw += chunk;
       const input = JSON.parse(raw);
       const user = String(input.messages.find((message: any) => message.role === "user")?.content);
+      const tools = input.messages.filter((message: any) => message.role === "tool");
+      let message: any = { role: "assistant", content: user.includes("Summarize something") ? "Rove did the task." : "Wrong prompt." };
+      if (user.includes("Ask me first")) message = tools.length
+        ? { role: "assistant", content: `You said: ${JSON.parse(tools[0].content).reply}` }
+        : { role: "assistant", content: null, tool_calls: [{ id: "q1", type: "function", function: { name: "ask_user", arguments: '{"question":"Which colour?"}' } }] };
       response.setHeader("content-type", "application/json");
-      response.end(JSON.stringify({ choices: [{ message: { role: "assistant", content: user.includes("Summarize something") ? "Rove did the task." : "Wrong prompt." }, finish_reason: "stop" }] }));
+      response.end(JSON.stringify({ choices: [{ message, finish_reason: message.tool_calls ? "tool_calls" : "stop" }], usage: { prompt_tokens: 1200, completion_tokens: 30 } }));
       return;
     }
     response.setHeader("content-type", "text/html");
@@ -80,6 +87,7 @@ test.beforeAll(async () => {
   await ui.goto(`chrome-extension://${new URL(worker.url()).host}/index.html`);
   const { settings } = await rpc("/api/state");
   await rpc("/api/settings", "PUT", { ...settings, baseUrl: origin + "/v1", model: "fixture", apiKey: "fixture-key", approvalMode: "never", mcpEnabled: true });
+  expect(await rpc("/api/mcp/port", "PUT", { port: TEST_PORT })).toEqual({ port: TEST_PORT });
 });
 test.afterAll(async () => {
   for (const child of servers) child.kill();
@@ -138,6 +146,21 @@ test("rove_run_task hands a task to Rove's model and returns its answer; a wrong
   const report = JSON.parse(textOf(await client.call("rove_run_task", { prompt: "Summarize something", waitSeconds: 30 })));
   expect(report).toMatchObject({ status: "completed", answer: "Rove did the task." });
   expect((await rpc("/api/state")).runs.map((run: any) => run.id)).toContain(report.runId);
+  // The report says how long it took, with which model, and what it used.
+  expect(report.report).toMatchObject({ model: "fixture", provider: new URL(origin).host, steps: 0, modelRequests: 1, tokens: { input: 1200, output: 30, complete: true } });
+  expect(report.report.durationSeconds).toBeGreaterThanOrEqual(0);
+  expect(Date.parse(report.report.finishedAt)).toBeGreaterThanOrEqual(Date.parse(report.report.startedAt));
+
+  // A question from Rove comes back as awaiting_user, and rove_reply answers it.
+  const asked = JSON.parse(textOf(await client.call("rove_run_task", { prompt: "Ask me first, then finish", waitSeconds: 30 })));
+  expect(asked).toMatchObject({ status: "awaiting_user", question: "Which colour?" });
+  const replied = JSON.parse(textOf(await client.call("rove_reply", { runId: asked.runId, message: "Teal", waitSeconds: 30 })));
+  expect(replied).toMatchObject({ status: "completed", answer: "You said: Teal" });
+  expect(replied.report.tools).toEqual({ ask_user: 1 });
+  // Replying when Rove asked nothing is refused.
+  expect((await client.call("rove_reply", { runId: asked.runId, message: "Again" })).isError).toBe(true);
+  const listed = JSON.parse(textOf(await client.call("rove_list_tasks", { limit: 2 })));
+  expect(listed.map((task: any) => task.runId)).toEqual([asked.runId, report.runId]);
 
   // Turning task handoff off removes the tools from the list.
   const { settings } = await rpc("/api/state");

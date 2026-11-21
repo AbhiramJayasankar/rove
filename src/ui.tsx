@@ -81,8 +81,10 @@ export function CopyButton({ text, label }: { text: string; label?: string }) {
     </button>
   );
 }
-export type Page = "workbench" | "settings" | "instructions" | "tools" | "schedules";
-export type SettingsPage = Exclude<Page, "workbench" | "schedules">;
+/** The settings sections, each its own page under the Settings overview ("settings"). */
+export type SettingsSection = "model" | "instructions" | "browsing" | "tools" | "search" | "apps" | "appearance" | "backup";
+export type SettingsPage = "settings" | SettingsSection;
+export type Page = "workbench" | "schedules" | SettingsPage;
 export type Shot = {
   dataUrl: string;
   url?: string;

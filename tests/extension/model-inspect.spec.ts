@@ -2,6 +2,7 @@ import { test, expect, chromium, type BrowserContext, type Page } from "@playwri
 import http from "node:http";
 import path from "node:path";
 import { DEFAULT_SETTINGS } from "../../shared/defaults";
+import { openSection } from "./settings-nav";
 
 // Two providers at once: a llama.cpp server and an aggregator with several models.
 // Listing both must not hide the active model's reasoning, and any listed model can be inspected.
@@ -99,7 +100,7 @@ test("turning images off for the chat model hides screenshots and trims the inst
 });
 
 test("settings can inspect and adjust any listed model, not only the chat model", async () => {
-  await ui.getByRole("button", { name: "Settings", exact: true }).click();
+  await openSection(ui, "Model");
   const details = ui.locator(".model-details");
   await expect(details.getByText("131,072 tokens").first()).toBeVisible();
   await ui.getByRole("button", { name: "Model to inspect", exact: true }).click();

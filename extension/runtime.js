@@ -1567,11 +1567,11 @@ function toGeminiRequest(messages, tools) {
       push("model", parts);
     } else if (message.role === "tool") {
       const text = typeof message.content === "string" ? message.content : JSON.stringify(message.content);
-      const parsed = parseJson(text);
+      const parsed2 = parseJson(text);
       push("user", [{
         functionResponse: {
           name: names.get(message.tool_call_id) || "tool",
-          response: parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : { result: parsed ?? text }
+          response: parsed2 && typeof parsed2 === "object" && !Array.isArray(parsed2) ? parsed2 : { result: parsed2 ?? text }
         }
       }]);
     } else push("user", userParts(message.content));
@@ -2779,8 +2779,8 @@ function conversationHistory(run) {
 var strictness = { allow: 0, ask: 1, block: 2 };
 function hostOf2(url2) {
   try {
-    const parsed = new URL(url2);
-    return ["http:", "https:"].includes(parsed.protocol) ? parsed.hostname.toLowerCase() : void 0;
+    const parsed2 = new URL(url2);
+    return ["http:", "https:"].includes(parsed2.protocol) ? parsed2.hostname.toLowerCase() : void 0;
   } catch {
     return void 0;
   }
@@ -3678,6 +3678,152 @@ Browser context: ${active.selectedTab ? `selected tab ID ${active.selectedTab}. 
   }
 };
 
+// shared/usage.ts
+var number = (value) => value !== null && value !== void 0 && value !== "" && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : void 0;
+function requestCost(usage, model) {
+  const reported = number(usage?.cost);
+  if (reported != null) return reported;
+  if (model?.free) return 0;
+  const pricing = model?.pricing;
+  if (!pricing) return;
+  const input2 = number(usage?.prompt_tokens ?? usage?.input_tokens), output2 = number(usage?.completion_tokens ?? usage?.output_tokens);
+  if (input2 == null || output2 == null) return;
+  const prompt = number(pricing.prompt) ?? (number(pricing.input_usd_per_1m) != null ? Number(pricing.input_usd_per_1m) / 1e6 : void 0);
+  const completion = number(pricing.completion) ?? (number(pricing.output_usd_per_1m) != null ? Number(pricing.output_usd_per_1m) / 1e6 : void 0);
+  if (prompt == null || completion == null) return;
+  const cached2 = Math.min(
+    input2,
+    number(
+      usage.prompt_tokens_details?.cached_tokens ?? usage.input_tokens_details?.cached_tokens
+    ) || 0
+  );
+  const cacheRate = number(pricing.input_cache_read) ?? number(pricing.cached_prompt) ?? (number(pricing.cached_input_usd_per_1m) != null ? Number(pricing.cached_input_usd_per_1m) / 1e6 : prompt);
+  const writes = Math.min(
+    input2 - cached2,
+    number(usage.prompt_tokens_details?.cache_write_tokens) || 0
+  );
+  const writeRate = number(pricing.input_cache_write) ?? prompt;
+  return (input2 - cached2 - writes) * prompt + cached2 * cacheRate + writes * writeRate + output2 * completion;
+}
+function chatUsage(events, fallback, baseline) {
+  let model = fallback, input2 = 0, output2 = 0, cached2 = 0, reasoning = 0, cost = 0, responses = 0, inputReports = 0, outputReports = 0, costReports = 0;
+  for (const event of events) {
+    if (event.type === "model_metadata") model = event.data.model || null;
+    if (event.type !== "model_response") continue;
+    responses++;
+    const usage = event.data.usage;
+    const inTokens = number(usage?.prompt_tokens ?? usage?.input_tokens), outTokens = number(usage?.completion_tokens ?? usage?.output_tokens);
+    if (inTokens != null) {
+      input2 += inTokens;
+      inputReports++;
+    }
+    if (outTokens != null) {
+      output2 += outTokens;
+      outputReports++;
+    }
+    cached2 += number(
+      usage?.prompt_tokens_details?.cached_tokens ?? usage?.input_tokens_details?.cached_tokens
+    ) || 0;
+    reasoning += number(
+      usage?.completion_tokens_details?.reasoning_tokens ?? usage?.output_tokens_details?.reasoning_tokens
+    ) || 0;
+    const estimate = requestCost(usage, model);
+    if (estimate != null) {
+      cost += estimate;
+      costReports++;
+    }
+  }
+  const contextEvent = events.findLast((event) => event.type === "context_usage");
+  const context = contextEvent?.data;
+  const lastResponse = events.findLast(
+    (event) => event.type === "model_response" && number(event.data.usage?.prompt_tokens ?? event.data.usage?.input_tokens) != null
+  );
+  const reported = lastResponse && (!contextEvent || lastResponse.id > contextEvent.id) ? number(lastResponse.data.usage?.prompt_tokens ?? lastResponse.data.usage?.input_tokens) + (number(lastResponse.data.usage?.completion_tokens ?? lastResponse.data.usage?.output_tokens) ?? 0) : void 0;
+  const used = reported ?? number(context?.estimatedTokens) ?? (events.length ? 0 : number(baseline) ?? 0);
+  const requests = Math.max(
+    responses,
+    events.filter((event) => event.type === "model_request").length
+  );
+  return {
+    input: input2,
+    output: output2,
+    cached: cached2,
+    reasoning,
+    cost: costReports === requests ? cost : void 0,
+    requests,
+    responses,
+    inputReports,
+    outputReports,
+    current: used,
+    estimated: reported == null,
+    contextWindow: number(context?.contextWindow) ?? model?.contextWindow ?? fallback?.contextWindow ?? 32768,
+    inputBudget: number(context?.inputBudget),
+    outputBudget: number(context?.reservedOutputTokens)
+  };
+}
+
+// extension-core/report.ts
+var FINISHED = /* @__PURE__ */ new Set(["completed", "failed", "stopped"]);
+function parsed(value) {
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return void 0;
+  }
+}
+function runReport(run) {
+  const events = run.events;
+  const configuration = events.findLast((event) => event.type === "run_configuration")?.data;
+  const lastStatus = events.findLast((event) => event.type === "status");
+  const finished = FINISHED.has(run.status) && lastStatus ? lastStatus.time : void 0;
+  const start = Date.parse(run.createdAt);
+  const end = Date.parse(finished ?? (/* @__PURE__ */ new Date()).toISOString());
+  const tools = {};
+  let failed = 0;
+  const pages = /* @__PURE__ */ new Map();
+  for (const event of events) {
+    if (event.type === "tool_call" && typeof event.data.name === "string")
+      tools[event.data.name] = (tools[event.data.name] ?? 0) + 1;
+    if (event.type !== "tool_result") continue;
+    if (event.data.error) failed++;
+    const result = parsed(event.data.result);
+    if (result && typeof result === "object" && typeof result.url === "string" && /^https?:|^file:/.test(result.url)) {
+      const key = `${result.tabId ?? ""} ${result.url}`;
+      pages.delete(key);
+      pages.set(key, { ...Number.isInteger(result.tabId) ? { tabId: result.tabId } : {}, url: result.url, ...result.title ? { title: String(result.title) } : {} });
+    }
+  }
+  const usage = chatUsage(events);
+  let provider;
+  try {
+    provider = configuration?.settings?.baseUrl ? new URL(configuration.settings.baseUrl).host : void 0;
+  } catch {
+  }
+  return {
+    startedAt: new Date(start).toISOString(),
+    ...finished ? { finishedAt: finished } : {},
+    durationSeconds: Math.max(0, Math.round((end - start) / 100) / 10),
+    ...configuration?.settings?.model ? { model: String(configuration.settings.model) } : {},
+    ...provider ? { provider } : {},
+    steps: Object.values(tools).reduce((sum, count) => sum + count, 0),
+    modelRequests: usage.requests,
+    tools,
+    failedToolCalls: failed,
+    tokens: {
+      input: usage.input,
+      output: usage.output,
+      cached: usage.cached,
+      reasoning: usage.reasoning,
+      // false when some responses did not report token counts.
+      complete: usage.inputReports === usage.requests && usage.outputReports === usage.requests
+    },
+    ...usage.cost != null && usage.requests > 0 ? { costUsd: Math.round(usage.cost * 1e6) / 1e6 } : {},
+    // The last few pages, latest last.
+    pages: [...pages.values()].slice(-8)
+  };
+}
+
 // extension-core/search.ts
 var SEARCH_PROVIDERS = {
   exa: { name: "Exa", endpoint: "https://api.exa.ai/search", keyPage: "https://dashboard.exa.ai/api-keys" },
@@ -3955,7 +4101,7 @@ __export(external_exports, {
   null: () => _null3,
   nullable: () => nullable,
   nullish: () => nullish2,
-  number: () => number2,
+  number: () => number3,
   object: () => object,
   optional: () => optional,
   output: () => output,
@@ -5714,7 +5860,7 @@ __export(regexes_exports, {
   nanoid: () => nanoid,
   nanoidOfLength: () => nanoidOfLength,
   null: () => _null,
-  number: () => number,
+  number: () => number2,
   rfc5322Email: () => rfc5322Email,
   sha1_base64: () => sha1_base64,
   sha1_base64url: () => sha1_base64url,
@@ -5815,7 +5961,7 @@ var string = (params) => {
 };
 var bigint = /^-?\d+n?$/;
 var integer = /^-?\d+$/;
-var number = /^-?\d+(?:\.\d+)?$/;
+var number2 = /^-?\d+(?:\.\d+)?$/;
 var boolean2 = /^(?:true|false)$/i;
 var _null = /^null$/i;
 var _undefined = /^undefined$/i;
@@ -6942,7 +7088,7 @@ var $ZodCustomStringFormat = /* @__PURE__ */ $constructor("$ZodCustomStringForma
 });
 var $ZodNumber = /* @__PURE__ */ $constructor("$ZodNumber", (inst, def) => {
   $ZodType.init(inst, def);
-  inst._zod.pattern = number;
+  inst._zod.pattern = number2;
   inst._zod.parse = (payload, _ctx) => {
     if (def.coerce)
       try {
@@ -8045,7 +8191,7 @@ var $ZodRecord = /* @__PURE__ */ $constructor("$ZodRecord", (inst, def) => {
         if (keyResult instanceof Promise) {
           throw new Error("Async schemas not supported in object keys currently");
         }
-        const checkNumericKey = typeof key === "string" && number.test(key) && keyResult.issues.length;
+        const checkNumericKey = typeof key === "string" && number2.test(key) && keyResult.issues.length;
         if (checkNumericKey) {
           const retryResult = def.keyType._zod.run({ value: Number(key), issues: [] }, ctx);
           if (retryResult instanceof Promise) {
@@ -8614,7 +8760,7 @@ function leafPattern(schema) {
   if (minimum !== void 0 || maximum !== void 0)
     return string({ minimum, maximum }).source;
   const own2 = schema._zod.pattern;
-  return (isInt && own2 === number ? integer : own2)?.source;
+  return (isInt && own2 === number2 ? integer : own2)?.source;
 }
 function partPattern(schema) {
   const def = schema._zod.def;
@@ -13115,8 +13261,8 @@ function ko_default() {
 var capitalizeFirstCharacter = (text) => {
   return text.charAt(0).toUpperCase() + text.slice(1);
 };
-function getUnitTypeFromNumber(number4) {
-  const abs = Math.abs(number4);
+function getUnitTypeFromNumber(number5) {
+  const abs = Math.abs(number5);
   const last = abs % 10;
   const last2 = abs % 100;
   if (last2 >= 11 && last2 <= 19 || last === 0)
@@ -18094,7 +18240,7 @@ function generateRecordCheck(doc, ctx, schema, accessor) {
     if (keyFn.definite === false)
       ctx.definite = false;
     const keyFast = addConstant(ctx, keyFn);
-    const numericConst = addConstant(ctx, number);
+    const numericConst = addConstant(ctx, number2);
     const outKeyVar = newVar(ctx);
     emitOwnKeys(doc, ctx, accessor, kVar, (d) => {
       d.write(`let ${outKeyVar} = ${keyFast}(${kVar});`);
@@ -20404,7 +20550,7 @@ function stringifyKeyNames(bySchema, json2, visited) {
     return rest;
   rest.type = "string";
   if (!values)
-    rest.pattern = (types.includes("number") ? number : integer).source;
+    rest.pattern = (types.includes("number") ? number2 : integer).source;
   return rest;
 }
 var pendingRecords = /* @__PURE__ */ new WeakMap();
@@ -20875,7 +21021,7 @@ __export(schemas_exports2, {
   null: () => _null3,
   nullable: () => nullable,
   nullish: () => nullish2,
-  number: () => number2,
+  number: () => number3,
   object: () => object,
   optional: () => optional,
   partialRecord: () => partialRecord,
@@ -21621,7 +21767,7 @@ var ZodNumber = /* @__PURE__ */ $constructor(
     }
   })
 );
-function number2(params) {
+function number3(params) {
   return _number(ZodNumber, params);
 }
 var ZodNumberFormat = /* @__PURE__ */ $constructor("ZodNumberFormat", (inst, def) => {
@@ -22461,7 +22607,7 @@ var stringbool = (...args) => _stringbool({
 }, ...args);
 function json(params) {
   const jsonSchema = lazy(() => {
-    return union([string2(params), number2(), boolean3(), _null3(), array(jsonSchema), record(string2(), jsonSchema)]);
+    return union([string2(params), number3(), boolean3(), _null3(), array(jsonSchema), record(string2(), jsonSchema)]);
   });
   return jsonSchema;
 }
@@ -23460,13 +23606,13 @@ __export(coerce_exports, {
   bigint: () => bigint3,
   boolean: () => boolean4,
   date: () => date5,
-  number: () => number3,
+  number: () => number4,
   string: () => string3
 });
 function string3(params) {
   return _coercedString(ZodString, params);
 }
-function number3(params) {
+function number4(params) {
   return _coercedNumber(ZodNumber, params);
 }
 function boolean4(params) {
@@ -23875,7 +24021,8 @@ var McpBridge = class {
     return { connected: !!this.socket, clients: [...new Set([...this.clients.values()].map((client) => client.name))], activity: this.activity };
   }
   /** Turn the connection on or off to match settings; call after settings change and at start-up. */
-  async refresh() {
+  async refresh(reconnect = false) {
+    if (reconnect) this.disconnect();
     if (this.deps.enabled()) {
       await chrome.alarms.create(MCP_ALARM, { periodInMinutes: 0.5 });
       this.scan();
@@ -23900,7 +24047,7 @@ var McpBridge = class {
     this.connecting = true;
     let socket;
     try {
-      socket = new WebSocket(`ws://127.0.0.1:${MCP_PORT}/extension`);
+      socket = new WebSocket(`ws://127.0.0.1:${this.deps.port()}/extension`);
     } catch {
       this.connecting = false;
       return this.later();
@@ -23995,8 +24142,8 @@ var ProviderStore = class {
   keys = {};
   async init(settings, key) {
     const saved = await chrome.storage.local.get(["modelProviders", "modelProviderKeys", "activeModelProviderId"]);
-    const parsed = external_exports.array(profileSchema).max(20).safeParse(saved.modelProviders);
-    this.profiles = parsed.success ? parsed.data : [];
+    const parsed2 = external_exports.array(profileSchema).max(20).safeParse(saved.modelProviders);
+    this.profiles = parsed2.success ? parsed2.data : [];
     const keys = external_exports.record(external_exports.string(), external_exports.string().max(1e4)).safeParse(saved.modelProviderKeys);
     this.keys = keys.success ? keys.data : {};
     this.activeId = typeof saved.activeModelProviderId === "string" && this.profiles.some((p) => p.id === saved.activeModelProviderId) ? saved.activeModelProviderId : this.profiles[0]?.id || crypto.randomUUID();
@@ -25601,6 +25748,8 @@ var scheduleSchema = external_exports.object({
 }).strict();
 var MCP_TOKEN_KEY = "mcpToken";
 var mcpToken = "";
+var MCP_PORT_KEY = "mcpPort";
+var mcpPort = MCP_PORT;
 var newToken = () => [...crypto.getRandomValues(new Uint8Array(18))].map((b) => b.toString(16).padStart(2, "0")).join("");
 var MCP_NO_TAB = /* @__PURE__ */ new Set(["browser_tabs", "browser_wait", "browser_downloads", "browser_save_file", "web_search"]);
 var mcpTabs = /* @__PURE__ */ new Map();
@@ -25610,7 +25759,7 @@ var MCP_IDLE_MS = 6e4;
 var RUN_TOOLS = [
   {
     name: "rove_run_task",
-    description: "Hand a whole browsing task to Rove, which does it in a new Chrome tab with the user's chosen model and settings, and returns its answer. Waits up to waitSeconds; if the task is still going, call rove_task_status with the runId. The task appears in Rove's history, and the user's approval settings apply.",
+    description: "Hand a whole browsing task to Rove, which does it in a new Chrome tab with the user's chosen model and settings, and returns its answer with a report: how long it took, the model, steps and tools used, tokens, cost when the provider reports prices, and the pages it visited. Waits up to waitSeconds; if the task is still going, call rove_task_status with the runId. If Rove asks a question, answer it with rove_reply. The task appears in Rove's history, and the user's Rove approval setting applies to it.",
     inputSchema: { type: "object", properties: {
       prompt: { type: "string", minLength: 1, maxLength: 5e4, description: "The task, as you would type it to Rove." },
       waitSeconds: { type: "integer", minimum: 0, maximum: 600, default: 120, description: "How long to wait for the answer." }
@@ -25618,11 +25767,27 @@ var RUN_TOOLS = [
   },
   {
     name: "rove_task_status",
-    description: "The status of a Rove task started with rove_run_task, with its answer once it finishes. Can wait for it to finish.",
+    description: "The status, answer and report (time, model, steps, tokens, cost, pages) of a Rove task. Can wait for it to finish.",
     inputSchema: { type: "object", properties: {
       runId: { type: "string" },
       waitSeconds: { type: "integer", minimum: 0, maximum: 600, default: 0 }
     }, required: ["runId"], additionalProperties: false }
+  },
+  {
+    name: "rove_reply",
+    description: "Answer a question Rove asked during a task (status awaiting_user), then wait for the task to go on. Approvals of actions are for the user in Rove's side panel, not for this tool.",
+    inputSchema: { type: "object", properties: {
+      runId: { type: "string" },
+      message: { type: "string", minLength: 1, maxLength: 5e4 },
+      waitSeconds: { type: "integer", minimum: 0, maximum: 600, default: 120 }
+    }, required: ["runId", "message"], additionalProperties: false }
+  },
+  {
+    name: "rove_list_tasks",
+    description: "Rove's most recent tasks, newest first: runId, the first prompt, status and times. Includes tasks the user started in Rove.",
+    inputSchema: { type: "object", properties: {
+      limit: { type: "integer", minimum: 1, maximum: 50, default: 10 }
+    }, additionalProperties: false }
   },
   {
     name: "rove_stop_task",
@@ -25652,13 +25817,17 @@ async function taskReport(runId, waitSeconds) {
   if (!run) throw new Error("No Rove task with that runId.");
   const answer = [...run.events].reverse().find((event) => event.type === "assistant")?.data.content;
   const error62 = run.status === "failed" ? [...run.events].reverse().find((event) => event.type === "status" && event.data.message)?.data.message : void 0;
+  const waiting = run.status === "awaiting_approval" ? run.events.findLast((event) => ["approval_required", "user_question"].includes(event.type)) : void 0;
+  const question = waiting?.type === "user_question" ? String(waiting.data.question ?? "") : void 0;
   return {
     runId,
-    status: run.status,
+    status: question !== void 0 ? "awaiting_user" : run.status,
     ...typeof answer === "string" && answer ? { answer } : {},
     ...error62 ? { error: error62 } : {},
-    ...run.status === "awaiting_approval" ? { note: "Rove is waiting for the user to approve an action in its side panel." } : {},
-    ...run.status === "running" ? { note: "Still running. Call rove_task_status with this runId to wait for the answer." } : {}
+    ...question !== void 0 ? { question, note: "Rove asked a question. Answer it with rove_reply, or ask the user." } : {},
+    ...run.status === "awaiting_approval" && question === void 0 ? { note: `Rove is waiting for the user to approve ${waiting?.data.tool ?? "an action"} in its side panel.` } : {},
+    ...run.status === "running" ? { note: "Still running. Call rove_task_status with this runId to wait for the answer." } : {},
+    report: runReport(run)
   };
 }
 async function mcpCall(tool2, args, client) {
@@ -25670,7 +25839,23 @@ async function mcpCall(tool2, args, client) {
       const run = await route("/api/runs", "POST", { prompt, tabId: null });
       return taskReport(run.id, Number.isFinite(args.waitSeconds) ? Number(args.waitSeconds) : 120);
     }
+    if (tool2 === "rove_list_tasks") {
+      const limit = Math.max(1, Math.min(50, Number.isInteger(args.limit) ? Number(args.limit) : 10));
+      return [...store.summaries()].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, limit).map((run) => ({ runId: run.id, prompt: run.prompt.length > 200 ? `${run.prompt.slice(0, 199)}\u2026` : run.prompt, status: run.status, createdAt: run.createdAt, updatedAt: run.updatedAt }));
+    }
     const runId = external_exports.string().min(1).parse(args.runId);
+    if (tool2 === "rove_reply") {
+      const run = store.summaries().find((item) => item.id === runId);
+      if (!run || !engine.isActive(runId)) throw new Error("That Rove task is not running.");
+      const full = await store.getRun(runId);
+      const waiting = full?.events.findLast((event) => ["approval_required", "user_question"].includes(event.type));
+      if (run.status !== "awaiting_approval" || waiting?.type !== "user_question")
+        throw new Error("Rove has not asked a question in that task. Approvals are for the user in Rove's side panel.");
+      engine.reply(runId, external_exports.string().trim().min(1).max(5e4).parse(args.message));
+      await store.flush();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return taskReport(runId, Number.isFinite(args.waitSeconds) ? Number(args.waitSeconds) : 120);
+    }
     if (tool2 === "rove_stop_task") {
       engine.stop(runId);
       return taskReport(runId, 0);
@@ -25713,6 +25898,7 @@ async function mcpCall(tool2, args, client) {
 }
 var mcp = new McpBridge({
   enabled: () => store.settings.mcpEnabled,
+  port: () => mcpPort,
   token: () => mcpToken,
   tools: mcpTools,
   call: mcpCall,
@@ -25777,6 +25963,8 @@ var ready = (async () => {
   const savedToken = (await chrome.storage.local.get(MCP_TOKEN_KEY))[MCP_TOKEN_KEY];
   mcpToken = typeof savedToken === "string" && savedToken.length >= 32 ? savedToken : newToken();
   if (mcpToken !== savedToken) await chrome.storage.local.set({ [MCP_TOKEN_KEY]: mcpToken });
+  const savedPort = Number((await chrome.storage.local.get(MCP_PORT_KEY))[MCP_PORT_KEY]);
+  if (Number.isInteger(savedPort) && savedPort >= 1024 && savedPort <= 65535) mcpPort = savedPort;
   await mcp.refresh();
 })();
 function state() {
@@ -26105,7 +26293,14 @@ async function route(path, method, body, settingsLocked = false) {
     broadcast("settings", result);
     return { ok: true, ...result };
   }
-  if (method === "GET" && path === "/api/mcp") return { token: mcpToken, port: MCP_PORT, ...mcp.status() };
+  if (method === "GET" && path === "/api/mcp") return { token: mcpToken, port: mcpPort, ...mcp.status() };
+  if (method === "PUT" && path === "/api/mcp/port") {
+    mcpPort = external_exports.number().int().min(1024).max(65535).parse(body.port);
+    if (mcpPort === MCP_PORT) await chrome.storage.local.remove(MCP_PORT_KEY);
+    else await chrome.storage.local.set({ [MCP_PORT_KEY]: mcpPort });
+    await mcp.refresh(true);
+    return { port: mcpPort };
+  }
   if (method === "POST" && path === "/api/mcp/token") {
     mcpToken = newToken();
     await chrome.storage.local.set({ [MCP_TOKEN_KEY]: mcpToken });

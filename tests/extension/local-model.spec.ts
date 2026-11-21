@@ -2,6 +2,7 @@ import { test, expect, chromium, type BrowserContext, type Page } from "@playwri
 import http from "node:http";
 import path from "node:path";
 import { DEFAULT_SETTINGS } from "../../shared/defaults";
+import { openSection } from "./settings-nav";
 
 // A llama.cpp-style server: /props reports no image support and a thinking template.
 // The extension should detect that, and let the user replace both controls.
@@ -63,7 +64,7 @@ test("a llama.cpp server is detected, and images and reasoning can be overridden
   expect(detected.tools.map((tool: any) => tool.function.name)).not.toContain("browser_screenshot");
   expect(detected.reasoning_effort).toBe("high");
 
-  await ui.getByRole("button", { name: "Settings", exact: true }).click();
+  await openSection(ui, "Model");
   await expect(ui.getByText("The endpoint says this model cannot see images.")).toBeVisible();
   await ui.getByRole("combobox", { name: "Images", exact: true }).click();
   await ui.getByRole("option", { name: "Always send images" }).click();
@@ -92,7 +93,7 @@ test("invalid request fields are refused", async () => {
 });
 
 test("model details show what the endpoint reports, in Settings and in the picker", async () => {
-  await ui.getByRole("button", { name: "Settings", exact: true }).click();
+  await openSection(ui, "Model");
   const details = ui.locator(".model-details");
   await expect(details.getByText("65,536 tokens").first()).toBeVisible();
   await expect(details.getByText("Off · On (Custom levels)")).toBeVisible();

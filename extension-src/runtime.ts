@@ -3,6 +3,7 @@ import { AgentEngine, MAX_CONCURRENT_RUNS, contextBaseline } from "../extension-
 import { historyBeforeEdit } from "../extension-core/conversation";
 import { ModelCatalogue, effectiveSettings } from "../extension-core/catalogue";
 import { BUILTIN_TOOLS, getTools } from "../extension-core/tools";
+import { runReport } from "../extension-core/report";
 import { parseReasoningBody, testModel } from "../extension-core/model";
 import type {
   AppState,
@@ -433,6 +434,9 @@ const scheduleSchema = z.object({
 // ---------- Connected apps (MCP) ----------
 const MCP_TOKEN_KEY = "mcpToken";
 let mcpToken = "";
+// Another port for the MCP server, for a clash with something else on 47821 (and for tests).
+const MCP_PORT_KEY = "mcpPort";
+let mcpPort = MCP_PORT;
 const newToken = () => [...crypto.getRandomValues(new Uint8Array(18))].map((b) => b.toString(16).padStart(2, "0")).join("");
 // Tools an app can use without a tab. Everything else needs a tabId, or acts in the app's last tab.
 const MCP_NO_TAB = new Set(["browser_tabs", "browser_wait", "browser_downloads", "browser_save_file", "web_search"]);
@@ -443,7 +447,7 @@ const MCP_IDLE_MS = 60_000;
 const RUN_TOOLS = [
   {
     name: "rove_run_task",
-    description: "Hand a whole browsing task to Rove, which does it in a new Chrome tab with the user's chosen model and settings, and returns its answer. Waits up to waitSeconds; if the task is still going, call rove_task_status with the runId. The task appears in Rove's history, and the user's approval settings apply.",
+    description: "Hand a whole browsing task to Rove, which does it in a new Chrome tab with the user's chosen model and settings, and returns its answer with a report: how long it took, the model, steps and tools used, tokens, cost when the provider reports prices, and the pages it visited. Waits up to waitSeconds; if the task is still going, call rove_task_status with the runId. If Rove asks a question, answer it with rove_reply. The task appears in Rove's history, and the user's Rove approval setting applies to it.",
     inputSchema: { type: "object", properties: {
       prompt: { type: "string", minLength: 1, maxLength: 50000, description: "The task, as you would type it to Rove." },
       waitSeconds: { type: "integer", minimum: 0, maximum: 600, default: 120, description: "How long to wait for the answer." },
@@ -451,11 +455,27 @@ const RUN_TOOLS = [
   },
   {
     name: "rove_task_status",
-    description: "The status of a Rove task started with rove_run_task, with its answer once it finishes. Can wait for it to finish.",
+    description: "The status, answer and report (time, model, steps, tokens, cost, pages) of a Rove task. Can wait for it to finish.",
     inputSchema: { type: "object", properties: {
       runId: { type: "string" },
       waitSeconds: { type: "integer", minimum: 0, maximum: 600, default: 0 },
     }, required: ["runId"], additionalProperties: false },
+  },
+  {
+    name: "rove_reply",
+    description: "Answer a question Rove asked during a task (status awaiting_user), then wait for the task to go on. Approvals of actions are for the user in Rove's side panel, not for this tool.",
+    inputSchema: { type: "object", properties: {
+      runId: { type: "string" },
+      message: { type: "string", minLength: 1, maxLength: 50000 },
+      waitSeconds: { type: "integer", minimum: 0, maximum: 600, default: 120 },
+    }, required: ["runId", "message"], additionalProperties: false },
+  },
+  {
+    name: "rove_list_tasks",
+    description: "Rove's most recent tasks, newest first: runId, the first prompt, status and times. Includes tasks the user started in Rove.",
+    inputSchema: { type: "object", properties: {
+      limit: { type: "integer", minimum: 1, maximum: 50, default: 10 },
+    }, additionalProperties: false },
   },
   {
     name: "rove_stop_task",
@@ -489,13 +509,21 @@ async function taskReport(runId: string, waitSeconds: number) {
   if (!run) throw new Error("No Rove task with that runId.");
   const answer = [...run.events].reverse().find((event) => event.type === "assistant")?.data.content;
   const error = run.status === "failed" ? [...run.events].reverse().find((event) => event.type === "status" && event.data.message)?.data.message : undefined;
+  // Rove waits the same way for an approval and for an answer to its own question; tell them apart.
+  const waiting = run.status === "awaiting_approval"
+    ? run.events.findLast((event) => ["approval_required", "user_question"].includes(event.type))
+    : undefined;
+  const question = waiting?.type === "user_question" ? String(waiting.data.question ?? "") : undefined;
   return {
     runId,
-    status: run.status,
+    status: question !== undefined ? "awaiting_user" : run.status,
     ...(typeof answer === "string" && answer ? { answer } : {}),
     ...(error ? { error } : {}),
-    ...(run.status === "awaiting_approval" ? { note: "Rove is waiting for the user to approve an action in its side panel." } : {}),
+    ...(question !== undefined ? { question, note: "Rove asked a question. Answer it with rove_reply, or ask the user." } : {}),
+    ...(run.status === "awaiting_approval" && question === undefined
+      ? { note: `Rove is waiting for the user to approve ${waiting?.data.tool ?? "an action"} in its side panel.` } : {}),
     ...(run.status === "running" ? { note: "Still running. Call rove_task_status with this runId to wait for the answer." } : {}),
+    report: runReport(run),
   };
 }
 async function mcpCall(tool: string, args: Record<string, any>, client: McpClient) {
@@ -507,7 +535,27 @@ async function mcpCall(tool: string, args: Record<string, any>, client: McpClien
       const run = await route("/api/runs", "POST", { prompt, tabId: null });
       return taskReport(run.id, Number.isFinite(args.waitSeconds) ? Number(args.waitSeconds) : 120);
     }
+    if (tool === "rove_list_tasks") {
+      const limit = Math.max(1, Math.min(50, Number.isInteger(args.limit) ? Number(args.limit) : 10));
+      return [...store.summaries()]
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+        .slice(0, limit)
+        .map((run) => ({ runId: run.id, prompt: run.prompt.length > 200 ? `${run.prompt.slice(0, 199)}…` : run.prompt, status: run.status, createdAt: run.createdAt, updatedAt: run.updatedAt }));
+    }
     const runId = z.string().min(1).parse(args.runId);
+    if (tool === "rove_reply") {
+      const run = store.summaries().find((item) => item.id === runId);
+      if (!run || !engine.isActive(runId)) throw new Error("That Rove task is not running.");
+      const full = await store.getRun(runId);
+      const waiting = full?.events.findLast((event) => ["approval_required", "user_question"].includes(event.type));
+      if (run.status !== "awaiting_approval" || waiting?.type !== "user_question")
+        throw new Error("Rove has not asked a question in that task. Approvals are for the user in Rove's side panel.");
+      engine.reply(runId, z.string().trim().min(1).max(50000).parse(args.message));
+      await store.flush();
+      // Let the task move off the question before waiting on it.
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      return taskReport(runId, Number.isFinite(args.waitSeconds) ? Number(args.waitSeconds) : 120);
+    }
     if (tool === "rove_stop_task") {
       engine.stop(runId);
       return taskReport(runId, 0);
@@ -554,6 +602,7 @@ async function mcpCall(tool: string, args: Record<string, any>, client: McpClien
 }
 const mcp = new McpBridge({
   enabled: () => store.settings.mcpEnabled,
+  port: () => mcpPort,
   token: () => mcpToken,
   tools: mcpTools,
   call: mcpCall,
@@ -629,6 +678,8 @@ const ready = (async () => {
   const savedToken = (await chrome.storage.local.get(MCP_TOKEN_KEY))[MCP_TOKEN_KEY];
   mcpToken = typeof savedToken === "string" && savedToken.length >= 32 ? savedToken : newToken();
   if (mcpToken !== savedToken) await chrome.storage.local.set({ [MCP_TOKEN_KEY]: mcpToken });
+  const savedPort = Number((await chrome.storage.local.get(MCP_PORT_KEY))[MCP_PORT_KEY]);
+  if (Number.isInteger(savedPort) && savedPort >= 1024 && savedPort <= 65535) mcpPort = savedPort;
   await mcp.refresh();
 })();
 function state(): AppState {
@@ -992,7 +1043,14 @@ async function route(path: string, method: string, body: any, settingsLocked = f
     broadcast("settings", result);
     return { ok: true, ...result };
   }
-  if (method === "GET" && path === "/api/mcp") return { token: mcpToken, port: MCP_PORT, ...mcp.status() };
+  if (method === "GET" && path === "/api/mcp") return { token: mcpToken, port: mcpPort, ...mcp.status() };
+  if (method === "PUT" && path === "/api/mcp/port") {
+    mcpPort = z.number().int().min(1024).max(65535).parse(body.port);
+    if (mcpPort === MCP_PORT) await chrome.storage.local.remove(MCP_PORT_KEY);
+    else await chrome.storage.local.set({ [MCP_PORT_KEY]: mcpPort });
+    await mcp.refresh(true);
+    return { port: mcpPort };
+  }
   if (method === "POST" && path === "/api/mcp/token") {
     mcpToken = newToken();
     await chrome.storage.local.set({ [MCP_TOKEN_KEY]: mcpToken });

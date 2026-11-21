@@ -14,7 +14,13 @@ const staticKeys = (): string[] => {
   return [...keys];
 };
 // Strings that reach t() through variables rather than literal calls.
-const dynamicKeys = ["Working", "Waiting for you", "Completed", "Failed", "Stopped", "Allow", "Ask", "Block", "Off", "Low", "Medium", "High", "Max", "Thinking off", "Thinking on", "Web Speech", "Groq / compatible API", "Summarize this page", "Find something on this page", "Open a site and do something"];
+const dynamicKeys = ["Working", "Waiting for you", "Completed", "Failed", "Stopped", "Allow", "Ask", "Block", "Off", "Low", "Medium", "High", "Max", "Thinking off", "Thinking on", "Web Speech", "Groq / compatible API", "Summarize this page", "Find something on this page", "Open a site and do something",
+  // Settings section names and descriptions.
+  "Model", "Instructions", "Browsing", "Tools and sites", "Search and voice", "Connected apps", "Appearance", "Backup",
+  "The AI provider and model Rove thinks with.", "What Rove is told in every chat, and the prompts you reuse.",
+  "How Rove works in your tabs, and how long a task may run.", "Which browser tools Rove may use, and rules for particular sites.",
+  "Web search for up-to-date answers, and speech to text for dictating.", "Let Claude Code and other MCP apps use Rove.",
+  "Theme, light or dark, and language.", "Move your setup to another Chrome profile, or keep a copy."];
 
 describe("languages", () => {
   it("translates every UI string in both Chinese dictionaries", () => {

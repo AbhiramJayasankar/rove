@@ -735,28 +735,6 @@ input:focus-visible + .switch {
   display: flex;
   flex-direction: column;
 }
-.settings-nav {
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 0 16px;
-  gap: 10px;
-}
-.settings-nav nav {
-  display: flex;
-  border-bottom: 1px solid var(--line);
-  gap: 22px;
-}
-.settings-nav nav button {
-  color: var(--muted);
-  padding: 10px 0 12px;
-  border-bottom: 2px solid transparent;
-  font-size: 12px;
-}
-.settings-nav nav button.selected {
-  border-color: var(--accent);
-  color: var(--ink);
-}
 .settings-content {
   flex: 1;
   min-height: 0;
@@ -1029,9 +1007,6 @@ input:focus-visible + .switch {
   .task-empty h1 {
     font-size: 36px;
   }
-  .settings-nav {
-    padding-inline: 28px;
-  }
   .settings-content {
     padding: 36px;
   }
@@ -1049,9 +1024,6 @@ input:focus-visible + .switch {
 
   .preview-toggle {
     margin-right: 2px;
-  }
-  .settings-nav nav {
-    gap: 17px;
   }
   .settings-content {
     padding-inline: 16px;
@@ -1151,11 +1123,6 @@ input:focus-visible + .switch {
 @media (min-width: 700px) {
   .settings-footer {
     padding-inline: max(36px, calc((100% - 650px) / 2 + 36px));
-  }
-  .settings-content {
-    max-width: 650px;
-    width: 100%;
-    align-self: center;
   }
 }
 

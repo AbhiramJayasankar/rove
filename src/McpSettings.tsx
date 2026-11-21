@@ -13,7 +13,7 @@ function readFolder() {
   }
 }
 
-/** Settings > Tools > Connected apps: lets MCP clients such as Claude Code use Rove. */
+/** Settings > Connected apps: lets MCP clients such as Claude Code use Rove. */
 export default function McpSettings({ state, draft, update }: {
   state: AppState;
   draft: Settings;
@@ -21,18 +21,20 @@ export default function McpSettings({ state, draft, update }: {
 }) {
   const t = useT();
   const [token, setToken] = useState("");
+  const [port, setPort] = useState(47821);
   const [folder, setFolder] = useState(readFolder);
   const [copied, setCopied] = useState("");
   const saved = state.settings.mcpEnabled;
   const status = state.mcp;
   useEffect(() => {
-    if (saved) void api<{ token: string }>("/api/mcp").then((info) => setToken(info.token)).catch(() => {});
+    if (saved) void api<{ token: string; port: number }>("/api/mcp").then((info) => { setToken(info.token); setPort(info.port); }).catch(() => {});
   }, [saved]);
   const place = folder.trim().replace(/[\\/]+$/, "") || (navigator.userAgent.includes("Windows") ? "C:\\path\\to\\Rove" : "/path/to/Rove");
   const separator = place.includes("\\") ? "\\" : "/";
   const script = `${place}${separator}mcp${separator}rove-mcp.mjs`;
-  const claude = `claude mcp add rove --scope user -e ROVE_TOKEN=${token} -- node "${script}"`;
-  const config = JSON.stringify({ mcpServers: { rove: { command: "node", args: [script], env: { ROVE_TOKEN: token } } } }, null, 2);
+  const portEnv = port === 47821 ? {} : { ROVE_MCP_PORT: String(port) };
+  const claude = `claude mcp add rove --scope user -e ROVE_TOKEN=${token}${port === 47821 ? "" : ` -e ROVE_MCP_PORT=${port}`} -- node "${script}"`;
+  const config = JSON.stringify({ mcpServers: { rove: { command: "node", args: [script], env: { ROVE_TOKEN: token, ...portEnv } } } }, null, 2);
   function copy(key: string, value: string) {
     void navigator.clipboard.writeText(value).then(() => {
       setCopied(key);
@@ -40,7 +42,7 @@ export default function McpSettings({ state, draft, update }: {
     });
   }
   const rows: [keyof Settings, string, string][] = [
-    ["mcpBrowserTools", t("Let apps use the browser tools"), t("The app clicks, types and reads pages itself, in tabs Rove groups for it. Tools you switched off above stay off.")],
+    ["mcpBrowserTools", t("Let apps use the browser tools"), t("The app clicks, types and reads pages itself, in tabs Rove groups for it. Tools you switched off under Tools and sites stay off.")],
     ["mcpRunTasks", t("Let apps hand tasks to Rove"), t("The app gives Rove a whole task, which Rove's own model does in a new tab. It shows in your history.")],
   ];
   return (

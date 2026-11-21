@@ -2,6 +2,21 @@
 
 The details behind the [README](../README.md): models, local servers, providers, browsing behavior, voice, prompts and storage.
 
+## Settings
+
+The sliders icon opens an overview: one sentence says which model Rove uses, how it works in your tabs, how many tools it may use and which site rules or apps apply, and each part of it opens the section that changes it. The sections are:
+
+- **Model**: providers, keys, the models shown in chat and what the endpoint reports about them.
+- **Instructions**: system instructions, standing instructions and saved prompts.
+- **Browsing**: the step limit per task and the three tab switches.
+- **Tools and sites**: which browser tools the model may use, and Allow, Ask or Block rules for sites.
+- **Search and voice**: the web search API and the speech to text backend.
+- **Connected apps**: MCP access for Claude Code and other apps.
+- **Appearance**: theme, light or dark, pitch black, and language.
+- **Backup**: save your setup to a file or restore it.
+
+A dot beside a section means it has unsaved changes; **Save changes** saves every section at once.
+
 ## Models and context
 
 Rove uses OpenAI-compatible **Chat Completions function calling**. Set a base URL such as `https://api.openai.com/v1`, a compatible gateway, or a local model server. A full URL ending in `/chat/completions` also works. Local endpoints may omit the key. The model must support tools. Streaming is always requested.
@@ -37,7 +52,7 @@ Provider keys stay in `chrome.storage.local` (`modelProviderKeys`, with the sele
 
 ## Browsing behavior
 
-Settings → Tools → **Browsing** has three switches, all on by default and applied to the next browser action of every task:
+Settings → **Browsing** has three switches, all on by default and applied to the next browser action of every task:
 
 - **Work in the background.** Rove never switches to the tab it works in. It opens its own tabs behind the one you are using and keeps hidden tabs rendering at full speed while a task runs, so you can keep using Chrome (or another app). Screenshots of a hidden tab work without bringing it forward, and a tab Chrome unloaded to save memory is reloaded in place. Turn this off if a page only works while it is in front; Rove then switches to the tab as older versions did.
 - **Group Rove's tabs.** Tabs Rove opens go into one Chrome tab group titled Rove per task, so you can see what it opened and close it together. Your own tabs are never grouped. The group stays after the task so you can review it.
@@ -61,18 +76,18 @@ If another task is working in the tab, Rove says so instead of starting a second
 
 - **Standing instructions** (Settings → Instructions) are added to every task after the system instructions.
 - **Saved prompts**: add them in Settings → Instructions. Type `/` in the message box to search and insert one; an optional start page is prefixed as "Start at ...". Nothing is sent until you press Send.
-- **Site rules** (Settings → Tools) set Allow, Ask or Block for a site and its subdomains. They override Auto-approve and Ask first for that site; Ask cannot be answered by switching to Auto-approve; Block never reaches the browser and the model is told why. The most specific rule wins and a tie takes the stricter action. A rule checks the address a tool acts on, and again where the tab ends up: if a redirect or a click lands on a blocked site, the page text and screenshot from that action are withheld from the model, and the next tool call on that tab is blocked.
+- **Site rules** (Settings → Tools and sites) set Allow, Ask or Block for a site and its subdomains. They override Auto-approve and Ask first for that site; Ask cannot be answered by switching to Auto-approve; Block never reaches the browser and the model is told why. The most specific rule wins and a tie takes the stricter action. A rule checks the address a tool acts on, and again where the tab ends up: if a redirect or a click lands on a blocked site, the page text and screenshot from that action are withheld from the model, and the next tool call on that tab is blocked.
 - **Attachments**: the paperclip adds up to five images (5 MB each) or text files (200,000 characters each), or a screenshot of the selected tab. Images need a vision model. File contents are treated as untrusted data.
 - **Reports**: the agent can save a `.md`, `.txt`, `.csv`, `.json` or `.html` report to Downloads/Rove with `browser_save_file`. File names are bare names; folders and other types are refused.
 - **Export**: the trace view exports a run as JSON or a readable Markdown transcript.
-- **Languages**: English, Simplified Chinese and Traditional Chinese. Settings → Language defaults to following Chrome. The system prompt and the model's answers are not translated.
+- **Languages**: English, Simplified Chinese and Traditional Chinese. Settings → Appearance → Language defaults to following Chrome. The system prompt and the model's answers are not translated.
 - **Shortcut**: Alt+Shift+O opens Rove; change it at `chrome://extensions/shortcuts`.
 
 ## Voice input
 
 The microphone inserts dictation at the cursor or replaces selected text. Click again to stop; Escape cancels and restores the draft. It never auto-sends.
 
-Settings → Model → Speech to text selects the backend:
+Settings → Search and voice → Speech to text selects the backend:
 
 - **Web Speech** (default): no key, live text; Chrome sends audio to Google. Needs internet and a Chrome build with speech recognition.
 - **Groq / compatible API**: uploads WebM/Opus only to your configured endpoint when you stop. Defaults: `https://api.groq.com/openai/v1`, `whisper-large-v3-turbo`. The base URL and model are editable; enter a separate voice API key. There is no automatic fallback between backends.
@@ -92,12 +107,12 @@ The calendar button in the header opens **Scheduled tasks**. A scheduled task is
 
 ## Connected apps (MCP)
 
-**Settings > Tools > Connected apps** lets MCP clients such as Claude Code, Codex or Cursor use Rove. It is off until you switch it on.
+**Settings > Connected apps** lets MCP clients such as Claude Code, Codex or Cursor use Rove. It is off until you switch it on.
 
 - The app starts `mcp/rove-mcp.mjs` from the Rove folder (Node.js 22 or newer) over stdio. The script listens on `127.0.0.1:47821`; Rove's service worker connects out to it, every 10 seconds while it is awake and at least every 30 seconds through an alarm, and keeps the connection open with a ping every 20 seconds. Several apps can run at once: the first script owns the port and relays for the others.
 - The script accepts Rove only from Rove's own extension origin, and Rove accepts the script only if it presents the token from Rove's settings (`ROVE_TOKEN`). Web pages cannot reach the script, because browsers always send their own origin.
 - **Browser tools** run in the background in tabs Rove groups for the app. Without a `tabId`, a tool acts in the tab the app used last. Rove keeps the debugger attached for a minute after the app's last action, then lets go.
-- **Task handoff** starts an ordinary Rove task in a new tab and returns its status and answer; `rove_task_status` waits for a running one.
+- **Task handoff** starts an ordinary Rove task in a new tab and returns its status and answer, plus a `report`: start and finish time, duration, model and provider host, steps and the count of each tool, failed tool calls, tokens (input, output, cached, reasoning, and whether every response reported them), cost when the provider reports it, and the last pages the task worked on. `rove_task_status` waits for a running task. When Rove asks the user something, the status is `awaiting_user` with the question, and `rove_reply` answers it; an approval still has to be given in Rove's panel. `rove_list_tasks` lists recent tasks, newest first.
 - Site rules apply to every call: Block refuses, and Ask refuses with a message telling the app to ask you to allow the site, because Rove cannot show you an approval in the middle of the app's call. Rove's approval mode does not apply to direct browser tools; your MCP app's own permission prompts do. Tasks handed to Rove follow Rove's approval mode.
 - The panel lists the connected apps and their last 20 actions. Nothing an app does through the browser tools is added to Rove's chat history.
 

@@ -2,6 +2,7 @@ import { test, expect, chromium, type BrowserContext, type Page } from "@playwri
 import http from "node:http";
 import path from "node:path";
 import { DEFAULT_SETTINGS } from "../../shared/defaults";
+import { openSection } from "./settings-nav";
 
 let context: BrowserContext, ui: Page, server: http.Server, origin: string;
 const calls: { provider: string; key?: string }[] = [];
@@ -72,7 +73,7 @@ test("one unavailable catalogue does not hide other providers", async () => {
   expect((await rpc("/api/state")).providers).toHaveLength(2);
 });
 test("settings adds OpenRouter, saves its own connection and keeps existing providers", async () => {
-  await ui.getByRole("button", { name: "Settings", exact: true }).click();
+  await openSection(ui, "Model");
   await ui.getByRole("combobox", { name: "Configure provider" }).click();
   await ui.getByRole("option", { name: "+ Add OpenRouter", exact: true }).click();
   await expect(ui.getByRole("textbox", { name: "Provider name", exact: true })).toHaveValue("OpenRouter");
@@ -84,7 +85,7 @@ test("settings adds OpenRouter, saves its own connection and keeps existing prov
   await expect.poll(async () => (await rpc("/api/state")).settings.baseUrl).toBe(origin + "/router/v1");
   expect((await rpc("/api/state")).providers).toHaveLength(3);
   await ui.reload();
-  await ui.getByRole("button", { name: "Settings", exact: true }).click();
+  await openSection(ui, "Model");
   await expect(ui.getByRole("combobox", { name: "Configure provider" })).toHaveText("OpenRouter");
   await ui.setViewportSize({ width: 400, height: 900 });
   expect(await ui.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

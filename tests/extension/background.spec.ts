@@ -1,6 +1,7 @@
 import { test, expect, chromium, type BrowserContext, type Page } from "@playwright/test";
 import http from "node:http";
 import path from "node:path";
+import { openSection } from "./settings-nav";
 
 // Rove works in tabs the user is not looking at: it opens them behind the current tab, collects them in a
 // tab group, and Settings can turn either behaviour off. (Playwright reports every tab as visible, so the
@@ -54,8 +55,7 @@ test("a tab Rove opens stays behind the current tab, in a Rove group, and the us
 });
 
 test("Settings → Tools has the browsing switches, they save, and they take effect on the next tab", async () => {
-  await ui.getByRole("button", { name: "Settings", exact: true }).click();
-  await ui.getByRole("button", { name: "Tools", exact: true }).click();
+  await openSection(ui, "Browsing");
   const background = ui.getByRole("switch", { name: "Work in the background", exact: true });
   const group = ui.getByRole("switch", { name: "Group Rove's tabs", exact: true });
   const bar = ui.getByRole("switch", { name: "Keep going if I close Chrome's debugging bar", exact: true });

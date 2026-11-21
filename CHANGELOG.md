@@ -2,6 +2,17 @@
 
 Rove follows [semantic versioning](https://semver.org). The version lives in `package.json`; the build copies it into the extension manifest and the app.
 
+## 2.10.0 - 2026-11-20
+
+### Added
+- **A run report for connected apps.** When Claude Code or another app hands Rove a task, the answer now comes with how long it took, which model and provider did it, how many steps and which tools it used, how many failed, the tokens (and the cost, when the provider reports it) and the pages it ended on.
+- **Connected apps can answer Rove's questions.** If a task handed to Rove asks you something, the app sees the question and can reply with the new `rove_reply` tool, instead of the task waiting in the panel. `rove_list_tasks` lists recent tasks so an app can pick one up again.
+
+### Changed
+- **Settings is rebuilt.** It opens on an overview with a sentence that says how Rove is set up (its model and provider, how it works in your tabs, how many tools it may use, your site rules and any connected app); each part of the sentence opens the place to change it. Below it, every section has its own page with a one-line summary of how it is set: **Model**, **Instructions**, **Browsing**, **Tools and sites**, **Search and voice**, **Connected apps**, **Appearance** and **Backup**. A dot marks a section with unsaved changes. In a wide window a list of sections stays on the left.
+- Settings moved to where they belong: the step limit is under **Browsing** with the tab switches, speech to text sits with web search under **Search and voice**, language is with the themes under **Appearance**, and **Backup** and **Connected apps** have their own pages.
+- The MCP server's instructions now say that Rove's approval setting applies to tasks handed to Rove, while the browser tools an app uses directly are approved by that app.
+
 ## 2.9.1 - 2026-11-20
 
 ### Fixed

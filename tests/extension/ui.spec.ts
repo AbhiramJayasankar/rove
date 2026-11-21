@@ -8,6 +8,7 @@ import {
 import http from "node:http";
 import path from "node:path";
 import fs from "node:fs/promises";
+import { openSection } from "./settings-nav";
 
 let context: BrowserContext;
 let fixture: http.Server;
@@ -167,16 +168,17 @@ const resultText =
 test("connection settings use unsaved credentials for discovery and retain only the requested controls", async () => {
   await ui.setViewportSize({ width: 400, height: 850 });
   await ui.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(
-    ui
-      .getByRole("navigation", { name: "Settings sections" })
-      .getByRole("button"),
-  ).toHaveText(["Model", "Instructions", "Tools"]);
+  // The overview lists every section and reads back how Rove is set up.
+  await expect(ui.getByRole("heading", { name: "Settings", level: 1 })).toBeVisible();
+  for (const name of ["Model", "Instructions", "Browsing", "Tools and sites", "Search and voice", "Connected apps", "Appearance", "Backup"])
+    await expect(ui.locator(".settings-groups").getByRole("button", { name, exact: true })).toBeVisible();
+  await expect(ui.locator(".settings-readout")).toContainText("tools");
   const version = await ui.evaluate(() => chrome.runtime.getManifest().version);
   await expect(ui.getByText(`Rove ${version}`)).toBeVisible();
   await ui.getByRole("button", { name: "What's new", exact: true }).click();
   await expect(ui.getByRole("dialog", { name: "What's new" })).toContainText(`${version} - `);
   await ui.keyboard.press("Escape");
+  await openSection(ui, "Model");
   await ui
     .getByRole("textbox", { name: "API base URL", exact: true })
     .fill(origin + "/v1");
@@ -221,11 +223,11 @@ test("connection settings use unsaved credentials for discovery and retain only 
   await expect(
     ui.getByRole("combobox", { name: "Approval mode", exact: true }),
   ).toHaveCount(0);
-  await ui.getByRole("button", { name: "Instructions", exact: true }).click();
+  await openSection(ui, "Instructions");
   await expect(
     ui.getByRole("textbox", { name: "System instructions", exact: true }),
   ).toBeVisible();
-  await ui.getByRole("button", { name: "Tools", exact: true }).click();
+  await openSection(ui, "Tools and sites");
   await ui
     .getByRole("searchbox", { name: "Search tools", exact: true })
     .fill("snapshot");

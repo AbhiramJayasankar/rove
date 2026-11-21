@@ -202,15 +202,15 @@ await ui.getByRole("button", { name: "Stop", exact: true }).first().click().catc
 await sleep(500);
 
 // Settings.
-await ui.setViewportSize({ width: 470, height: 2100 });
+await ui.setViewportSize({ width: 470, height: 860 });
 await ui.getByRole("button", { name: "Settings", exact: true }).click();
+await sleep(800);
+await shot("settings-overview.png");
+await ui.setViewportSize({ width: 470, height: 2100 });
+await ui.locator(".settings-groups").getByRole("button", { name: "Model", exact: true }).click();
 await sleep(1200);
 await ui.locator(".settings-content").evaluate((node) => (node.scrollTop = 0));
 await shot("settings-model.png", { fullPage: true });
-await ui.getByRole("button", { name: "Tools", exact: true }).click();
-await sleep(500);
-await ui.setViewportSize({ width: 470, height: 1500 });
-await shot("settings-tools.png");
 await ui.setViewportSize({ width: 470, height: 860 });
 
 // Model picker with its details.

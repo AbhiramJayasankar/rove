@@ -602,7 +602,7 @@ export default function Workbench({
               {!state.settings.model ? (
                 <button
                   className="setup-model"
-                  onClick={() => setPage("settings")}
+                  onClick={() => setPage("model")}
                 >
                   {t("Connect a model")}
                   <ArrowUp size={14} />

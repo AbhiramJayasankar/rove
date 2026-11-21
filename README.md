@@ -28,7 +28,7 @@ Rove is not in the Chrome Web Store, so you load it as an unpacked extension. It
 4. Click **Load unpacked** and choose the `rove-<version>` folder (the one that contains `manifest.json`).
 5. Click the puzzle-piece icon in Chrome's toolbar and **pin Rove**. Click its icon, or press `Alt+Shift+O`, to open the side panel on the current tab. The panel stays with the tabs you open it on.
 
-**To update**, unzip the new release anywhere, then either load the new folder with **Load unpacked** or copy its files over the old folder and click the reload icon on Rove's card. Rove has a fixed extension ID, so both routes update the Rove you have and keep your settings and chats. (Updating from 2.6.x or older is the exception; see below.) **Settings > Model > Backup** saves everything to a file if you want a copy first.
+**To update**, unzip the new release anywhere, then either load the new folder with **Load unpacked** or copy its files over the old folder and click the reload icon on Rove's card. Rove has a fixed extension ID, so both routes update the Rove you have and keep your settings and chats. (Updating from 2.6.x or older is the exception; see below.) **Settings > Backup** saves everything to a file if you want a copy first.
 
 ### Updating from 2.6.x or older
 
@@ -42,7 +42,7 @@ The ID changes once in 2.7.0, so **this one update arrives as a separate Rove**.
 chrome.storage.local.get(null).then((all) => { const keep = ["settings", "modelProviders", "activeModelProviderId", "visibleModels", "shortcuts", "voiceSettings", "relay.modelProfiles.v1", "rove.modelOverrides.v1", "modelApiKey", "modelProviderKeys", "voiceApiKey"]; const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([JSON.stringify({ format: "rove-settings-backup", version: 1, storage: Object.fromEntries(Object.entries(all).filter(([key]) => keep.includes(key))) })], { type: "application/json" })); a.download = "rove-old-settings.json"; a.click(); });
 ```
 
-2. In the **new** Rove, go to **Settings > Model > Backup > Restore from file** and choose that file. Rove reloads with your settings.
+2. In the **new** Rove, go to **Settings > Backup > Restore from file** and choose that file. Rove reloads with your settings.
 3. Remove the old Rove in `chrome://extensions`.
 
 ### Option 2: clone the repository
@@ -96,13 +96,13 @@ Rove cannot control Chrome's own pages (`chrome://…`), the Chrome Web Store or
 
 <table>
 <tr>
-<td width="33%"><img src="docs/images/settings-model.png" alt="Settings: provider, model list, what the endpoint reports about the selected model, and per-model abilities"></td>
-<td width="33%"><img src="docs/images/settings-tools.png" alt="Settings, Tools: browsing switches and the list of browser tools"></td>
+<td width="33%"><img src="docs/images/settings-overview.png" alt="The Settings overview: a sentence saying which model Rove uses, how it works in tabs and how many tools it may use, above the list of sections"></td>
+<td width="33%"><img src="docs/images/settings-model.png" alt="Settings, Model: provider, model list, what the endpoint reports about the selected model, and per-model abilities"></td>
 <td width="33%"><img src="docs/images/panel-activity-dark.png" alt="The same task in dark mode"></td>
 </tr>
 <tr>
+<td align="center"><sub><b>Settings at a glance.</b> One sentence says how Rove is set up, and each part of it opens its section.</sub></td>
 <td align="center"><sub><b>See what the endpoint tells you</b> about any model: context, limits, modalities, tools, reasoning, price. Override images and reasoning per model.</sub></td>
-<td align="center"><sub><b>Choose the tools</b> the model may use, and how Rove treats your tabs.</sub></td>
 <td align="center"><sub><b>Light and dark,</b> in English, 简体中文 or 繁體中文.</sub></td>
 </tr>
 </table>
@@ -115,13 +115,13 @@ Rove cannot control Chrome's own pages (`chrome://…`), the Chrome Web Store or
 
 - **Drive real pages.** Frame-aware page reading, native clicks and typing, forms and selects, hover and drag, scrolling, screenshots, dialogs, tabs and downloads. Generic JavaScript, raw DevTools commands and file upload exist but start switched off.
 - **Run up to three tasks at once,** each with its own tabs, while you keep browsing.
-- **Search the web** through Exa, Tavily or Parallel with your own key (**Settings > Tools > Web search**).
+- **Search the web** through Exa, Tavily or Parallel with your own key (**Settings > Search and voice**).
 - **Reuse prompts.** Standing instructions apply to every task, and a `/` menu inserts saved prompts.
 - **Attach context.** Add images, text files or a screenshot of the current tab.
 - **Dictate.** Speak your task with Chrome's built-in speech recognition, or with a Whisper-compatible endpoint of your choice.
 - **Run tasks on a schedule.** The calendar button in the header lists scheduled tasks: once, on chosen days at a set time, or every few hours. Rove runs each one by itself in a new tab while Chrome is open, and sends a notification when it finishes or needs you.
-- **Work with Claude Code and other MCP apps.** Turn on **Settings > Tools > Connected apps** and Claude Code, Codex, Cursor or any MCP client can use Rove's browser tools in your Chrome, or hand Rove a whole task. See [Use Rove from Claude Code](#use-rove-from-claude-code-and-other-mcp-apps).
-- **Pick a look.** Six colour themes, each in light and dark, plus pitch black for OLED screens, under **Settings > Model > Appearance**.
+- **Work with Claude Code and other MCP apps.** Turn on **Settings > Connected apps** and Claude Code, Codex, Cursor or any MCP client can use Rove's browser tools in your Chrome, or hand Rove a whole task. See [Use Rove from Claude Code](#use-rove-from-claude-code-and-other-mcp-apps).
+- **Pick a look.** Six colour themes, each in light and dark, plus pitch black for OLED screens, under **Settings > Appearance**.
 - **Keep a record.** Every task is saved locally. Export one as JSON or a readable Markdown transcript.
 
 The [user guide](docs/guide.md) covers models and local servers, multiple providers, browsing behavior, site rules, attachments, voice input and storage in detail.
@@ -130,7 +130,7 @@ The [user guide](docs/guide.md) covers models and local servers, multiple provid
 
 Rove ships a small MCP server, `mcp/rove-mcp.mjs`, inside the extension folder. Your MCP app starts it, and Rove connects to it on `127.0.0.1`. It needs Node.js 22 or newer and nothing else.
 
-1. In Rove, open **Settings > Tools > Connected apps**, switch on **Let apps like Claude Code use Rove**, and save.
+1. In Rove, open **Settings > Connected apps**, switch on **Let apps like Claude Code use Rove**, and save.
 2. Type the folder you loaded in `chrome://extensions` into **Rove folder**, then copy the Claude Code command shown below it. It looks like this:
 
 ```sh
@@ -142,7 +142,7 @@ For other apps, copy the JSON config shown under it instead. Rove connects withi
 What the app gets:
 
 - **Browser tools** (`browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_screenshot` and the rest): the app drives your Chrome itself, in tabs Rove opens in the background and groups. Tools you switched off in Rove stay off.
-- **Task handoff** (`rove_run_task`, `rove_task_status`, `rove_stop_task`): the app gives Rove a whole task, which Rove's own model carries out in a new tab and answers. The task shows in your history.
+- **Task handoff** (`rove_run_task`, `rove_task_status`, `rove_reply`, `rove_list_tasks`, `rove_stop_task`): the app gives Rove a whole task, which Rove's own model carries out in a new tab and answers. With the answer comes a short report: how long it took, which model and provider, how many steps and which tools, tokens and cost (when the provider reports them) and the pages it ended on. If Rove asks a question, the app can answer it with `rove_reply`. The task shows in your history.
 
 Your site rules apply to every app: a blocked site is refused, and an *Ask* site is refused with a note asking you to allow it, since Rove cannot ask you in the middle of the app's call. Each switch can be turned off on its own. The token in the command stops other programs on your computer from posing as Rove's server; **New token** replaces it.
 
@@ -169,7 +169,7 @@ Web pages are untrusted. Rove tells the model so, but the settings below are wha
 | "This model's endpoint metadata explicitly reports no tool support" | Rove needs tool calling. Choose a model that supports it. |
 | A local model cannot see images | Rove reads this from llama.cpp automatically. For other servers set **Model abilities → Images** to *Never send images*. |
 | The reasoning menu is missing or wrong | The endpoint did not advertise a control. Define your own levels under **Model abilities → Reasoning control**. |
-| A page only works while it is in the foreground | Turn off **Settings → Tools → Browsing → Work in the background**. |
+| A page only works while it is in the foreground | Turn off **Settings → Browsing → Work in the background**. |
 | "Another debugger is using this tab" | Close DevTools on that tab, or any other tool that is attached to it, and retry. |
 | Rove will not control a page | It cannot control `chrome://` pages, the Chrome Web Store or other extensions' pages. |
 

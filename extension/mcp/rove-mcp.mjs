@@ -54,7 +54,9 @@ async function onMessage(message) {
         instructions:
           "Rove drives the user's own Chrome, in their signed-in tabs. Use browser_* tools to act in a tab yourself " +
           "(open one with browser_navigate and newTab:true, read it with browser_snapshot, then pass its tabId), or " +
-          "rove_run_task to hand a whole task to Rove's own model. The user's Rove site rules apply: blocked sites are refused.",
+          "rove_run_task to hand a whole task to Rove's own model; it returns the answer and a report with time, model, steps, tokens and cost. " +
+          "The user's Rove site rules apply to every call: blocked sites are refused, and sites set to Ask are refused until the user allows them. " +
+          "Rove's approval setting applies only to tasks handed to rove_run_task; your direct browser_* calls are approved through your own app's permissions.",
       });
     }
     if (method === "notifications/initialized" || method?.startsWith("notifications/")) return;

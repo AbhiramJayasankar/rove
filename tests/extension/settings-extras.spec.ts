@@ -2,6 +2,7 @@ import { test, expect, chromium, type BrowserContext, type Page } from "@playwri
 import fs from "node:fs";
 import path from "node:path";
 import { DEFAULT_SETTINGS } from "../../shared/defaults";
+import { openSection } from "./settings-nav";
 
 // Settings added in 2.7.0, driven through the real UI: web search, the step limit without a limit,
 // Gemini providers, and backup and restore. Also the fixed extension ID.
@@ -11,10 +12,9 @@ async function rpc(route: string, method = "GET", body?: unknown): Promise<any> 
   if (!result.ok) throw new Error(result.error);
   return result.data;
 }
-async function openSettings(tab: "Model" | "Tools") {
+async function openSettings(section: "Model" | "Browsing" | "Search and voice" | "Appearance" | "Backup") {
   await ui.goto(base);
-  await ui.getByRole("button", { name: /settings/i }).first().click();
-  await ui.getByRole("button", { name: tab, exact: true }).click();
+  await openSection(ui, section);
 }
 
 test.beforeAll(async () => {
@@ -33,7 +33,7 @@ test("the extension ID is the same wherever the folder is", async () => {
 });
 
 test("a web search API and its key are saved from Settings, the key apart from settings", async () => {
-  await openSettings("Tools");
+  await openSettings("Search and voice");
   await ui.locator(".search-panel .choice-trigger").click();
   await ui.getByRole("option", { name: /Tavily/ }).click();
   await ui.getByLabel("Tavily API key").fill("tvly-e2e-key");
@@ -42,7 +42,7 @@ test("a web search API and its key are saved from Settings, the key apart from s
   expect((await rpc("/api/state")).searchKeys).toEqual({ exa: false, tavily: true, parallel: false });
   // The key never appears in settings or state.
   expect(JSON.stringify(await rpc("/api/state"))).not.toContain("tvly-e2e-key");
-  await openSettings("Tools");
+  await openSettings("Search and voice");
   await expect(ui.locator(".search-panel .field-state")).toContainText("Saved");
   await ui.locator(".search-panel .choice-trigger").click();
   await ui.getByRole("option", { name: /^Off/ }).click();
@@ -51,14 +51,14 @@ test("a web search API and its key are saved from Settings, the key apart from s
 });
 
 test("typing past 2000 turns the step limit off, and minus brings it back to 2000", async () => {
-  await openSettings("Model");
+  await openSettings("Browsing");
   const steps = ui.locator("#step-limit");
   await steps.fill("2500");
   await expect(steps).toHaveValue("∞");
   await expect(ui.locator("#step-limit-note")).toContainText("No limit");
   await ui.getByRole("button", { name: "Save changes" }).click();
   await expect.poll(async () => (await rpc("/api/state")).settings.maxSteps).toBe(0);
-  await openSettings("Model");
+  await openSettings("Browsing");
   await ui.getByRole("button", { name: "Fewer steps" }).click();
   await expect(steps).toHaveValue("2000");
   await ui.getByRole("button", { name: "No step limit" }).click();
@@ -82,7 +82,7 @@ test("Vertex AI can be added from the provider menu and lists Gemini models with
 
 test("a backup saved from Settings restores instructions and keys", async () => {
   await rpc("/api/settings", "PUT", { ...(await rpc("/api/state")).settings, systemPrompt: "Instructions to keep", memory: "Notes to keep" });
-  await openSettings("Model");
+  await openSettings("Backup");
   const [download] = await Promise.all([ui.waitForEvent("download"), ui.getByRole("button", { name: "Save backup" }).click()]);
   const file = path.join(test.info().outputDir, download.suggestedFilename());
   await download.saveAs(file);
@@ -92,7 +92,7 @@ test("a backup saved from Settings restores instructions and keys", async () => 
 
   await rpc("/api/settings", "PUT", { ...(await rpc("/api/state")).settings, systemPrompt: "Something else", memory: "", apiKey: "" });
   expect((await rpc("/api/state")).hasApiKey).toBe(false);
-  await openSettings("Model");
+  await openSettings("Backup");
   await ui.locator('.backup-panel input[type="file"]').setInputFiles(file);
   await expect(ui.locator(".backup-ok")).toContainText("Settings restored");
   await ui.waitForLoadState("load");
@@ -103,7 +103,7 @@ test("a backup saved from Settings restores instructions and keys", async () => 
 });
 
 test("a theme picked in Settings repaints Rove at once and is kept", async () => {
-  await openSettings("Model");
+  await openSettings("Appearance");
   await ui.getByRole("radio", { name: "Dark" }).click();
   await ui.getByRole("radio", { name: "Harbor" }).click();
   const ink = () => ui.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--ink").trim());
@@ -115,14 +115,14 @@ test("a theme picked in Settings repaints Rove at once and is kept", async () =>
   // The header switch keeps the theme and changes only light and dark.
   await ui.getByRole("button", { name: /use light mode/i }).click();
   await expect.poll(ink).toBe("#222831");
-  await openSettings("Model");
+  await openSettings("Appearance");
   await ui.getByRole("radio", { name: "Match Chrome" }).click();
   await ui.getByRole("radio", { name: "Sage" }).click();
   expect(await ui.evaluate(() => [localStorage.getItem("relay.theme"), localStorage.getItem("relay.palette")])).toEqual([null, null]);
 });
 
 test("pitch black puts dark mode on #000000 and keeps the theme's accent", async () => {
-  await openSettings("Model");
+  await openSettings("Appearance");
   await ui.getByRole("radio", { name: "Dark" }).click();
   await ui.getByRole("radio", { name: "Heather" }).click();
   const canvas = () => ui.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--canvas").trim());
@@ -135,7 +135,7 @@ test("pitch black puts dark mode on #000000 and keeps the theme's accent", async
   await expect.poll(canvas).toBe("#fcfafd");
   await ui.reload();
   expect(await ui.evaluate(() => localStorage.getItem("relay.black"))).toBe("1");
-  await openSettings("Model");
+  await openSettings("Appearance");
   await ui.getByRole("switch", { name: "Pitch black in dark mode" }).uncheck();
   await ui.getByRole("radio", { name: "Match Chrome" }).click();
   await ui.getByRole("radio", { name: "Sage" }).click();

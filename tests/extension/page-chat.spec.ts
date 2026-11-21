@@ -2,6 +2,7 @@ import { test, expect, chromium, type BrowserContext, type Page } from "@playwri
 import http from "node:http";
 import path from "node:path";
 import { DEFAULT_SETTINGS } from "../../shared/defaults";
+import { openSection } from "./settings-nav";
 
 // Which chat a Rove page shows when it opens, and the preview of a tab a task is working in.
 // (The side panel's per-tab chats need Chrome's real side panel, which headless Chrome does not create;
@@ -106,14 +107,12 @@ test("leaving Settings with unsaved changes asks to save, discard or keep editin
   const back = page.getByRole("button", { name: "Back to chat", exact: true });
   const dialog = page.getByRole("dialog", { name: "Unsaved changes" });
   // Looking around without changing anything leaves straight away.
-  await settings.click();
-  await page.getByRole("button", { name: "Instructions", exact: true }).click();
+  await openSection(page, "Instructions");
   await back.click();
   await expect(dialog).toBeHidden();
   await expect(page.getByRole("textbox", { name: "Task prompt" })).toBeVisible();
 
-  await settings.click();
-  await page.getByRole("button", { name: "Instructions", exact: true }).click();
+  await openSection(page, "Instructions");
   await page.getByRole("button", { name: "Add saved prompt" }).click();
   await page.getByRole("textbox", { name: "Name", exact: true }).fill("cart");
   await page.getByRole("textbox", { name: "Prompt", exact: true }).fill("Go to the shop.");
@@ -128,13 +127,11 @@ test("leaving Settings with unsaved changes asks to save, discard or keep editin
   const stored = await page.evaluate(async () => ((await chrome.storage.local.get("shortcuts")) as { shortcuts?: { name: string }[] }).shortcuts?.map((item) => item.name));
   expect(stored).toEqual(["cart"]);
 
-  await settings.click();
-  await page.getByRole("button", { name: "Instructions", exact: true }).click();
+  await openSection(page, "Instructions");
   await page.getByRole("textbox", { name: "Standing instructions" }).fill("Always be brief.");
   await back.click();
   await dialog.getByRole("button", { name: "Discard" }).click();
-  await settings.click();
-  await page.getByRole("button", { name: "Instructions", exact: true }).click();
+  await openSection(page, "Instructions");
   await expect(page.getByRole("textbox", { name: "Standing instructions" })).toHaveValue("");
   expect((await rpc("/api/state")).settings.memory).toBe("");
   await page.close();
